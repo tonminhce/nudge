@@ -22,13 +22,13 @@ use super::service::project;
 use super::service::resolve_applications;
 use super::service::resolve_target_field;
 use super::service::resolve_target_object;
+use super::service::translate_object_identifier_fields;
 use super::service::transpile_create_field;
 use super::service::transpile_create_object;
-use super::service::translate_object_identifier_fields;
 use super::service::valid_metadata_name_shape;
 use super::service::CreateFieldTranspilation;
-use super::service::OptionOperation;
 use super::service::OperationContext;
+use super::service::OptionOperation;
 use crate::metadata::actions::MetadataName;
 use crate::metadata::actions::UniversalFlatEntity;
 use crate::metadata::builders::build_workspace_migration;
@@ -36,10 +36,10 @@ use crate::metadata::builders::expand_matrix_with_side_effects;
 use crate::metadata::builders::FlatEntityOperationsMatrix;
 use crate::metadata::builders::WorkspaceMigrationBuildResult;
 use crate::metadata::flat::FieldMetadataType;
-use crate::metadata::flat::UniversalFlatObjectMetadata;
 use crate::metadata::flat::UniversalFlatFieldMetadata;
 use crate::metadata::flat::UniversalFlatIndexFieldMetadata;
 use crate::metadata::flat::UniversalFlatIndexMetadata;
+use crate::metadata::flat::UniversalFlatObjectMetadata;
 use crate::workspace_migrations::runner::run_workspace_migration;
 use crate::workspace_migrations::runner::RunnerInput;
 
@@ -123,7 +123,11 @@ async fn run_migration(
     let infer_deletion = super::service::infer_deletion_for_deletes(&expansion.matrix);
     let from_to = compute_api_from_to_maps(&universal_maps, &expansion.matrix);
 
-    let options = build_options(&applications, application_universal_identifier, infer_deletion);
+    let options = build_options(
+        &applications,
+        application_universal_identifier,
+        infer_deletion,
+    );
 
     let migration = match build_workspace_migration(options, from_to) {
         WorkspaceMigrationBuildResult::Success(migration) => migration,
@@ -285,21 +289,24 @@ async fn update_objects(
     for (input, id) in inputs.iter().zip(ids.iter()) {
         if let Some(update) = input.get("update").and_then(Value::as_object) {
             for prop in ["nameSingular", "namePlural"] {
-                let _ = require_string_shape(update, prop)?;
+                require_string_shape(update, prop)?;
             }
         }
 
-        let existing = resolve_target_object(id, &flat_maps.object_metadata_maps).map_err(|_| {
-            GraphQlError::not_found("Object to update not found")
-                .with_extensions(json!({ "subCode": "OBJECT_METADATA_NOT_FOUND" }))
-        })?;
+        let existing =
+            resolve_target_object(id, &flat_maps.object_metadata_maps).map_err(|_| {
+                GraphQlError::not_found("Object to update not found")
+                    .with_extensions(json!({ "subCode": "OBJECT_METADATA_NOT_FOUND" }))
+            })?;
 
-        let payload =
-            super::service::normalize_update_object_payload(input.get("update").unwrap_or(&Value::Null));
+        let payload = super::service::normalize_update_object_payload(
+            input.get("update").unwrap_or(&Value::Null),
+        );
 
         let payload = translate_object_identifier_fields(payload, &existing, &flat_maps)?;
 
-        let merged = super::service::merged_object_entity(&flat_object_universal(&existing), &payload);
+        let merged =
+            super::service::merged_object_entity(&flat_object_universal(&existing), &payload);
 
         add_to_update(&mut matrix, object_entity(&merged));
     }
@@ -312,7 +319,13 @@ async fn update_objects(
         "Multiple validation errors occurred while updating object"
     };
 
-    run_migration(ctx, matrix, &applications.custom_universal_identifier, message).await?;
+    run_migration(
+        ctx,
+        matrix,
+        &applications.custom_universal_identifier,
+        message,
+    )
+    .await?;
 
     let flat_maps = load_flat_maps(ctx.state, ctx.workspace_id).await?;
 
@@ -320,7 +333,9 @@ async fn update_objects(
 
     for id in &ids {
         let Some(updated) = flat_maps.object_metadata_maps.find_by_id(id) else {
-            return Err(GraphQlError::internal("Object metadata disappeared after update"));
+            return Err(GraphQlError::internal(
+                "Object metadata disappeared after update",
+            ));
         };
 
         results.push(object_dto(updated));
@@ -329,10 +344,7 @@ async fn update_objects(
     Ok(results)
 }
 
-fn require_string_shape(
-    object: &Map<String, Value>,
-    prop: &str,
-) -> Result<(), GraphQlError> {
+fn require_string_shape(object: &Map<String, Value>, prop: &str) -> Result<(), GraphQlError> {
     if let Some(value) = object.get(prop).and_then(Value::as_str) {
         if !valid_metadata_name_shape(value) {
             return Err(GraphQlError::user_input(format!(
@@ -374,18 +386,31 @@ async fn delete_one_object(ctx: &OperationContext<'_>) -> Result<Value, GraphQlE
 
     let mut matrix = FlatEntityOperationsMatrix::default();
 
-    add_to_delete(&mut matrix, object_entity(&flat_object_universal(&existing)));
+    add_to_delete(
+        &mut matrix,
+        object_entity(&flat_object_universal(&existing)),
+    );
 
-    for field in flat_maps.field_metadata_maps.by_universal_identifier.values() {
+    for field in flat_maps
+        .field_metadata_maps
+        .by_universal_identifier
+        .values()
+    {
         if field.object_metadata_id == existing.id
-            || field.relation_target_object_metadata_universal_identifier.as_deref()
+            || field
+                .relation_target_object_metadata_universal_identifier
+                .as_deref()
                 == Some(existing.universal_identifier.as_str())
         {
             add_to_delete(&mut matrix, field_entity(&flat_field_universal(field)));
         }
     }
 
-    for index in flat_maps.index_metadata_maps.by_universal_identifier.values() {
+    for index in flat_maps
+        .index_metadata_maps
+        .by_universal_identifier
+        .values()
+    {
         if index.object_metadata_id == existing.id {
             add_to_delete(
                 &mut matrix,
@@ -498,7 +523,7 @@ async fn update_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
         super::service::normalize_update_field_payload(input.get("update").unwrap_or(&Value::Null));
 
     if let Some(object) = payload.as_object() {
-        let _ = require_string_shape(object, "name")?;
+        require_string_shape(object, "name")?;
     }
 
     let flat_maps = load_flat_maps(ctx.state, ctx.workspace_id).await?;
@@ -619,7 +644,9 @@ fn backs_exactly(
     field_universal_identifier: &str,
 ) -> bool {
     index.universal_flat_index_field_metadatas.len() == 1
-        && index.universal_flat_index_field_metadatas[0].sub_field_name.is_none()
+        && index.universal_flat_index_field_metadatas[0]
+            .sub_field_name
+            .is_none()
         && index.universal_flat_index_field_metadatas[0].field_metadata_universal_identifier
             == field_universal_identifier
 }
@@ -638,9 +665,8 @@ async fn delete_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
 
     let universal = flat_field_universal(&existing);
 
-    if existing
-        .application_universal_identifier
-        == crate::metadata::builders::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER
+    if existing.application_universal_identifier
+        == crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER
         || existing.is_system
     {
         return Err(GraphQlError::forbidden(format!(
@@ -687,16 +713,22 @@ async fn delete_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
 async fn create_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
     let input = input_argument(ctx.selection, ctx.variables);
 
-    let index_input = input.get("index").and_then(Value::as_object).ok_or_else(|| {
-        GraphQlError::validation("Field \"index\" of type \"CreateIndexInput!\" is required.")
-    })?;
+    let index_input = input
+        .get("index")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            GraphQlError::validation("Field \"index\" of type \"CreateIndexInput!\" is required.")
+        })?;
 
     let object_metadata_id = super::input::require_string(index_input, "objectMetadataId")?;
     let object_metadata_id = require_uuid_like(&object_metadata_id)?;
 
     let flat_maps = load_flat_maps(ctx.state, ctx.workspace_id).await?;
 
-    let Some(object) = flat_maps.object_metadata_maps.find_by_id(&object_metadata_id) else {
+    let Some(object) = flat_maps
+        .object_metadata_maps
+        .find_by_id(&object_metadata_id)
+    else {
         return Err(GraphQlError::not_found(format!(
             "Object metadata {object_metadata_id} not found"
         ))
@@ -710,10 +742,10 @@ async fn create_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
         .unwrap_or_default();
 
     if fields.is_empty() {
-        return Err(GraphQlError::user_input(
-            "At least one field is required to create an index",
-        )
-        .with_extensions(json!({ "subCode": "INDEX_FIELDS_REQUIRED" })));
+        return Err(
+            GraphQlError::user_input("At least one field is required to create an index")
+                .with_extensions(json!({ "subCode": "INDEX_FIELDS_REQUIRED" })),
+        );
     }
 
     let index_type_raw = index_input
@@ -722,7 +754,9 @@ async fn create_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
         .unwrap_or("BTREE");
 
     let index_type = crate::metadata::flat::IndexType::parse(index_type_raw).ok_or_else(|| {
-        GraphQlError::validation(format!("Field \"indexType\" must be a valid IndexType, got {index_type_raw}"))
+        GraphQlError::validation(format!(
+            "Field \"indexType\" must be a valid IndexType, got {index_type_raw}"
+        ))
     })?;
 
     let mut dedup_keys: Vec<String> = Vec::new();
@@ -741,11 +775,16 @@ async fn create_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
 
         let sub_field_name = optional_string(field_object, "subFieldName")?;
 
-        let dedup_key = format!("{field_metadata_id}::{}", sub_field_name.clone().unwrap_or_default());
+        let dedup_key = format!(
+            "{field_metadata_id}::{}",
+            sub_field_name.clone().unwrap_or_default()
+        );
 
         if dedup_keys.contains(&dedup_key) {
-            return Err(GraphQlError::user_input("Duplicate field+sub-field in index field list")
-                .with_extensions(json!({ "subCode": "DUPLICATE_INDEX_FIELDS" })));
+            return Err(
+                GraphQlError::user_input("Duplicate field+sub-field in index field list")
+                    .with_extensions(json!({ "subCode": "DUPLICATE_INDEX_FIELDS" })),
+            );
         }
 
         dedup_keys.push(dedup_key);
@@ -844,7 +883,10 @@ async fn create_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
                 .find_by_universal_identifier(&entity.field_metadata_universal_identifier)
                 .map(|field| {
                     if let Some(sub_field) = &entity.sub_field_name {
-                        crate::metadata::names::compute_composite_column_name(&field.name, sub_field)
+                        crate::metadata::names::compute_composite_column_name(
+                            &field.name,
+                            sub_field,
+                        )
                     } else if field.field_type.is_relation_or_morph() {
                         crate::metadata::names::compute_relation_join_column_name(&field.name)
                     } else {
@@ -989,10 +1031,7 @@ async fn list_page(
     let filter = argument_value(ctx, "filter");
     let paging = argument_value(ctx, "paging");
 
-    let first = paging
-        .get("first")
-        .and_then(Value::as_i64)
-        .unwrap_or(10);
+    let first = paging.get("first").and_then(Value::as_i64).unwrap_or(10);
 
     if first <= 0 || first > 1000 {
         return Err(GraphQlError::user_input(format!(
@@ -1052,7 +1091,11 @@ async fn list_page(
 
     let has_next = rows.len() as i64 > first;
 
-    let page: Vec<Uuid> = rows.into_iter().take(first as usize).map(|(id,)| id).collect();
+    let page: Vec<Uuid> = rows
+        .into_iter()
+        .take(first as usize)
+        .map(|(id,)| id)
+        .collect();
 
     let flat_maps = load_flat_maps(ctx.state, ctx.workspace_id).await?;
 
@@ -1251,7 +1294,12 @@ fn build_filter_conditions(
                 }
 
                 if inner.len() == 1 {
-                    branches.push(inner.into_iter().next().unwrap_or(FilterCondition::AlwaysFalse));
+                    branches.push(
+                        inner
+                            .into_iter()
+                            .next()
+                            .unwrap_or(FilterCondition::AlwaysFalse),
+                    );
                 } else {
                     branches.push(FilterCondition::And(inner));
                 }
@@ -1404,7 +1452,10 @@ fn emit_condition(
             inverted_boolean,
         } => {
             let rendered = if *inverted_boolean {
-                value.as_bool().map(|raw| Value::Bool(!raw)).unwrap_or_else(|| value.clone())
+                value
+                    .as_bool()
+                    .map(|raw| Value::Bool(!raw))
+                    .unwrap_or_else(|| value.clone())
             } else {
                 value.clone()
             };
@@ -1511,5 +1562,3 @@ fn push_param(
 
     Ok(())
 }
-
-

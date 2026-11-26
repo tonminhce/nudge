@@ -23,7 +23,6 @@ use crate::metadata::builders::BuildOptions;
 use crate::metadata::builders::FlatEntityOperationsMatrix;
 use crate::metadata::builders::InferDeletionFromMissingEntities;
 use crate::metadata::builders::OrchestratorFailureReport;
-use crate::metadata::builders::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER;
 use crate::metadata::cache::to_universal_workspace_maps;
 use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::flat::FlatEntityMaps;
@@ -50,16 +49,19 @@ use crate::metadata::names::compute_object_target_table;
 use crate::metadata::names::compute_relation_join_column_name;
 use crate::metadata::names::validate_field_metadata_name;
 use crate::metadata::names::validate_object_metadata_names;
+use crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER;
 use crate::state::AppState;
 
 pub const FIELD_METADATA_NAMESPACE: &str = "fieldMetadata";
 pub const MAX_OBJECTS_PER_BATCH_UPDATE: usize = 100;
 pub const MAX_CUSTOM_INDEXES_PER_OBJECT: usize = 10;
 pub const DEPRECATED_TARGET_TABLE_NAME: &str = "DEPRECATED";
-pub const NON_BATCHABLE_UPDATE_PROPERTIES: &[&str] =
-    &["nameSingular", "namePlural", "labelIdentifierFieldMetadataId"];
-pub const GIN_COMPATIBLE_FIELD_TYPES: &[&str] =
-    &["TS_VECTOR", "ARRAY", "MULTI_SELECT", "RAW_JSON"];
+pub const NON_BATCHABLE_UPDATE_PROPERTIES: &[&str] = &[
+    "nameSingular",
+    "namePlural",
+    "labelIdentifierFieldMetadataId",
+];
+pub const GIN_COMPATIBLE_FIELD_TYPES: &[&str] = &["TS_VECTOR", "ARRAY", "MULTI_SELECT", "RAW_JSON"];
 
 pub struct OperationContext<'a> {
     pub state: &'a AppState,
@@ -80,7 +82,7 @@ pub async fn resolve_applications(
     state: &AppState,
     workspace_id: Uuid,
 ) -> Result<ResolvedApplications, GraphQlError> {
-    let custom: Option<(Uuid, String)> = sqlx::query_as(
+    let custom: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
         "SELECT a.id, a.\"universalIdentifier\" FROM core.\"workspace\" w \
          JOIN core.\"application\" a ON a.id = w.\"workspaceCustomApplicationId\" \
          WHERE w.id = $1",
@@ -90,16 +92,26 @@ pub async fn resolve_applications(
     .await
     .map_err(|error| GraphQlError::internal(error.to_string()))?;
 
-    let (custom_id, custom_universal_identifier) = custom.ok_or_else(|| {
-        GraphQlError::internal("Could not find workspace custom application")
-    })?;
+    let (custom_id, custom_universal_identifier) = custom
+        .map(|(id, universal_identifier)| {
+            (
+                id,
+                universal_identifier
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| id.to_string()),
+            )
+        })
+        .ok_or_else(|| GraphQlError::internal("Could not find workspace custom application"))?;
 
     let has_standard: Option<(Uuid,)> = sqlx::query_as(
         "SELECT id FROM core.\"application\" \
          WHERE \"workspaceId\" = $1 AND \"universalIdentifier\" = $2",
     )
     .bind(workspace_id)
-    .bind(TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER)
+    .bind(
+        Uuid::parse_str(TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER)
+            .expect("standard application universal identifier is a uuid"),
+    )
     .fetch_optional(&state.core_pool)
     .await
     .map_err(|error| GraphQlError::internal(error.to_string()))?;
@@ -153,7 +165,9 @@ pub fn build_options(
     }
 }
 
-pub fn infer_deletion_for_deletes(matrix: &FlatEntityOperationsMatrix) -> InferDeletionFromMissingEntities {
+pub fn infer_deletion_for_deletes(
+    matrix: &FlatEntityOperationsMatrix,
+) -> InferDeletionFromMissingEntities {
     let mut per_name = std::collections::HashMap::new();
 
     for (metadata_name, operations) in &matrix.by_metadata_name {
@@ -201,7 +215,11 @@ pub fn compute_api_from_to_maps(
             remove_entity_from_bucket(&mut from_to, *metadata_name, entity);
         }
 
-        for entity in operations.to_create.iter().chain(operations.to_update.iter()) {
+        for entity in operations
+            .to_create
+            .iter()
+            .chain(operations.to_update.iter())
+        {
             apply_entity_to_bucket(&mut from_to, *metadata_name, entity);
         }
     }
@@ -218,19 +236,34 @@ fn remove_entity_from_bucket(
 
     match metadata_name {
         MetadataName::ObjectMetadata => {
-            from_to.object_metadata.to.delete_by_universal_identifier(identifier);
+            from_to
+                .object_metadata
+                .to
+                .delete_by_universal_identifier(identifier);
         }
         MetadataName::FieldMetadata => {
-            from_to.field_metadata.to.delete_by_universal_identifier(identifier);
+            from_to
+                .field_metadata
+                .to
+                .delete_by_universal_identifier(identifier);
         }
         MetadataName::Index => {
-            from_to.index_metadata.to.delete_by_universal_identifier(identifier);
+            from_to
+                .index_metadata
+                .to
+                .delete_by_universal_identifier(identifier);
         }
         MetadataName::FieldMetadataOption => {
-            from_to.field_metadata_option.to.delete_by_universal_identifier(identifier);
+            from_to
+                .field_metadata_option
+                .to
+                .delete_by_universal_identifier(identifier);
         }
         MetadataName::SearchFieldMetadata => {
-            from_to.search_field_metadata.to.delete_by_universal_identifier(identifier);
+            from_to
+                .search_field_metadata
+                .to
+                .delete_by_universal_identifier(identifier);
         }
         _ => {}
     }
@@ -279,7 +312,10 @@ fn apply_entity_to_bucket(
             }
         }
         MetadataName::SearchFieldMetadata => {
-            if let Ok(typed) = serde_json::from_value::<crate::metadata::flat::UniversalFlatSearchFieldMetadata>(value) {
+            if let Ok(typed) = serde_json::from_value::<
+                crate::metadata::flat::UniversalFlatSearchFieldMetadata,
+            >(value)
+            {
                 from_to
                     .search_field_metadata
                     .to
@@ -344,7 +380,10 @@ pub fn validate_create_object_input(input: &Value) -> Result<(), GraphQlError> {
         }
     }
 
-    for error in validate_object_metadata_names(&name_singular, &name_plural) {
+    if let Some(error) = validate_object_metadata_names(&name_singular, &name_plural)
+        .into_iter()
+        .next()
+    {
         return Err(GraphQlError::user_input(&error.message)
             .with_extensions(json!({ "subCode": error.code })));
     }
@@ -352,7 +391,10 @@ pub fn validate_create_object_input(input: &Value) -> Result<(), GraphQlError> {
     Ok(())
 }
 
-pub fn validate_create_field_input(input: &Value, is_standard_app_caller: bool) -> Result<(), GraphQlError> {
+pub fn validate_create_field_input(
+    input: &Value,
+    is_standard_app_caller: bool,
+) -> Result<(), GraphQlError> {
     let field = input
         .get("field")
         .and_then(Value::as_object)
@@ -368,7 +410,10 @@ pub fn validate_create_field_input(input: &Value, is_standard_app_caller: bool) 
         ));
     }
 
-    for error in validate_field_metadata_name(&name, is_standard_app_caller) {
+    if let Some(error) = validate_field_metadata_name(&name, is_standard_app_caller)
+        .into_iter()
+        .next()
+    {
         return Err(GraphQlError::user_input(&error.message)
             .with_extensions(json!({ "subCode": error.code })));
     }
@@ -376,7 +421,9 @@ pub fn validate_create_field_input(input: &Value, is_standard_app_caller: bool) 
     let type_raw = require_string(field, "type")?;
 
     FieldMetadataType::parse(&type_raw).ok_or_else(|| {
-        GraphQlError::validation(format!("Field \"type\" must be a valid FieldMetadataType, got {type_raw}"))
+        GraphQlError::validation(format!(
+            "Field \"type\" must be a valid FieldMetadataType, got {type_raw}"
+        ))
     })?;
 
     Ok(())
@@ -395,7 +442,10 @@ pub fn normalize_update_object_payload(payload: &Value) -> Value {
         }
     }
 
-    for key in ["labelIdentifierFieldMetadataId", "imageIdentifierFieldMetadataId"] {
+    for key in [
+        "labelIdentifierFieldMetadataId",
+        "imageIdentifierFieldMetadataId",
+    ] {
         if let Some(value) = object.get(key) {
             result.insert(key.to_string(), value.clone());
         }
@@ -442,15 +492,18 @@ pub fn transpile_create_object(
 
     let mut sanitized = object.clone();
 
-    sanitize_string_fields(&mut sanitized, &[
-        "description",
-        "icon",
-        "labelPlural",
-        "labelSingular",
-        "namePlural",
-        "nameSingular",
-        "shortcut",
-    ]);
+    sanitize_string_fields(
+        &mut sanitized,
+        &[
+            "description",
+            "icon",
+            "labelPlural",
+            "labelSingular",
+            "namePlural",
+            "nameSingular",
+            "shortcut",
+        ],
+    );
 
     let name_singular = require_string(&sanitized, "nameSingular")?;
     let name_plural = require_string(&sanitized, "namePlural")?;
@@ -461,7 +514,8 @@ pub fn transpile_create_object(
     let universal_identifier = optional_string(&sanitized, "universalIdentifier")?
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-    let application_universal_identifier = if optional_bool(&sanitized, "isRemote").unwrap_or(false) {
+    let application_universal_identifier = if optional_bool(&sanitized, "isRemote").unwrap_or(false)
+    {
         applications.standard_universal_identifier.clone()
     } else {
         applications.custom_universal_identifier.clone()
@@ -514,7 +568,8 @@ pub fn transpile_create_object(
         is_audit_logged: true,
         is_ui_editable: true,
         is_ui_creatable: true,
-        is_label_synced_with_name: optional_bool(&sanitized, "isLabelSyncedWithName").unwrap_or(false),
+        is_label_synced_with_name: optional_bool(&sanitized, "isLabelSyncedWithName")
+            .unwrap_or(false),
         open_record_in: Some(ObjectOpenRecordIn::UserChoice),
         target_table_name: Some(DEPRECATED_TARGET_TABLE_NAME.to_string()),
         created_at: now,
@@ -578,10 +633,10 @@ pub fn transpile_create_field(
     let object_metadata_id = require_uuid(&object_metadata_id, "objectMetadataId")?;
 
     let Some(parent_object) = maps.object_metadata_maps.find_by_id(&object_metadata_id) else {
-        return Err(GraphQlError::not_found(
-            "Provided object metadata id does not exist",
-        )
-        .with_extensions(json!({ "subCode": "OBJECT_METADATA_NOT_FOUND" })));
+        return Err(
+            GraphQlError::not_found("Provided object metadata id does not exist")
+                .with_extensions(json!({ "subCode": "OBJECT_METADATA_NOT_FOUND" })),
+        );
     };
 
     let name = require_string(&sanitized, "name")?;
@@ -592,9 +647,8 @@ pub fn transpile_create_field(
     }
 
     let type_raw = require_string(&sanitized, "type")?;
-    let field_type = FieldMetadataType::parse(&type_raw).ok_or_else(|| {
-        GraphQlError::validation(format!("Invalid field type: {type_raw}"))
-    })?;
+    let field_type = FieldMetadataType::parse(&type_raw)
+        .ok_or_else(|| GraphQlError::validation(format!("Invalid field type: {type_raw}")))?;
 
     if field_type == FieldMetadataType::TsVector {
         return Err(GraphQlError::user_input(
@@ -613,9 +667,10 @@ pub fn transpile_create_field(
     };
 
     let default_value = match sanitized.get("defaultValue") {
-        Some(value) if !value.is_null() => {
-            Some(nullify_empty_composite_default_value(field_type.as_str(), value))
-        }
+        Some(value) if !value.is_null() => Some(nullify_empty_composite_default_value(
+            field_type.as_str(),
+            value,
+        )),
         _ => match field_type {
             FieldMetadataType::Actor => Some(json!({
                 "source": "'MANUAL'",
@@ -655,7 +710,8 @@ pub fn transpile_create_field(
                     .map(|value| !value)
             })
             .unwrap_or(true),
-        is_label_synced_with_name: optional_bool(&sanitized, "isLabelSyncedWithName").unwrap_or(false),
+        is_label_synced_with_name: optional_bool(&sanitized, "isLabelSyncedWithName")
+            .unwrap_or(false),
         default_value,
         universal_settings: settings,
         options,
@@ -664,7 +720,15 @@ pub fn transpile_create_field(
         ..UniversalFlatFieldMetadata::default()
     };
 
-    if field.is_enum_type() && field.options.as_ref().and_then(Value::as_array).map(Vec::len).unwrap_or(0) == 0 {
+    if field.is_enum_type()
+        && field
+            .options
+            .as_ref()
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0)
+            == 0
+    {
         return Err(GraphQlError::user_input(
             "Enum fields require at least one option",
         ));
@@ -768,13 +832,12 @@ pub fn transpile_create_field(
             ..UniversalFlatFieldMetadata::default()
         };
 
-        let (indexed_field, indexed_object) = if relation_type
-            == crate::metadata::flat::RelationType::ManyToOne
-        {
-            (&field, parent_object)
-        } else {
-            (&inverse_field, target_object)
-        };
+        let (indexed_field, indexed_object) =
+            if relation_type == crate::metadata::flat::RelationType::ManyToOne {
+                (&field, parent_object)
+            } else {
+                (&inverse_field, target_object)
+            };
 
         indexes.push(build_relation_backing_index(
             &flat_object_universal(indexed_object),
@@ -803,7 +866,9 @@ fn relation_type_as_str(relation_type: crate::metadata::flat::RelationType) -> &
     }
 }
 
-pub fn build_option_rows(field: &UniversalFlatFieldMetadata) -> Vec<UniversalFlatFieldMetadataOption> {
+pub fn build_option_rows(
+    field: &UniversalFlatFieldMetadata,
+) -> Vec<UniversalFlatFieldMetadataOption> {
     if !field.is_enum_type() {
         return Vec::new();
     }
@@ -822,7 +887,9 @@ pub fn build_option_rows(field: &UniversalFlatFieldMetadata) -> Vec<UniversalFla
 
                     Some(UniversalFlatFieldMetadataOption {
                         universal_identifier: id.to_string(),
-                        application_universal_identifier: field.application_universal_identifier.clone(),
+                        application_universal_identifier: field
+                            .application_universal_identifier
+                            .clone(),
                         field_metadata_universal_identifier: field.universal_identifier.clone(),
                         value: value.to_string(),
                         label: object
@@ -905,10 +972,7 @@ pub fn build_unique_backing_index(
 
     let table_name = match &object.target_table_name {
         Some(name) if name != DEPRECATED_TARGET_TABLE_NAME => name.clone(),
-        _ => compute_object_target_table(
-            &object.name_singular,
-            application_universal_identifier,
-        ),
+        _ => compute_object_target_table(&object.name_singular, application_universal_identifier),
     };
 
     UniversalFlatIndexMetadata {
@@ -971,14 +1035,24 @@ pub fn merged_object_entity(
     existing: &UniversalFlatObjectMetadata,
     updates: &Value,
 ) -> UniversalFlatObjectMetadata {
-    merge_into_existing(existing, updates, |entity| serde_json::to_value(entity).ok(), |payload| serde_json::from_value(payload).ok())
+    merge_into_existing(
+        existing,
+        updates,
+        |entity| serde_json::to_value(entity).ok(),
+        |payload| serde_json::from_value(payload).ok(),
+    )
 }
 
 pub fn merged_field_entity(
     existing: &UniversalFlatFieldMetadata,
     updates: &Value,
 ) -> UniversalFlatFieldMetadata {
-    merge_into_existing(existing, updates, |entity| serde_json::to_value(entity).ok(), |payload| serde_json::from_value(payload).ok())
+    merge_into_existing(
+        existing,
+        updates,
+        |entity| serde_json::to_value(entity).ok(),
+        |payload| serde_json::from_value(payload).ok(),
+    )
 }
 
 fn merge_into_existing<E, ToValue, FromValue>(
@@ -1018,19 +1092,23 @@ pub fn translate_object_identifier_fields(
 
     if let Some(raw) = object.remove("labelIdentifierFieldMetadataId") {
         if raw.is_null() {
-            return Err(GraphQlError::user_input("Field label identifier is required")
-                .with_extensions(json!({ "subCode": "INVALID_OBJECT_INPUT" })));
+            return Err(
+                GraphQlError::user_input("Field label identifier is required")
+                    .with_extensions(json!({ "subCode": "INVALID_OBJECT_INPUT" })),
+            );
         }
 
-        let identifier = raw
-            .as_str()
-            .ok_or_else(|| GraphQlError::validation("labelIdentifierFieldMetadataId must be a string"))?;
+        let identifier = raw.as_str().ok_or_else(|| {
+            GraphQlError::validation("labelIdentifierFieldMetadataId must be a string")
+        })?;
 
         let field_id = require_uuid(identifier, "labelIdentifierFieldMetadataId")?;
 
         let Some(field) = maps.field_metadata_maps.find_by_id(&field_id) else {
-            return Err(GraphQlError::user_input("Field declared as label identifier not found")
-                .with_extensions(json!({ "subCode": "INVALID_OBJECT_INPUT" })));
+            return Err(
+                GraphQlError::user_input("Field declared as label identifier not found")
+                    .with_extensions(json!({ "subCode": "INVALID_OBJECT_INPUT" })),
+            );
         };
 
         if field.object_metadata_id != existing_object.id {
@@ -1063,8 +1141,10 @@ pub fn translate_object_identifier_fields(
             let field_id = require_uuid(&identifier, "imageIdentifierFieldMetadataId")?;
 
             let Some(field) = maps.field_metadata_maps.find_by_id(&field_id) else {
-                return Err(GraphQlError::user_input("Field declared as image identifier not found")
-                    .with_extensions(json!({ "subCode": "INVALID_OBJECT_INPUT" })));
+                return Err(GraphQlError::user_input(
+                    "Field declared as image identifier not found",
+                )
+                .with_extensions(json!({ "subCode": "INVALID_OBJECT_INPUT" })));
             };
 
             if field.object_metadata_id != existing_object.id {
@@ -1074,7 +1154,10 @@ pub fn translate_object_identifier_fields(
                 .with_extensions(json!({ "subCode": "INVALID_OBJECT_INPUT" })));
             }
 
-            if !matches!(field.field_type, FieldMetadataType::Files | FieldMetadataType::Links) {
+            if !matches!(
+                field.field_type,
+                FieldMetadataType::Files | FieldMetadataType::Links
+            ) {
                 return Err(GraphQlError::user_input(
                     "Field cannot be used as image identifier due to its type: should be of type Files or Links",
                 )
@@ -1354,6 +1437,10 @@ pub fn project(base: &Value, selection: &[FieldSelection]) -> Value {
         return base.clone();
     }
 
+    if let Value::Array(items) = base {
+        return Value::Array(items.iter().map(|item| project(item, selection)).collect());
+    }
+
     let mut result = Map::new();
 
     for field in selection {
@@ -1361,9 +1448,12 @@ pub fn project(base: &Value, selection: &[FieldSelection]) -> Value {
 
         let value = match base.get(field.name.as_str()) {
             Some(child) => match child {
-                Value::Array(items) if !field.selection.is_empty() => {
-                    Value::Array(items.iter().map(|item| project(item, &field.selection)).collect())
-                }
+                Value::Array(items) if !field.selection.is_empty() => Value::Array(
+                    items
+                        .iter()
+                        .map(|item| project(item, &field.selection))
+                        .collect(),
+                ),
                 Value::Object(_) if !field.selection.is_empty() => project(child, &field.selection),
                 other => other.clone(),
             },
@@ -1407,6 +1497,9 @@ pub fn inputs_argument(selection: &FieldSelection, variables: &Value) -> Vec<Val
     Vec::new()
 }
 
-pub fn builder_failure_message_for(report: &OrchestratorFailureReport, fallback: &str) -> GraphQlError {
+pub fn builder_failure_message_for(
+    report: &OrchestratorFailureReport,
+    fallback: &str,
+) -> GraphQlError {
     GraphQlError::builder_failure(fallback, report)
 }
