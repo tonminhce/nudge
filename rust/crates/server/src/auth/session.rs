@@ -1397,6 +1397,7 @@ mod tests {
             session_absolute_lifetime_secs: 180 * 24 * 60 * 60,
             session_idle_timeout_secs: 30 * 24 * 60 * 60,
             is_cloudflare_geolocation_enabled: false,
+            workspace_schema_ddl_locked: false,
         }
     }
 

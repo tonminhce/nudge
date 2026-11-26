@@ -8,6 +8,7 @@ use sqlx::PgPool;
 
 use crate::auth::jwt_service::JwtService;
 use crate::auth::signing_keys::SigningKeyManager;
+use crate::metadata::cache::WorkspaceFlatMapsCache;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -17,6 +18,7 @@ pub struct AppState {
     #[expect(dead_code, reason = "used by the key rotation surface in a later wave")]
     pub signing_keys: Arc<SigningKeyManager>,
     pub jwt: Arc<JwtService>,
+    pub metadata_cache: Arc<WorkspaceFlatMapsCache>,
 }
 
 impl AppState {
@@ -58,6 +60,7 @@ impl AppState {
             redis,
             signing_keys,
             jwt,
+            metadata_cache: Arc::new(WorkspaceFlatMapsCache::new()),
         })
     }
 }

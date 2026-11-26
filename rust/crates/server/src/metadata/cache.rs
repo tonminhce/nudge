@@ -192,6 +192,19 @@ pub fn metadata_version_key(workspace_id: &Uuid) -> String {
     format!("workspace-metadata-version:{workspace_id}")
 }
 
+pub async fn invalidate_workspace_maps(state: &crate::state::AppState, workspace_id: Uuid) {
+    state.metadata_cache.invalidate(&workspace_id);
+
+    let Ok(mut connection) = state.redis.get_multiplexed_async_connection().await else {
+        return;
+    };
+
+    let _ = redis::cmd("DEL")
+        .arg(metadata_version_key(&workspace_id))
+        .query_async::<()>(&mut connection)
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;

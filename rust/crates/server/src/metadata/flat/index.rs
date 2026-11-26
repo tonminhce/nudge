@@ -30,7 +30,7 @@ pub struct FlatIndexFieldMetadata {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UniversalFlatIndexFieldMetadata {
     #[serde(default)]

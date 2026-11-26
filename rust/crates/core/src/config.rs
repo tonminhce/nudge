@@ -51,6 +51,7 @@ pub struct Config {
     pub session_absolute_lifetime_secs: u64,
     pub session_idle_timeout_secs: u64,
     pub is_cloudflare_geolocation_enabled: bool,
+    pub workspace_schema_ddl_locked: bool,
 }
 
 impl Config {
@@ -100,6 +101,7 @@ impl Config {
                 "IS_CLOUDFLARE_GEOLOCATION_ENABLED",
                 false,
             )?,
+            workspace_schema_ddl_locked: parse_bool_or("WORKSPACE_SCHEMA_DDL_LOCKED", false)?,
         })
     }
 }
