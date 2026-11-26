@@ -806,7 +806,6 @@ mod integration_tests {
     use crate::workspace_migrations::runner::RunnerInput;
     use nudge_core::Config;
     use nudge_core::NodeEnv;
-    use sqlx::Connection;
     use std::time::Duration;
 
     static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -838,27 +837,11 @@ mod integration_tests {
         }
     }
 
-    async fn migrate_core(url: &str) -> Option<()> {
-        let mut connection = sqlx::PgConnection::connect(url).await.ok()?;
-
-        sqlx::query("SET search_path TO public")
-            .execute(&mut connection)
-            .await
-            .ok()?;
-
-        sqlx::migrate!("./migrations/core")
-            .run(&mut connection)
-            .await
-            .ok()?;
-
-        let _ = connection.close().await;
-
-        Some(())
-    }
-
     async fn test_state() -> Option<AppState> {
         let url = std::env::var("NUDGE_TEST_DATABASE_URL").ok()?;
-        migrate_core(&url).await?;
+        crate::workspace_migrations::ddl::test_support::migrate_core(&url)
+            .await
+            .expect("running core migrations");
         AppState::connect(&test_config(url)).await.ok()
     }
 
