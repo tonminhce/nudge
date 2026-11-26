@@ -333,6 +333,7 @@ mod tests {
 
         let schema_name = super::super::test_support::unique_schema_name("wm_index");
         super::super::test_support::create_schema(&mut connection, &schema_name).await;
+        super::super::test_support::setup_upstream_extensions(&mut connection).await;
 
         crate::workspace_migrations::ddl::table::create_table(
             &mut connection,
@@ -397,6 +398,7 @@ mod tests {
 
         let schema_name = super::super::test_support::unique_schema_name("wm_concurrent");
         super::super::test_support::create_schema(&mut connection, &schema_name).await;
+        super::super::test_support::setup_upstream_extensions(&mut connection).await;
 
         crate::workspace_migrations::ddl::table::create_table(
             &mut connection,
