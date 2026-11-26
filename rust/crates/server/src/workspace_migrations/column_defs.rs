@@ -6,8 +6,7 @@ use serde_json::Value;
 
 use crate::metadata::names::{
     compute_column_name, compute_composite_column_name, compute_postgres_enum_name,
-    compute_relation_join_column_name, compute_server_only_composite_column_name,
-    remove_sql_ddl_injection,
+    compute_relation_join_column_name, remove_sql_ddl_injection,
 };
 
 use super::ddl::escape::{assert_safe_ts_vector_expression, escape_identifier, escape_literal};
@@ -447,35 +446,6 @@ pub fn generate_composite_column_definition(
     })
 }
 
-pub fn build_server_only_composite_column_definitions(
-    field_type: FieldMetadataType,
-    field_name: &str,
-) -> Result<Vec<WorkspaceSchemaColumnDefinition>, ColumnDefsError> {
-    let server_only_columns: [(&str, FieldMetadataType); 1] =
-        [("fileIds", FieldMetadataType::RawJson)];
-
-    if field_type != FieldMetadataType::RichText {
-        return Ok(Vec::new());
-    }
-
-    server_only_columns
-        .iter()
-        .map(|(column_name, column_field_type)| {
-            Ok(WorkspaceSchemaColumnDefinition {
-                name: compute_server_only_composite_column_name(field_name, column_name),
-                column_type: field_metadata_type_to_column_type(*column_field_type)?.to_string(),
-                is_nullable: Some(true),
-                default: None,
-                is_primary: false,
-                is_array: false,
-                as_expression: None,
-                generated_type: None,
-                is_generated_always_as_identity: false,
-            })
-        })
-        .collect()
-}
-
 pub fn generate_ts_vector_column_definition(
     field: &FlatFieldColumnInput,
     search_vector_expression: Option<&str>,
@@ -570,19 +540,12 @@ pub fn generate_column_definitions(
     }
 
     if composite_types::is_composite_field_metadata_type(field.field_type) {
-        let mut definitions = composite_types::composite_properties(field.field_type)
+        return composite_types::composite_properties(field.field_type)
             .iter()
             .map(|property| {
                 generate_composite_column_definition(property, field, schema_name, table_name)
             })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        definitions.extend(build_server_only_composite_column_definitions(
-            field.field_type,
-            &field.name,
-        )?);
-
-        return Ok(definitions);
+            .collect();
     }
 
     if field.field_type == FieldMetadataType::TsVector {
@@ -1084,7 +1047,7 @@ mod tests {
     }
 
     #[test]
-    fn rich_text_composite_adds_the_server_only_file_ids_column() {
+    fn rich_text_composite_yields_the_upstream_text_columns() {
         let columns = generate_column_definitions(
             &field("bodyV2", FieldMetadataType::RichText),
             SCHEMA,
@@ -1098,15 +1061,8 @@ mod tests {
                 .iter()
                 .map(|column| column.name.as_str())
                 .collect::<Vec<_>>(),
-            vec![
-                "bodyV2Blocknote",
-                "bodyV2Markdown",
-                "bodyV2Tiptap",
-                "bodyV2_fileIds"
-            ]
+            vec!["bodyV2Blocknote", "bodyV2Markdown", "bodyV2Tiptap"]
         );
-        assert_eq!(columns[3].column_type, "jsonb");
-        assert_eq!(columns[3].default, None);
     }
 
     #[test]
