@@ -1,0 +1,21 @@
+{
+  "normalized": {
+    "findOne": {
+      "data": {
+        "person": {
+          "company": {
+            "name": "Notion"
+          },
+          "createdAt": "<iso>",
+          "id": "<uuid>",
+          "name": {
+            "firstName": "Ivan",
+            "lastName": "Zhao"
+          },
+          "updatedAt": "<iso>"
+        }
+      }
+    }
+  },
+  "scenario": "findOne"
+}

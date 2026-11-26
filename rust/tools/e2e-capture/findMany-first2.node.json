@@ -1,0 +1,49 @@
+{
+  "normalized": {
+    "anchorPersonId": "<uuid>",
+    "findMany": {
+      "data": {
+        "people": {
+          "edges": [
+            {
+              "cursor": "<cursor>",
+              "node": {
+                "company": {
+                  "name": "Notion"
+                },
+                "id": "<uuid>",
+                "name": {
+                  "firstName": "Ivan",
+                  "lastName": "Zhao"
+                },
+                "position": 5
+              }
+            },
+            {
+              "cursor": "<cursor>",
+              "node": {
+                "company": {
+                  "name": "Anthropic"
+                },
+                "id": "<uuid>",
+                "name": {
+                  "firstName": "Dario",
+                  "lastName": "Amodei"
+                },
+                "position": 2
+              }
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "<cursor>",
+            "hasNextPage": true,
+            "hasPreviousPage": false,
+            "startCursor": "<cursor>"
+          },
+          "totalCount": 5
+        }
+      }
+    }
+  },
+  "scenario": "findMany-first2"
+}

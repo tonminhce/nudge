@@ -1,0 +1,29 @@
+{
+  "normalized": {
+    "error": {
+      "data": {
+        "people": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "BAD_USER_INPUT",
+            "subCode": "INVALID_ARGS_FILTER",
+            "userFriendlyMessage": "An error occurred."
+          },
+          "message": "Sub field \"bogus\" not found for composite type: FULL_NAME. Available sub fields: firstName, lastName."
+        }
+      ]
+    },
+    "errorCodes": [
+      "BAD_USER_INPUT",
+      "INVALID_ARGS_FILTER"
+    ],
+    "errorShape": [
+      "code",
+      "subCode",
+      "userFriendlyMessage"
+    ]
+  },
+  "scenario": "error-bad-filter"
+}
