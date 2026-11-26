@@ -164,9 +164,11 @@ end-to-end before the next begins.
 - [x] **Wave 0** — research and architecture decisions
 - [x] **Wave 1** — server foundation: config, Postgres/Redis, database migrations,
       health endpoint *(done, schema verified)*
-- [ ] **Wave 2** — authentication, workspaces, roles and permissions
-      *(password auth, ES256 signing, sign-up, the two-step sign-in and refresh
-      rotation are done and verified; SSO, 2FA, API keys and permissions remain)*
+- [x] **Wave 2** — authentication, workspaces, roles and permissions
+      *(done: password auth, ES256 signing, session cookies with the CSRF origin
+      check, API keys, 2FA, invitations, email verification, password reset,
+      workspace lifecycle, impersonation and SSO; SAML signature verification is
+      flag-gated off until a sound Rust path exists)*
 - [ ] **Wave 3** — metadata engine: standard objects, live schema management
 - [ ] **Wave 4** — GraphQL and REST record APIs
 - [ ] **Wave 5** — the web UI and the Tauri desktop app
