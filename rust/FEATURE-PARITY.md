@@ -66,7 +66,7 @@ Roughly 3 of about 90 feature areas are done. The rest is the port.
 | Refresh rotation under the shared advisory lock | **done** | 2 | 1 minute reuse grace |
 | Bearer auth context dispatch | **done** | 2 | |
 | Workspace creation without a sign-up | todo | 2 | |
-| API keys | todo | 2 | one role per key |
+| API keys | **done** | 2 | JWT `type=API_KEY` (`sub`=workspace, `jti`=key id), one roleTarget per key, DB re-check on every request (revoked/expired take effect immediately) |
 | Session cookies and the CSRF origin check | **done** | 2 | `sess_` tokens, `sha256` storage, opt-in header, origin allowlist, renewal bridge, daily cleanup |
 | Two factor authentication (TOTP, backup and recovery codes) | todo | 2 | |
 | SSO: Google, Microsoft, OIDC, SAML | todo | 2 | |

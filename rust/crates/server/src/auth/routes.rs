@@ -31,6 +31,7 @@ pub fn router() -> Router<AppState> {
         .merge(super::two_factor::router())
         .merge(super::account_tokens::router())
         .merge(super::workspace_lifecycle::router())
+        .merge(super::sso::router())
 }
 
 fn response_with_cookies(

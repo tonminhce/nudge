@@ -9,6 +9,7 @@ pub mod routes;
 pub mod service;
 pub mod session;
 pub mod signing_keys;
+pub mod sso;
 pub mod tokens;
 pub mod two_factor;
 pub mod workspace_lifecycle;

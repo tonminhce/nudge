@@ -22,6 +22,11 @@ hex = "0.4"
 hmac = "0.12"
 p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "json",
+] }
+rsa = "0.9"
 sha1 = "0.10"
 sha2 = "0.10"
 axum = { version = "0.8", features = ["macros"] }
