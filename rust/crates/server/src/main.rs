@@ -2,6 +2,7 @@ mod auth;
 mod db;
 mod metadata;
 mod routes;
+mod standard_objects;
 mod state;
 mod workspace_migrations;
 

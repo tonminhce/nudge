@@ -1031,6 +1031,12 @@ async fn activate_workspace(
     let (id, display_name, subdomain, activation_status, application_id) = workspace;
 
     if activation_status == "CREATED" || activation_status == "ACTIVE" {
+        if let Err(error) =
+            crate::standard_objects::seed_standard_objects(&state, workspace_id).await
+        {
+            return Err(AuthError::internal(error.message));
+        }
+
         return Ok(Json(json!({
             "workspace": {
                 "id": id,
@@ -1170,6 +1176,16 @@ async fn activate_workspace(
     .await?;
 
     transaction.commit().await?;
+
+    if let Err(error) = crate::standard_objects::seed_standard_objects(&state, workspace_id).await {
+        tracing::error!(
+            workspace_id = %workspace_id,
+            error = %error.message,
+            "workspace standard object seeding failed after activation"
+        );
+
+        return Err(AuthError::internal(error.message));
+    }
 
     Ok(Json(json!({
         "workspace": {
