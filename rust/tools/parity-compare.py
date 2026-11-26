@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import sys
@@ -8,6 +9,9 @@ import urllib.request
 
 NODE_BASE = "http://127.0.0.1:3001"
 RUST_BASE = "http://127.0.0.1:3000"
+REFERENCE_ORIGIN = "http://refhq.localhost:3001"
+REFERENCE_EMAIL = "owner-1795713371@refhq.test"
+REFERENCE_PASSWORD = "ReferenceSecret123"
 
 UUID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
@@ -42,6 +46,121 @@ def request(base, method, path, body=None, headers=None):
         return error.code, normalize(raw)
 
 
+CURSOR_KEYS = {
+    "cursor",
+    "endCursor",
+    "startCursor",
+    "after",
+    "before",
+    "starting_after",
+    "ending_before",
+}
+MV_KEYS = {"metadataVersion"}
+
+
+def normalize_string(value):
+    value = TOKEN_RE.sub("<jwt>", value)
+    value = UUID_RE.sub("<uuid>", value)
+    value = ISO_RE.sub("<iso>", value)
+    value = EPOCH_RE.sub("<epoch>", value)
+    return value
+
+
+def normalize_json(value, key=None):
+    if isinstance(value, dict):
+        return {k: normalize_json(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [normalize_json(v) for v in value]
+    if key in MV_KEYS and value is not None:
+        return "<mv>"
+    if isinstance(value, str):
+        if key in CURSOR_KEYS:
+            return "<cursor>"
+        return normalize_string(value)
+    return value
+
+
+def diff_paths(node, rust, path=""):
+    if node == rust:
+        return []
+    if isinstance(node, dict) and isinstance(rust, dict):
+        out = []
+        for key in sorted(set(node) | set(rust)):
+            child = f"{path}.{key}" if path else key
+            if key not in node:
+                out.append((child, "<missing>", rust[key]))
+            elif key not in rust:
+                out.append((child, node[key], "<missing>"))
+            else:
+                out.extend(diff_paths(node[key], rust[key], child))
+        return out
+    if isinstance(node, list) and isinstance(rust, list):
+        out = []
+        for index in range(max(len(node), len(rust))):
+            child = f"{path}[{index}]"
+            left = node[index] if index < len(node) else "<missing>"
+            right = rust[index] if index < len(rust) else "<missing>"
+            out.extend(diff_paths(left, right, child))
+        return out
+    return [(path or "<root>", node, rust)]
+
+
+def request_raw(base, method, path, body=None, headers=None):
+    url = base + path
+    data = body.encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("content-type", "application/json")
+    for key, value in (headers or {}).items():
+        req.add_header(key, value)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status, response.read().decode()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode()
+
+
+def fetch_reference_token():
+    query = (
+        "mutation signIn { signIn(email: \"%s\", password: \"%s\") "
+        "{ availableWorkspaces { availableWorkspacesForSignIn { id loginToken } } } }"
+        % (REFERENCE_EMAIL, REFERENCE_PASSWORD)
+    )
+    status, body = request_raw(
+        NODE_BASE, "POST", "/metadata", json.dumps({"query": query})
+    )
+    parsed = json.loads(body)
+    if not parsed.get("data"):
+        raise RuntimeError("signIn failed: %s" % body[:200])
+    workspaces = parsed["data"]["signIn"]["availableWorkspaces"][
+        "availableWorkspacesForSignIn"
+    ]
+    login_token = workspaces[0]["loginToken"]
+    exchange = (
+        "mutation ex { getAuthTokensFromLoginToken(loginToken: \"%s\", origin: \"%s\") "
+        "{ tokens { accessOrWorkspaceAgnosticToken { token } } } }"
+        % (login_token, REFERENCE_ORIGIN)
+    )
+    status, body = request_raw(
+        NODE_BASE, "POST", "/metadata", json.dumps({"query": exchange})
+    )
+    parsed = json.loads(body)
+    if not parsed.get("data"):
+        raise RuntimeError("token exchange failed: %s" % body[:200])
+    return parsed["data"]["getAuthTokensFromLoginToken"]["tokens"][
+        "accessOrWorkspaceAgnosticToken"
+    ]["token"]
+
+
+def graphql(base, query, token, variables=None, path="/graphql"):
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    headers = {"origin": REFERENCE_ORIGIN}
+    if token:
+        headers["authorization"] = f"Bearer {token}"
+    return request_raw(base, "POST", path, json.dumps(payload), headers)
+
+
 CASES = [
     ("GET", "/healthz", None),
     ("POST", "/graphql", '{ "query": "{ currentUser { id } }" }'),
@@ -52,7 +171,30 @@ CASES = [
 ]
 
 
+def run_record_cases():
+    import argparse
+    import importlib.util
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location(
+        "record_parity", os.path.join(here, "record-parity.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    scenario = None
+    if "--scenario" in sys.argv:
+        scenario = sys.argv[sys.argv.index("--scenario") + 1]
+    args = argparse.Namespace(
+        node_only="--node-only" in sys.argv,
+        offline="--offline" in sys.argv,
+        scenario=scenario,
+    )
+    return module.run(args)
+
+
 def main():
+    if "--records" in sys.argv:
+        return run_record_cases()
     failures = 0
     for method, path, body in CASES:
         node_status, node_body = request(NODE_BASE, method, path, body)
