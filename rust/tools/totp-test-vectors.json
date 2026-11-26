@@ -1,0 +1,68 @@
+{
+ "rfc6238": {
+  "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+  "times": [
+   59,
+   1111111109,
+   1111111111,
+   1234567890,
+   2000000000,
+   20000000000
+  ],
+  "eightDigits": [
+   "94287082",
+   "07081804",
+   "14050471",
+   "89005924",
+   "69279037",
+   "65353130"
+  ],
+  "sixDigits": [
+   "287082",
+   "081804",
+   "050471",
+   "005924",
+   "279037",
+   "353130"
+  ]
+ },
+ "tenByte": {
+  "secret": "GEZDGNBVGY3TQOJQ",
+  "at1234567890": "919219",
+  "at1234567845": "371931",
+  "at1234567915": "919219"
+ },
+ "shortSecret": {
+  "secret": "GEZDGNBVGY3TQ",
+  "paddedKeyHex": "3132333435363738313233343536373831323334",
+  "at59": "841317"
+ },
+ "longSecret": {
+  "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNA",
+  "length": 55,
+  "at1234567890": "275842"
+ },
+ "window": {
+  "secret": "GEZDGNBVGY3TQOJQ",
+  "baseSeconds": 1111111109,
+  "at": "343526",
+  "minusOneStep": "931072",
+  "minusTwoSteps": "973503",
+  "plusOneStep": "624539",
+  "plusTwoSteps": "594283"
+ },
+ "generatedSecret": {
+  "rawHex": "a3b1c2d3e4f506172839",
+  "maskedHex": "23314253647506172839",
+  "secret": "EMYUEU3EOUDBOKBZ",
+  "codeAt59": "637357"
+ },
+ "uri": "otpauth://totp/Twenty%20-%20Nudge%20HQ:totp-vectors%40nudge.test?secret=GEZDGNBVGY3TQOJQ&period=30&digits=6&algorithm=SHA1&issuer=Twenty%20-%20Nudge%20HQ",
+ "uriPlainIssuer": "otpauth://totp/Twenty:totp-vectors%40nudge.test?secret=GEZDGNBVGY3TQOJQ&period=30&digits=6&algorithm=SHA1&issuer=Twenty",
+ "recoveryCodes": {
+  "plain": "ABCDE-FGHIJ-KLMNP-QRSTV",
+  "hash": "5bf753af87ca65362ba84c2121d2f12861afc220f4d0b9bcbd88b8d407ce5b66",
+  "lowercaseWithNoise": "5bf753af87ca65362ba84c2121d2f12861afc220f4d0b9bcbd88b8d407ce5b66",
+  "uppercased": "5bf753af87ca65362ba84c2121d2f12861afc220f4d0b9bcbd88b8d407ce5b66"
+ }
+}
