@@ -160,12 +160,18 @@ fn aggregate_relation_field_pairs(actions_report: &mut OrchestratorActionsReport
     let mut processed_field_universal_identifiers: HashSet<String> = HashSet::new();
     let mut aggregated_create_field_actions: Vec<UniversalCreateAction> = Vec::new();
 
-    for (universal_identifier, action) in &action_by_field_universal_identifier {
-        if processed_field_universal_identifiers.contains(universal_identifier) {
+    for action in &create_field_actions {
+        let Some(universal_identifier) = action.flat_entity.as_ref().map(|entity| entity.universal_identifier().to_string()) else {
+            aggregated_create_field_actions.push(action.clone());
+
+            continue;
+        };
+
+        if processed_field_universal_identifiers.contains(&universal_identifier) {
             continue;
         }
 
-        processed_field_universal_identifiers.insert(universal_identifier.clone());
+        processed_field_universal_identifiers.insert(universal_identifier);
 
         let target_universal_identifier = flat_field_of(action).and_then(|field| {
             field
