@@ -89,8 +89,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      - name: ensure psql
+        run: command -v psql || sudo apt-get install -y postgresql-client
       - run: cargo build -p nudge-server
       - name: start the server and run the auth e2e
+        env:
+          E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/default
         run: |
           PG_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/default \
           REDIS_URL=redis://127.0.0.1:6379 \

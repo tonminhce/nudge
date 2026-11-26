@@ -20,7 +20,7 @@ imp_get() {
 }
 
 imp_founder_can_impersonate() {
-  docker exec infra-db-1 psql -U postgres -d "${E2E_DATABASE_NAME:-default}" -tAc \
+  e2e_psql_tA \
     "SELECT \"canImpersonate\" FROM core.\"user\" WHERE email = '$IMP_ADMIN_EMAIL'"
 }
 
@@ -30,9 +30,9 @@ IMP_TARGET_ID="$(printf '%s' "$BODY" | grep -o '"user":{"id":"[^"]*"' | cut -d'"
 IMP_TARGET_WORKSPACE="$(printf '%s' "$BODY" | grep -o '"workspaceId":"[^"]*"' | cut -d'"' -f4)"
 check_value "  target workspace id present" "$([ -n "$IMP_TARGET_WORKSPACE" ] && echo 1 || echo 0)"
 
-IMP_ADMIN_EMAIL="$(docker exec infra-db-1 psql -U postgres -d "${E2E_DATABASE_NAME:-default}" -tAc \
+IMP_ADMIN_EMAIL="$(e2e_psql_tA \
   "SELECT email FROM core.\"user\" WHERE \"canImpersonate\" IS TRUE ORDER BY \"createdAt\" ASC LIMIT 1")"
-IMP_ADMIN_WORKSPACE="$(docker exec infra-db-1 psql -U postgres -d "${E2E_DATABASE_NAME:-default}" -tAc \
+IMP_ADMIN_WORKSPACE="$(e2e_psql_tA \
   "SELECT w.id FROM core.\"userWorkspace\" uw \
    JOIN core.\"workspace\" w ON w.id = uw.\"workspaceId\" \
    JOIN core.\"user\" u ON u.id = uw.\"userId\" \

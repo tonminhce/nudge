@@ -9,6 +9,24 @@ SUBDOMAIN="${SUBDOMAIN:-nudge-hq-$SUFFIX}"
 EXPECT_ROTATED_REUSE="${EXPECT_ROTATED_REUSE:-200}"
 E2E_DATABASE_NAME="${E2E_DATABASE_NAME:-default}"
 
+e2e_psql_tA() {
+  if [ -n "${E2E_DATABASE_URL:-}" ]; then
+    psql "$E2E_DATABASE_URL" -tAc "$1"
+  else
+    docker exec "${E2E_DATABASE_CONTAINER:-infra-db-1}" psql -U postgres \
+      -d "${E2E_DATABASE_NAME:-default}" -tAc "$1"
+  fi
+}
+
+e2e_psql_run() {
+  if [ -n "${E2E_DATABASE_URL:-}" ]; then
+    psql "$E2E_DATABASE_URL" "$@"
+  else
+    docker exec "${E2E_DATABASE_CONTAINER:-infra-db-1}" psql -U postgres \
+      -d "${E2E_DATABASE_NAME:-default}" "$@"
+  fi
+}
+
 results=0
 failures=0
 STATUS=""

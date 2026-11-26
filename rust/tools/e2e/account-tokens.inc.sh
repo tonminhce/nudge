@@ -14,7 +14,7 @@ at_capture() {
 }
 
 at_db() {
-  docker exec infra-db-1 psql -U postgres -d "${E2E_DATABASE_NAME:-default}" -tAc "$1" | tr -d '[:space:]'
+  e2e_psql_tA "$1" | tr -d '[:space:]'
 }
 
 at_absent() {
