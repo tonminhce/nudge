@@ -110,8 +110,13 @@ on the subdomain origin and activates). Do not re-run it against the already-see
   and diffed. Current scoreboard: `/healthz` (Terminus shape) and the NestJS fallback 404
   body match; `/graphql` + `/metadata` answers are the wave 4 gap; the SPA catch-all is the
   wave 5 gap.
-- `python3 -I tools/parity-bench.py` — 8 workers x 250 requests per scenario on this
-  10-core machine: healthz rust 2125 rps / p99 7.9ms vs node 1466 rps / p99 73.8ms.
+- `python3 -I tools/parity-bench.py` — 8 workers x 250 requests per scenario on this 10-core
+  machine, release build (`cargo build --release`): healthz rust 2789 rps / p99 6.5ms vs node
+  1155 rps / p99 68.8ms; graphql auth-error rust 7985 rps / p99 2.1ms vs node 2411 rps / p99
+  10.1ms (rust wins throughput ~2.4-3.3x and tail latency ~5-16x with zero errors). The debug
+  build is materially slower than release (the earlier 2125 rps healthz figure was a debug run),
+  so measure with the release binary; production deploy uses `rust/infra/Dockerfile`, which
+  builds `--release`.
 - `rust-anything app record --http` against the reference is wired in
   `rust/app-cases/rust-anything.json` but currently unusable: the tool abandons server starts
   slower than ~30-60s (the Node image boots in 2-5 minutes) even with `--ready-timeout 600`.
