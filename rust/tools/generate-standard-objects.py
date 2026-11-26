@@ -1,10 +1,100 @@
 import json
 import os
+import re
 
-BASELINE = "/Users/tonminh-mac/Documents/GitHub/nudge/rust/baseline"
-OUTPUT = "/Users/tonminh-mac/Documents/GitHub/nudge/rust/crates/server/src/standard_objects/definitions.rs"
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASELINE = os.path.join(REPO_ROOT, "baseline")
+OUTPUT = os.path.join(
+    REPO_ROOT, "crates", "server", "src", "standard_objects", "definitions.rs"
+)
 
 STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER = "20202020-64aa-4b6f-b003-9c74b97cee20"
+
+COMPOSITE_FIRST_COLUMN_SUFFIXES = {
+    "ACTOR": ["Source", "WorkspaceMemberId", "Name", "Context"],
+    "FULL_NAME": ["FirstName", "LastName"],
+    "LINKS": ["PrimaryLinkLabel", "PrimaryLinkUrl", "SecondaryLinks"],
+    "EMAILS": ["PrimaryEmail", "AdditionalEmails"],
+    "PHONES": [
+        "PrimaryPhoneNumber",
+        "PrimaryPhoneCountryCode",
+        "PrimaryPhoneCallingCode",
+        "AdditionalPhones",
+    ],
+    "CURRENCY": ["AmountMicros", "CurrencyCode"],
+    "ADDRESS": [
+        "AddressStreet1",
+        "AddressStreet2",
+        "AddressCity",
+        "AddressPostcode",
+        "AddressState",
+        "AddressCountry",
+        "AddressLat",
+        "AddressLng",
+    ],
+    "RICH_TEXT": ["Blocknote", "Markdown", "Tiptap"],
+}
+
+NO_COLUMN_SORT_KEY = 10**9
+
+
+def parse_baseline_column_orders(sql_path):
+    with open(sql_path) as handle:
+        text = handle.read()
+    orders = {}
+    vectors = {}
+    pattern = re.compile(
+        r'CREATE TABLE [\w".]+\.(?:"([^"]+)"|(\w+)) \(\n(.*?)\n\);', re.S
+    )
+    for match in pattern.finditer(text):
+        table_name = match.group(1) or match.group(2)
+        columns = []
+        logical = ""
+        depth = 0
+        for raw_line in match.group(3).split("\n"):
+            logical += raw_line.strip() + " "
+            depth += raw_line.count("(") - raw_line.count(")")
+            if depth > 0:
+                continue
+            stripped = logical.strip().rstrip(",")
+            logical = ""
+            if not stripped:
+                continue
+            upper = stripped.upper()
+            if upper.startswith(
+                ("CONSTRAINT", "PRIMARY KEY", "UNIQUE", "FOREIGN KEY", "CHECK")
+            ):
+                continue
+            if stripped.startswith('"'):
+                columns.append(stripped[1 : stripped.index('"', 1)])
+            else:
+                columns.append(re.match(r"[A-Za-z_]\w*", stripped).group(0))
+        orders[table_name] = {name: index for index, name in enumerate(columns)}
+        vectors[table_name] = columns
+    return orders, vectors
+
+
+def field_physical_columns(field):
+    field_type = field["type"]
+    settings = field.get("settings") or {}
+    if field_type == "RELATION":
+        if settings.get("relationType") == "MANY_TO_ONE":
+            return [settings.get("joinColumnName") or f"{field['name']}Id"]
+        return []
+    if field_type == "MORPH_RELATION":
+        if field.get("morphId") == field.get("universalIdentifier"):
+            return []
+        return [settings.get("joinColumnName") or f"{field['name']}Id"]
+    if field_type in COMPOSITE_FIRST_COLUMN_SUFFIXES:
+        return [field["name"] + suffix for suffix in COMPOSITE_FIRST_COLUMN_SUFFIXES[field_type]]
+    return [field["name"]]
+
+
+def field_attnum_sort_key(field, column_order):
+    for column in field_physical_columns(field):
+        if column in column_order:
+            return column_order[column]
+    return NO_COLUMN_SORT_KEY
 
 
 def load(name):
@@ -38,6 +128,10 @@ def main():
     options = load("field-metadata-option")
     index_fields = load("index-field-metadata")
     search_fields = load("search-field-metadata")
+
+    column_orders, column_vectors = parse_baseline_column_orders(
+        os.path.join(BASELINE, "workspace-schema-2.61.0.sql")
+    )
 
     field_universal_by_id = {f["id"]: f["universalIdentifier"] for f in fields}
     object_universal_by_id = {o["id"]: o["universalIdentifier"] for o in objects}
@@ -104,6 +198,7 @@ def main():
         "    pub image_identifier_field_universal_identifier: Option<&'static str>,"
     )
     lines.append("    pub fields: &'static [StandardFieldDefinition],")
+    lines.append("    pub column_plan: &'static [&'static str],")
     lines.append("}")
     lines.append("")
     lines.append("pub struct StandardFieldOptionDefinition {")
@@ -145,18 +240,17 @@ def main():
     lines.append("")
 
     for object_row in sorted(objects, key=lambda row: row["nameSingular"]):
-        constant = "FIELDS_" + "".join(
-            part.upper() for part in _split_name(object_row["nameSingular"])
-        ) if False else None
-
-    for object_row in sorted(objects, key=lambda row: row["nameSingular"]):
         suffix = "".join(part.capitalize() for part in _split_name(object_row["nameSingular"])).upper()
+        column_order = column_orders.get(object_row["nameSingular"], {})
         lines.append(
             f"pub const OBJECT_FIELDS_{suffix}: &[StandardFieldDefinition] = &["
         )
         for field in sorted(
             fields_by_object.get(object_row["id"], []),
-            key=lambda row: row["name"],
+            key=lambda row: (
+                field_attnum_sort_key(row, column_order),
+                row["name"],
+            ),
         ):
             lines.append("    StandardFieldDefinition {")
             lines.append(
@@ -212,6 +306,11 @@ def main():
             lines.append("    },")
         lines.append("];")
         lines.append("")
+        lines.append(f"pub const OBJECT_COLUMN_PLAN_{suffix}: &[&str] = &[")
+        for column in column_vectors.get(object_row["nameSingular"], []):
+            lines.append(f'    "{_escape(column)}",')
+        lines.append("];")
+        lines.append("")
 
     lines.append("pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[")
     for object_row in sorted(objects, key=lambda row: row["nameSingular"]):
@@ -262,6 +361,7 @@ def main():
             f"        image_identifier_field_universal_identifier: {rust_option(image_field)},"
         )
         lines.append(f"        fields: OBJECT_FIELDS_{suffix},")
+        lines.append(f"        column_plan: OBJECT_COLUMN_PLAN_{suffix},")
         lines.append("    },")
     lines.append("];")
     lines.append("")

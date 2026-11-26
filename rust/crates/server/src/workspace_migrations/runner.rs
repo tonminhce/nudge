@@ -1224,6 +1224,27 @@ async fn apply_object_create(
         is_generated_always_as_identity: false,
     });
 
+    if let Some(column_plan) = &create.column_plan {
+        let position_by_name: std::collections::HashMap<&str, usize> = column_plan
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (name.as_str(), index))
+            .collect();
+
+        column_definitions.sort_by(|left, right| {
+            position_by_name
+                .get(left.name.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+                .cmp(
+                    &position_by_name
+                        .get(right.name.as_str())
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                )
+        });
+    }
+
     table::create_table(
         connection,
         &runtime.schema_name,

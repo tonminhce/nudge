@@ -245,6 +245,13 @@ fn object_create_action(
         ))),
         universal_flat_field_metadatas: fields,
         field_id_by_universal_identifier: Some(field_id_map),
+        column_plan: Some(
+            object
+                .column_plan
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect(),
+        ),
         ..UniversalCreateAction::default()
     })
 }
@@ -592,6 +599,114 @@ mod tests {
     }
 
     #[test]
+    fn every_column_plan_matches_the_upstream_access_pair_layout() {
+        let historical = [
+            "agentChatThread",
+            "agentMessage",
+            "agentMessagePart",
+            "agentTurn",
+            "campaignDelivery",
+            "messageSuppression",
+        ];
+
+        let mut historical_seen = 0usize;
+
+        for object in definitions::STANDARD_OBJECTS {
+            let plan = object.column_plan;
+
+            assert_eq!(
+                plan.first().copied(),
+                Some("id"),
+                "{} plan must start with id",
+                object.name_singular
+            );
+
+            let access_at = plan.iter().position(|name| *name == "_accessGroupIds");
+            let private_at = plan.iter().position(|name| *name == "_isPrivate");
+
+            assert_eq!(
+                access_at.map(|index| index + 1),
+                private_at,
+                "{} access pair must be adjacent",
+                object.name_singular
+            );
+
+            let relation_columns: std::collections::HashSet<String> = object
+                .fields
+                .iter()
+                .filter_map(relation_join_column)
+                .collect();
+
+            let non_relation: Vec<&str> = plan
+                .iter()
+                .copied()
+                .filter(|name| !relation_columns.contains(*name))
+                .collect();
+
+            let tail = &non_relation[non_relation.len().saturating_sub(2)..];
+            assert_eq!(
+                tail,
+                &["_accessGroupIds", "_isPrivate"],
+                "{} access pair must close the CREATE TABLE portion",
+                object.name_singular
+            );
+
+            let created_at = plan
+                .iter()
+                .position(|name| *name == "createdAt")
+                .expect("createdAt in plan");
+
+            if historical.contains(&object.name_singular) {
+                historical_seen += 1;
+                assert!(
+                    created_at > 3,
+                    "{} carries the historical base-column layout",
+                    object.name_singular
+                );
+            } else {
+                assert_eq!(
+                    created_at, 1,
+                    "{} uses the modern head layout",
+                    object.name_singular
+                );
+            }
+        }
+
+        assert_eq!(historical_seen, historical.len());
+    }
+
+    fn relation_join_column(field: &definitions::StandardFieldDefinition) -> Option<String> {
+        match field.field_type {
+            "RELATION" => {
+                let settings = parse_json(field.settings_json).ok().flatten()?;
+                if settings.get("relationType").and_then(Value::as_str) != Some("MANY_TO_ONE") {
+                    return None;
+                }
+                Some(join_column_name(&settings, field.name))
+            }
+            "MORPH_RELATION" => {
+                if field.morph_id == Some(field.universal_identifier) {
+                    return None;
+                }
+                let settings = parse_json(field.settings_json).ok().flatten();
+                Some(match settings.as_ref() {
+                    Some(value) => join_column_name(value, field.name),
+                    None => format!("{}Id", field.name),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn join_column_name(settings: &Value, field_name: &str) -> String {
+        settings
+            .get("joinColumnName")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .unwrap_or_else(|| format!("{}Id", field_name))
+    }
+
+    #[test]
     fn the_seed_migration_orders_search_fields_first_and_indexes_last() {
         let migration = build_standard_seed_migration().expect("building the seed migration");
 
@@ -828,25 +943,31 @@ mod tests {
         let without_schema = line
             .replace(&format!("\"{schema}\""), "ws")
             .replace(&format!("{schema}."), "ws.")
-            .replace(schema, "ws")
-            .replace("public.", "");
+            .replace(schema, "ws");
 
         let without_access_group = strip_family_hex(&without_schema, "IDX_ACCESS_GROUP_IDS_");
 
         strip_family_hex(&without_access_group, "IDX_PRIVATE_RECORD_")
     }
 
-    type ColumnDumpRow = (String, String, String, bool, String, String, Option<String>);
+    type ColumnDumpRow = (
+        String,
+        String,
+        i32,
+        String,
+        bool,
+        String,
+        String,
+        Option<String>,
+    );
 
     async fn dump_normalized_schema(url: &str, schema: &str) -> Vec<String> {
         let pool = sqlx::PgPool::connect(url)
             .await
             .expect("connecting for the schema dump");
 
-        let mut lines: Vec<String> = Vec::new();
-
         let columns: Vec<ColumnDumpRow> = sqlx::query_as(
-            "SELECT c.relname::text, a.attname::text, \
+            "SELECT c.relname::text, a.attname::text, a.attnum::int, \
                 format_type(a.atttypid, a.atttypmod), a.attnotnull, a.attidentity::text, \
                 a.attgenerated::text, pg_get_expr(d.adbin, d.adrelid) \
              FROM pg_attribute a \
@@ -854,18 +975,27 @@ mod tests {
              JOIN pg_namespace n ON n.oid = c.relnamespace \
              LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
              WHERE n.nspname = $1 AND c.relkind = 'r' AND a.attnum > 0 \
-               AND NOT a.attisdropped",
+               AND NOT a.attisdropped \
+             ORDER BY c.relname, a.attnum",
         )
         .bind(schema)
         .fetch_all(&pool)
         .await
         .expect("dumping columns");
 
-        for (table, name, type_name, not_null, identity, generated, default) in columns {
-            lines.push(format!(
-                "column {table}.{name} type={type_name} notnull={not_null} identity={identity} generated={generated} default={default:?}"
-            ));
+        let mut columns_by_table: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+
+        for (table, name, attnum, type_name, not_null, identity, generated, default) in columns {
+            let line = format!(
+                "column {table}.{name} attnum={attnum} type={type_name} notnull={not_null} identity={identity} generated={generated} default={default:?}"
+            );
+            columns_by_table.entry(table).or_default().push(line);
         }
+
+        let mut index_lines: Vec<String> = Vec::new();
+        let mut constraint_lines: Vec<String> = Vec::new();
+        let mut enum_lines: Vec<String> = Vec::new();
 
         let indexes: Vec<(String, String)> = sqlx::query_as(
             "SELECT indexname::text, indexdef FROM pg_indexes WHERE schemaname = $1",
@@ -876,7 +1006,7 @@ mod tests {
         .expect("dumping indexes");
 
         for (name, definition) in indexes {
-            lines.push(format!("index {name} def={definition}"));
+            index_lines.push(format!("index {name} def={definition}"));
         }
 
         let constraints: Vec<(String, String, String, String)> = sqlx::query_as(
@@ -893,7 +1023,7 @@ mod tests {
         .expect("dumping constraints");
 
         for (name, kind, table, definition) in constraints {
-            lines.push(format!(
+            constraint_lines.push(format!(
                 "constraint {name} kind={kind} table={table} def={definition}"
             ));
         }
@@ -913,15 +1043,66 @@ mod tests {
         .expect("dumping enums");
 
         for (name, labels) in enums {
-            lines.push(format!("enum {name} values={labels}"));
+            enum_lines.push(format!("enum {name} values={labels}"));
         }
 
-        lines.sort();
+        let mut column_part: Vec<String> = Vec::new();
 
-        lines
-            .into_iter()
-            .map(|line| normalize_schema_line(&line, schema))
+        for (_table, lines) in columns_by_table {
+            column_part.extend(lines);
+        }
+
+        let mut tail_part: Vec<String> = Vec::new();
+        tail_part.extend(index_lines);
+        tail_part.extend(constraint_lines);
+        tail_part.extend(enum_lines);
+
+        let mut tail_lines: Vec<String> = tail_part
+            .iter()
+            .map(|line| normalize_schema_line(line, schema))
+            .collect();
+        tail_lines.sort();
+
+        let mut normalized_columns: Vec<String> = column_part
+            .iter()
+            .map(|line| normalize_schema_line(line, schema))
+            .collect();
+
+        normalized_columns.extend(tail_lines);
+        normalized_columns
+    }
+
+    fn group_column_lines(dump: &[String]) -> std::collections::BTreeMap<&str, Vec<&String>> {
+        let mut grouped: std::collections::BTreeMap<&str, Vec<&String>> =
+            std::collections::BTreeMap::new();
+
+        for line in dump {
+            if let Some(rest) = line.strip_prefix("column ") {
+                let table = rest.split('.').next().unwrap_or(rest);
+                grouped.entry(table).or_default().push(line);
+            }
+        }
+
+        grouped
+    }
+
+    fn non_column_lines(dump: &[String]) -> Vec<&String> {
+        dump.iter()
+            .filter(|line| !line.starts_with("column "))
             .collect()
+    }
+
+    fn membership_key(line: &str) -> String {
+        match line.strip_prefix("column ") {
+            Some(rest) => {
+                let without_attnum: Vec<&str> = rest
+                    .split_whitespace()
+                    .filter(|token| !token.starts_with("attnum="))
+                    .collect();
+                format!("column {}", without_attnum.join(" "))
+            }
+            None => line.to_string(),
+        }
     }
 
     #[tokio::test]
@@ -1033,26 +1214,110 @@ mod tests {
 
         assert!(!mine.is_empty() && !theirs.is_empty());
 
-        let set_mine: std::collections::HashSet<&String> = mine.iter().collect();
-        let set_theirs: std::collections::HashSet<&String> = theirs.iter().collect();
+        if mine != theirs {
+            let my_columns = group_column_lines(&mine);
+            let their_columns = group_column_lines(&theirs);
 
-        let mut extra: Vec<&&String> = set_mine.difference(&set_theirs).collect();
-        let mut missing: Vec<&&String> = set_theirs.difference(&set_mine).collect();
-        extra.sort();
-        missing.sort();
+            let mut divergent_tables = 0usize;
+            let mut divergences: Vec<String> = Vec::new();
 
-        if !extra.is_empty() || !missing.is_empty() {
+            let table_names: std::collections::BTreeSet<&str> = my_columns
+                .keys()
+                .chain(their_columns.keys())
+                .copied()
+                .collect();
+
+            for table in table_names {
+                let my_lines = my_columns.get(table);
+                let their_lines = their_columns.get(table);
+
+                if my_lines == their_lines {
+                    continue;
+                }
+
+                divergent_tables += 1;
+
+                let my_vec = my_lines.cloned().unwrap_or_default();
+                let their_vec = their_lines.cloned().unwrap_or_default();
+
+                let position = my_vec
+                    .iter()
+                    .zip(their_vec.iter())
+                    .position(|(a, b)| a != b)
+                    .unwrap_or_else(|| my_vec.len().min(their_vec.len()));
+
+                let mine_at = my_vec
+                    .get(position)
+                    .map(|line| line.as_str())
+                    .unwrap_or("<none>");
+                let theirs_at = their_vec
+                    .get(position)
+                    .map(|line| line.as_str())
+                    .unwrap_or("<none>");
+
+                divergences.push(format!(
+                    "  {table} first divergence at position {position} ({} columns vs {}):\n    mine:   {mine_at}\n    theirs: {theirs_at}\n",
+                    my_vec.len(),
+                    their_vec.len()
+                ));
+            }
+
+            let set_mine: std::collections::HashSet<&String> =
+                non_column_lines(&mine).into_iter().collect();
+            let set_theirs: std::collections::HashSet<&String> =
+                non_column_lines(&theirs).into_iter().collect();
+
+            let mut extra: Vec<&&String> = set_mine.difference(&set_theirs).collect();
+            let mut missing: Vec<&&String> = set_theirs.difference(&set_mine).collect();
+            extra.sort();
+            missing.sort();
+
+            let membership_mine: std::collections::HashSet<String> =
+                mine.iter().map(|line| membership_key(line)).collect();
+            let membership_theirs: std::collections::HashSet<String> =
+                theirs.iter().map(|line| membership_key(line)).collect();
+
+            let mut extra_members: Vec<&String> =
+                membership_mine.difference(&membership_theirs).collect();
+            let mut missing_members: Vec<&String> =
+                membership_theirs.difference(&membership_mine).collect();
+            extra_members.sort();
+            missing_members.sort();
+
             let mut report = format!(
-                "workspace schema parity: {} extra, {} missing",
-                extra.len(),
-                missing.len()
+                "workspace schema parity: ordered column vectors differ for {divergent_tables} tables\n"
             );
-            for line in extra.iter().take(30) {
+            report.push_str(&format!(
+                "membership set diff (attnum ignored): {} extra, {} missing\n",
+                extra_members.len(),
+                missing_members.len()
+            ));
+
+            for line in extra_members.iter().take(30) {
                 report.push_str(&format!("  + {line}\n"));
             }
-            for line in missing.iter().take(30) {
+            for line in missing_members.iter().take(30) {
                 report.push_str(&format!("  - {line}\n"));
             }
+
+            for divergence in &divergences {
+                report.push_str(divergence);
+            }
+
+            if !extra.is_empty() || !missing.is_empty() {
+                report.push_str(&format!(
+                    "non-column sections: {} extra, {} missing\n",
+                    extra.len(),
+                    missing.len()
+                ));
+                for line in extra.iter().take(30) {
+                    report.push_str(&format!("  + {line}\n"));
+                }
+                for line in missing.iter().take(30) {
+                    report.push_str(&format!("  - {line}\n"));
+                }
+            }
+
             panic!("{report}");
         }
     }

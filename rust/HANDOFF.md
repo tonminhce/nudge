@@ -48,6 +48,19 @@ R-002 (verify auth behaviour against upstream, never guess).
     `/auth/workspace/activate` (idempotent, retryable). DB-gated parity test compares the
     seeded workspace catalog against the live Node reference; `tools/metadata-parity.sh`
     compares seeded metadata content (all five tables, zero-diff on the reference).
+  - U7 physical parity: the generator orders each object's fields by the attnum of the field's
+    first physical column in `baseline/workspace-schema-2.61.0.sql` (not by name), and
+    `object_create_action` carries a per-table `column_plan` that `apply_object_create` uses to
+    sort the CREATE-TABLE column definitions into the exact upstream order (base columns, the
+    six tables whose `createdAt`/`updatedAt`/`deletedAt` sit mid-table, the access pair, and the
+    trailing relation join columns). `tools/verify-standard-objects-attnum.py` re-checks all 37
+    standard tables offline against the baseline dump; `tools/prove-attnum-parity.sh` diffs the
+    full 39-table workspace schema (ordered `attname` per table) of a live seeded database
+    against the reference database. The DB-gated parity test now compares ordered attnum column
+    vectors, so a reordering can no longer hide behind the old set comparison. Known residual:
+    `core.objectMetadata.targetTableName` stores the computed name for the 37 standard objects,
+    whereas the 2.61.0 reference stores the literal `DEPRECATED`; this is the `wave3/u10` fix
+    and is independent of column order (all other four parity sections are zero-diff).
   - U8 deferred queue: claim with `FOR UPDATE SKIP LOCKED`, delete-on-success,
     `30s * 2^n` retry backoff, FAILED at `MAX_ATTEMPTS=3`, stale recovery,
     non-transactional execution for `CREATE INDEX CONCURRENTLY`;
