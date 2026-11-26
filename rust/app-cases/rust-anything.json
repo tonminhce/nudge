@@ -1,0 +1,16 @@
+{
+  "schema": "rust-anything/app-cases@1",
+  "name": "tiny-server",
+  "run": [
+    "python3",
+    "/tmp/tiny-server.py"
+  ],
+  "timeout_secs": 30,
+  "http": {
+    "ready_secs": 30
+  },
+  "recorded": [
+    "example-001-get-healthz",
+    "trap-001-get-rust-anything-missin"
+  ]
+}

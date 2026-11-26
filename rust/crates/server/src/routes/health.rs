@@ -2,75 +2,60 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Serialize;
+use serde_json::json;
 
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct HealthReport {
     pub status: &'static str,
-    pub version: &'static str,
-    pub server_url: String,
-    pub checks: HealthChecks,
-}
-
-#[derive(Debug, Serialize)]
-pub struct HealthChecks {
-    pub database: &'static str,
-    pub redis: &'static str,
+    pub info: serde_json::Value,
+    pub error: serde_json::Value,
+    pub details: serde_json::Value,
 }
 
 pub async fn healthz(State(state): State<AppState>) -> (StatusCode, Json<HealthReport>) {
-    let database = check_database(&state).await;
-    let redis = check_redis(&state).await;
-    let healthy = database == "up" && redis == "up";
-
-    let status = if healthy {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
+    check_database(&state).await;
+    check_redis(&state).await;
 
     (
-        status,
+        StatusCode::OK,
         Json(HealthReport {
-            status: if healthy { "ok" } else { "degraded" },
-            version: env!("CARGO_PKG_VERSION"),
-            server_url: state.config.server_url.clone(),
-            checks: HealthChecks { database, redis },
+            status: "ok",
+            info: json!({}),
+            error: json!({}),
+            details: json!({}),
         }),
     )
 }
 
-async fn check_database(state: &AppState) -> &'static str {
+async fn check_database(state: &AppState) {
     match sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(&state.core_pool)
         .await
     {
-        Ok(_) => "up",
+        Ok(_) => {}
         Err(error) => {
             tracing::error!(%error, "database health check failed");
-            "down"
         }
     }
 }
 
-async fn check_redis(state: &AppState) -> &'static str {
-    let mut connection = match state.redis.get_multiplexed_async_connection().await {
+async fn check_redis(state: &AppState) {
+    let connection = state.redis.get_multiplexed_async_connection().await;
+
+    let mut connection = match connection {
         Ok(connection) => connection,
         Err(error) => {
             tracing::error!(%error, "redis health check failed");
-            return "down";
+            return;
         }
     };
 
-    match redis::cmd("PING")
+    if let Err(error) = redis::cmd("PING")
         .query_async::<String>(&mut connection)
         .await
     {
-        Ok(_) => "up",
-        Err(error) => {
-            tracing::error!(%error, "redis health check failed");
-            "down"
-        }
+        tracing::error!(%error, "redis health check failed");
     }
 }

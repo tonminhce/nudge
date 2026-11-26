@@ -1,8 +1,12 @@
 pub mod health;
 
+use axum::extract::OriginalUri;
+use axum::http::{Method, StatusCode};
 use axum::middleware;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
+use axum::{Json, Router};
+use serde_json::json;
 
 use crate::auth;
 use crate::state::AppState;
@@ -17,5 +21,18 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             auth::csrf::cookie_session_csrf,
         ))
+        .fallback(not_found_fallback)
         .with_state(state)
+}
+
+async fn not_found_fallback(method: Method, OriginalUri(uri): OriginalUri) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({
+            "message": format!("Cannot {} {}", method, uri.path()),
+            "error": "Not Found",
+            "statusCode": 404,
+        })),
+    )
+        .into_response()
 }
