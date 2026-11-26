@@ -46,8 +46,10 @@ R-002 (verify auth behaviour against upstream, never guess).
     (`_accessGroupIds`, `_isPrivate` + the two derived indexes), preallocated ids so
     search-field rows insert first against the deferrable core FKs; seeded from
     `/auth/workspace/activate` (idempotent, retryable). DB-gated parity test compares the
-    seeded workspace catalog against the live Node reference; `tools/metadata-parity.sh`
-    compares seeded metadata content (all five tables, zero-diff on the reference).
+    seeded workspace catalog against the live Node reference (ordered attnum column vectors —
+    see the physical-parity bullet below); `tools/metadata-parity.sh` compares seeded metadata
+    content keyed by universal identifier (field/option/index/search-field zero-diff; the
+    objectMetadata residual is the `targetTableName` value owned by `wave3/u10`).
   - U7 physical parity: the generator orders each object's fields by the attnum of the field's
     first physical column in `baseline/workspace-schema-2.61.0.sql` (not by name), and
     `object_create_action` carries a per-table `column_plan` that `apply_object_create` uses to
@@ -160,13 +162,17 @@ on the subdomain origin and activates). Do not re-run it against the already-see
 - U4 `column_defs` + `tsvector` — per-type columns; person tsvector expression byte-equal.
 - U5 actions + builders + aggregate + order — pure ordering/relation-pairing tests.
 - U6 runner transaction loop — one run creates object+field; failure rolls back rows AND DDL.
-- U7 standard-object registry + activation seeding — `pg_dump --schema-only` of a workspace
-  schema equal to a live 2.61.0 reference workspace (the primary equivalence gate). The literal
-  gate ran: a real activated workspace dumped inside `infra-db-1` and normalized against
-  `baseline/workspace-schema-2.61.0.sql` via `tools/dump-normalize.py` (normalizes the schema
-  name, the per-workspace random `objectMetadata` id in the enrichment-index names, and CREATE
-  TABLE column heap order) reports 434 vs 434 statements, 0 differences; the total-order sort
-  proves every table's column set is byte-identical to the reference.
+- U7 standard-object registry + activation seeding — the workspace schema equals a live 2.61.0
+  reference workspace in BOTH physical column order and content (the primary equivalence gate).
+  The earlier claim that attnum order was a non-semantic "heap artifact" and that a sorted-set
+  comparison sufficed was WRONG (supervising audit 2026-11-27): upstream order is deterministic
+  and 36 of 39 seeded tables diverged from it. Fixed on `wave3/u7-attnum`: the generator reorders
+  each object's fields to the baseline attnum, object creates carry a `column_plan` the runner
+  applies before `CREATE TABLE`, and the DB-gated parity test now compares ordered attnum column
+  vectors (only the schema name and the proven per-workspace objectMetadata id suffixes in
+  enrichment-index names are normalized). `tools/prove-attnum-parity.sh` re-proves it live: 39/39
+  tables identical ordered columns. `tools/dump-normalize.py` remains for whole-statement
+  `pg_dump` diffs (its total-order sort hides order, which is why the attnum test supersedes it).
 
 ## Known gaps / deferred (documented, deliberate)
 - Live-reference row audit (U7 parity work, `tools/metadata-parity.sh`): seeded `fieldMetadata`
