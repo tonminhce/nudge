@@ -1439,13 +1439,9 @@ async fn apply_object_update(
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty());
     let label_identifier_field_id = match label_identifier_universal {
-        Some(identifier) => Some(resolve_field_id(
-            connection,
-            runtime,
-            identifier,
-            &PreallocatedIds::default(),
-        )
-        .await?),
+        Some(identifier) => Some(
+            resolve_field_id(connection, runtime, identifier, &PreallocatedIds::default()).await?,
+        ),
         None => None,
     };
 
@@ -1455,13 +1451,9 @@ async fn apply_object_update(
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty());
     let image_identifier_field_id = match image_identifier_universal {
-        Some(identifier) => Some(resolve_field_id(
-            connection,
-            runtime,
-            identifier,
-            &PreallocatedIds::default(),
-        )
-        .await?),
+        Some(identifier) => Some(
+            resolve_field_id(connection, runtime, identifier, &PreallocatedIds::default()).await?,
+        ),
         None => None,
     };
 
