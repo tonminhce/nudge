@@ -89,6 +89,15 @@ workspace-lifecycle uses `http://localhost:3000`, so start the server with
 `SERVER_URL=http://localhost:3000` and hit it on `127.0.0.1:3000` — the CSRF check allows both
 (the request base origin plus the derived allowlist) and the check is origin-strict by design.
 
+## Production deployment verification (re-run after wave 3)
+`docker build -f rust/infra/Dockerfile -t nudge-server:u7 .` from the repo root produces a
+170MB release image; booted against a fresh scratch DB it migrates `core` on startup, serves
+`/healthz` in the Terminus shape within ~2s, and a `POST /auth/sign-up` followed by activation
+seeds the 37 standard objects / 636 fields / workspace schema + enrichment indexes (verified by
+row counts in the scratch DB, then dropped). `rust/infra/docker-compose.prod.yml` wires the same
+image to the bundled Postgres/Redis services. CI runs all three jobs green on every push
+(fmt/clippy/unit, the database-gated suites against a service Postgres, and both e2e modes).
+
 ## Comparing against the live Node reference
 The reference container `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001, database
 `twenty_ref`) runs the REAL product. Seed one workspace with `python3 -I /tmp/seed-ref.py`

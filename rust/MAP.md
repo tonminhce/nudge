@@ -231,7 +231,7 @@ Units U3 and U5.
   `compute_search_vector_rebuild_target_universal_identifiers` (renames, creates, deletes and
   search-field changes feed the rebuild set).
 - `metadata/error.rs`: upstream-compatible metadata error codes.
-- Verification: 36 new tests; the combined tree is 272 unit tests plus the 297-check e2e.
+- Verification: 36 new tests; the combined tree is 312 unit tests plus the 297-check e2e.
 
 ### Wave 3 units landed
 - U6 `workspace_migrations/runner.rs`: one transaction, `SET LOCAL lock_timeout`, guards,
