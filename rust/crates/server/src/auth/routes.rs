@@ -24,6 +24,10 @@ pub fn router() -> Router<AppState> {
         .route("/auth/token", post(renew_token))
         .route("/auth/sign-out", post(sign_out))
         .route("/auth/me", get(me))
+        .route("/auth/roles", get(roles))
+        .route("/auth/api-keys", post(create_api_key))
+        .route("/auth/api-keys/token", post(api_key_token))
+        .route("/auth/api-keys/revoke", post(revoke_api_key))
 }
 
 fn response_with_cookies(
@@ -174,6 +178,79 @@ async fn sign_out(
         json!({ "success": true }),
         cookies,
     ))
+}
+
+async fn roles(
+    State(state): State<AppState>,
+    context: AuthContext,
+) -> AuthResult<Json<serde_json::Value>> {
+    let workspace_id = super::api_keys::workspace_id_from(&context)?;
+
+    let roles = super::api_keys::roles_json(&state, workspace_id).await?;
+
+    Ok(Json(roles))
+}
+
+async fn create_api_key(
+    State(state): State<AppState>,
+    context: AuthContext,
+    Json(input): Json<super::api_keys::CreateApiKeyInput>,
+) -> AuthResult<(StatusCode, Json<serde_json::Value>)> {
+    let workspace_id = super::api_keys::workspace_id_from(&context)?;
+
+    let created = super::api_keys::create_api_key(&state, workspace_id, input).await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "apiKey": {
+                "id": created.id,
+                "name": created.name,
+                "expiresAt": created.expires_at.to_rfc3339(),
+            },
+        })),
+    ))
+}
+
+async fn api_key_token(
+    State(state): State<AppState>,
+    context: AuthContext,
+    Json(input): Json<super::api_keys::ApiKeyTokenInput>,
+) -> AuthResult<Json<serde_json::Value>> {
+    let workspace_id = super::api_keys::workspace_id_from(&context)?;
+
+    let token = super::api_keys::generate_api_key_token(
+        &state,
+        workspace_id,
+        input.api_key_id,
+        match &input.expires_at {
+            Some(raw) => Some(
+                chrono::DateTime::parse_from_rfc3339(raw)
+                    .map_err(|_| {
+                        super::error::AuthError::invalid_input("expiresAt must be an ISO 8601 date")
+                    })?
+                    .with_timezone(&chrono::Utc),
+            ),
+            None => None,
+        },
+    )
+    .await?;
+
+    Ok(Json(json!({ "token": token })))
+}
+
+async fn revoke_api_key(
+    State(state): State<AppState>,
+    context: AuthContext,
+    Json(input): Json<super::api_keys::RevokeApiKeyInput>,
+) -> AuthResult<Json<serde_json::Value>> {
+    let workspace_id = super::api_keys::workspace_id_from(&context)?;
+
+    let revoked = super::api_keys::revoke_api_key(&state, workspace_id, input.id).await?;
+
+    Ok(Json(json!({
+        "apiKey": super::api_keys::api_key_json(&revoked),
+    })))
 }
 
 async fn me(

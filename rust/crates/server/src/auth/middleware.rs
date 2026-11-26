@@ -113,7 +113,18 @@ impl FromRequestParts<AppState> for AuthContext {
 
             let payload = state.jwt.verify(token).await?;
 
-            return parse_payload(&payload);
+            let context = parse_payload(&payload)?;
+
+            if context.token_type == TokenType::ApiKey {
+                super::api_keys::validate_api_key_for_auth(
+                    state,
+                    context.workspace_id,
+                    context.api_key_id,
+                )
+                .await?;
+            }
+
+            return Ok(context);
         }
 
         if header.is_some() {

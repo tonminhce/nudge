@@ -15,7 +15,7 @@ BODY=""
 
 post() {
   local response
-  response="$(curl -s -w $'\n%{http_code}' -X POST "$BASE$1" \
+  response="$(curl -s -w $'\n%{http_code}' -X POST "$BASE$1" "${@:3}" \
     -H 'content-type: application/json' -d "$2")"
   STATUS="${response##*$'\n'}"
   BODY="${response%$'\n'*}"
@@ -223,6 +223,73 @@ get_cookie_flow /auth/me -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SE
 check "signed out session rejected" 401 "$STATUS"
 
 rm -f "$HDRS"
+
+plus_one_year="$(date -u -v+1y "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+1 year" "+%Y-%m-%dT%H:%M:%SZ")"
+
+get /auth/roles -H "authorization: Bearer $ACCESS_TOKEN"
+check "roles listed" 200 "$STATUS"
+ADMIN_ROLE_ID="$(printf '%s' "$BODY" | grep -o '{"id":"[^"]*","label":"Admin"' | cut -d'"' -f4)"
+check_value "  admin role found" "$([ -n "$ADMIN_ROLE_ID" ] && echo 1 || echo 0)"
+
+post /auth/api-keys "{\"name\":\"e2e key\",\"expiresAt\":\"$plus_one_year\",\"roleId\":\"$ADMIN_ROLE_ID\"}" \
+  -H "authorization: Bearer $ACCESS_TOKEN"
+check "api key created" 201 "$STATUS"
+API_KEY_ID="$(printf '%s' "$BODY" | grep -o '"apiKey":{"id":"[^"]*"' | cut -d'"' -f6)"
+check_value "  key id present" "$([ -n "$API_KEY_ID" ] && echo 1 || echo 0)"
+
+post /auth/api-keys/token "{\"apiKeyId\":\"$API_KEY_ID\"}" -H "authorization: Bearer $ACCESS_TOKEN"
+check "api key token minted" 200 "$STATUS"
+API_KEY_TOKEN="$(extract token)"
+check_value "  token present" "$([ -n "$API_KEY_TOKEN" ] && echo 1 || echo 0)"
+
+get /auth/me -H "authorization: Bearer $API_KEY_TOKEN"
+check "me rejects api key context" 401 "$STATUS"
+
+get /auth/roles -H "authorization: Bearer $API_KEY_TOKEN"
+check "roles with api key token" 200 "$STATUS"
+
+post /auth/api-keys/revoke "{\"id\":\"$API_KEY_ID\"}" -H "authorization: Bearer $ACCESS_TOKEN"
+check "api key revoked" 200 "$STATUS"
+check_value "  revokedAt set" "$(printf '%s' "$BODY" | grep -c '"revokedAt":"[^n]')"
+
+get /auth/roles -H "authorization: Bearer $API_KEY_TOKEN"
+check "revoked api key rejected" 403 "$STATUS"
+check_value "  revoked message" "$(printf '%s' "$BODY" | grep -c 'This API Key is revoked')"
+
+post /auth/api-keys "{\"name\":\"expired key\",\"expiresAt\":\"2020-01-01T00:00:00Z\",\"roleId\":\"$ADMIN_ROLE_ID\"}" \
+  -H "authorization: Bearer $ACCESS_TOKEN"
+check "expired key created" 201 "$STATUS"
+EXPIRED_KEY_ID="$(printf '%s' "$BODY" | grep -o '"apiKey":{"id":"[^"]*"' | cut -d'"' -f6)"
+
+post /auth/api-keys/token "{\"apiKeyId\":\"$EXPIRED_KEY_ID\"}" -H "authorization: Bearer $ACCESS_TOKEN"
+check "minting for expired key rejected" 403 "$STATUS"
+check_value "  expired message" "$(printf '%s' "$BODY" | grep -c 'This API Key has expired')"
+
+in_two_seconds="$(date -u -v+2S "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+2 seconds" "+%Y-%m-%dT%H:%M:%SZ")"
+post /auth/api-keys "{\"name\":\"short lived key\",\"expiresAt\":\"$in_two_seconds\",\"roleId\":\"$ADMIN_ROLE_ID\"}" \
+  -H "authorization: Bearer $ACCESS_TOKEN"
+check "short lived key created" 201 "$STATUS"
+SHORT_KEY_ID="$(printf '%s' "$BODY" | grep -o '"apiKey":{"id":"[^"]*"' | cut -d'"' -f6)"
+
+post /auth/api-keys/token "{\"apiKeyId\":\"$SHORT_KEY_ID\"}" -H "authorization: Bearer $ACCESS_TOKEN"
+check "short lived token minted" 200 "$STATUS"
+SHORT_TOKEN="$(extract token)"
+
+get /auth/roles -H "authorization: Bearer $SHORT_TOKEN"
+check "short lived token works" 200 "$STATUS"
+
+sleep 3
+
+get /auth/roles -H "authorization: Bearer $SHORT_TOKEN"
+check "expired api key rejected" 403 "$STATUS"
+check_value "  expired message" "$(printf '%s' "$BODY" | grep -c 'This API Key is expired')"
+
+post /auth/api-keys "{\"name\":\"bad role key\",\"expiresAt\":\"$plus_one_year\",\"roleId\":\"$(uuidgen)\"}" \
+  -H "authorization: Bearer $ACCESS_TOKEN"
+check "api key with unknown role rejected" 400 "$STATUS"
+
+post /auth/api-keys "{\"name\":\"e2e key\",\"expiresAt\":\"$plus_one_year\",\"roleId\":\"$ADMIN_ROLE_ID\"}"
+check "api key creation needs auth" 401 "$STATUS"
 
 printf '\n%d checks, %d failures\n' "$results" "$failures"
 
