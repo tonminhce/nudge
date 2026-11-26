@@ -100,9 +100,12 @@ image to the bundled Postgres/Redis services. CI runs all three jobs green on ev
 
 ## Comparing against the live Node reference
 The reference container `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001, database
-`twenty_ref`) runs the REAL product. Seed one workspace with `python3 -I /tmp/seed-ref.py`
-(recreate the container per MAP.md's toolchain section first if it was removed; sign-up is
-gated once a workspace exists in single-workspace mode — the first user is the admin).
+`twenty_ref`) runs the REAL product. Seed a FRESH container's first workspace with
+`python3 -I rust/tools/seed-reference.py [outdir]` (writes `ws-id.txt` + `ref-access.txt`; it
+signs up, creates the `refhq` workspace through `signUpInNewWorkspace`, exchanges the login token
+on the subdomain origin and activates). Do not re-run it against the already-seeded `twenty_ref`
+— single-workspace mode gates further workspace creation, and the parity gates depend on that
+`refhq` workspace existing.
 - `python3 -I tools/parity-compare.py` — same request set against both servers, normalized
   and diffed. Current scoreboard: `/healthz` (Terminus shape) and the NestJS fallback 404
   body match; `/graphql` + `/metadata` answers are the wave 4 gap; the SPA catch-all is the

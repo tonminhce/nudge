@@ -17,7 +17,7 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 - Reference SERVER `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001, database `twenty_ref`)
   is RUNNING with a seeded, activated workspace `00162a10` (schema `workspace_6n57znb4w89f8r7xudebmf0`,
   39 tables). Recreate procedure: drop/create `twenty_ref`, run the container with the env from
-  HANDOFF.md, wait for healthz, then `python3 -I /tmp/seed-ref.py` (sign-up →
+  HANDOFF.md, wait for healthz, then `python3 -I rust/tools/seed-reference.py` (sign-up →
   signUpInNewWorkspace → login-token exchange with the subdomain origin `http://refhq.localhost:3001`
   → activateWorkspace). Sign-up is gated once a workspace exists in single-workspace mode; the
   first user is the server admin.
