@@ -244,6 +244,14 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
 
     transaction.commit().await?;
 
+    if let Err(error) = crate::standard_objects::seed_standard_objects(state, workspace_id).await {
+        tracing::error!(
+            workspace_id = %workspace_id,
+            error = %error.message,
+            "standard object seeding failed during sign-up; workspace needs activation retry"
+        );
+    }
+
     let issued =
         tokens::issue_token_pair(state, user_id.0, workspace_id, AuthProvider::Password).await?;
 
