@@ -21,8 +21,8 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 |------|---------|-------|
 | 0 | Grilling, ADRs, research (data model, API, auth, workers, UI) | **done** — 5 research docs in `research/` |
 | 1 | Server foundation: config, Postgres/Redis, core-schema migrations, health | **done** — schema parity verified against the live 2.61.0 reference |
-| 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **in progress** — passwords, ES256 signing, login tokens, refresh rotation done; SSO, 2FA enrolment, API keys, sessions pending |
-| 3 | Metadata engine: standard objects seeding, workspace schema creation | open |
+| 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **done** — passwords, tokens, sessions, CSRF, API keys, 2FA, invitations, email verification, password reset, workspace lifecycle, impersonation, SSO (SAML signature verification flag-gated, ADR-013); permission *enforcement* moves to wave 4 with the query runner |
+| 3 | Metadata engine: standard objects seeding, workspace schema creation | open — plan in `research/workspace-migrations.md` (units U1-U10) |
 | 4 | Workspace GraphQL (dynamic schema) + REST + query runner (filter/sort/paginate/groupBy/aggregate) | open |
 | 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open |
 | 6 | Webhooks, files, email (SMTP), search, import/export, timeline, favorites, notes/tasks | open |

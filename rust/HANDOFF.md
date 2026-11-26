@@ -4,27 +4,38 @@ Written for the next AI session. Read this, then MAP.md, then RULES.md before to
 
 ## MANDATORY: work through rust-anything
 The next session MUST load the `rust-anything` skill and continue the whole-app flow it defines
-(`whole-app.md`): claim a unit in MAP.md, follow its steps per unit (bridge/record where they
-apply, and for the app as a whole `app record` -> `app front-door` -> port -> `app wire` ->
-`app replay` -> `app lift`). Never mark a unit done without its gate passing. Read `RULES.md`
-first; obey R-001 (no comments in code) everywhere.
+(`whole-app.md`): claim a unit in MAP.md, follow its steps per unit, and never mark a unit done
+without its gate passing. Read `RULES.md` first; obey R-001 (no comments in code) everywhere and
+R-002 (verify auth behaviour against upstream, never guess).
 
 ## Status after this session (2026-11-26)
-- Wave 0 done: five research documents in `research/` (data model, GraphQL/REST, auth,
-  workers/workflows, front-end inventory).
-- Wave 1 done and verified: the Rust server boots, migrates the `core` schema, and
-  `tools/verify-core-schema.sh` proves schema parity with the live reference
-  (columns 1207/1207, enums 57/57, indexes 368/368, constraints 389/389, functions 390/390).
-- Wave 2 in progress: passwords, ES256 signing, the `enc:v2:` envelope, sign-up, the two-step
-  sign-in, refresh rotation, the bearer dispatch, session cookies, the CSRF origin check, the
-  session cache with idle touch, superseded-session replacement, the renewal bridge and the
-  daily cleanup cron are done and verified (34 unit tests, 48 end-to-end checks in both grace
-  modes). SSO, 2FA enrolment, API keys, impersonation, invitations and the permission checks
-  remain.
-- **Next unit: API keys** (`core.apiKey`, JWT `type=API_KEY` with `sub` = workspace id and
-  `jti` = key id, exactly one role through `core.roleTarget`), then 2FA, invitations, SSO,
-  impersonation, permissions. Then wave 3 (workspace schemas + standard objects), wave 4
-  (GraphQL + REST), wave 5 (Leptos UI + Tauri).
+- Wave 0 done: research documents in `research/` (data model, GraphQL/REST, auth,
+  workers/workflows, front-end inventory, workspace migrations).
+- Wave 1 done and verified: server boots, migrates the `core` schema,
+  `tools/verify-core-schema.sh` proves parity with the live reference.
+- **Wave 2 done** and verified end to end (297 e2e checks, 0 failures, in both refresh-grace
+  modes; 130 unit tests):
+  - password auth, ES256 signing with rotating keys, the `enc:v2:` envelope, the two-step
+    sign-in, refresh rotation with the reuse grace, bearer dispatch (`auth/` core files);
+  - session cookies: `sess_` tokens, sha256 storage, opt-in + navigation access, CSRF origin
+    middleware (fail closed), Redis session cache with idle touch, superseded replacement,
+    renewal bridge, impersonator parking, daily 03:00 cleanup (`session.rs`, `csrf.rs`);
+  - API keys with roleTargets and live revocation checks (`api_keys.rs`);
+  - 2FA: otplib-exact TOTP (Node cross-checked vectors), workspace-scoped secret envelopes,
+    OTP replay guard, backup codes, admin recovery codes, login token consumed only after the
+    OTP passes (`two_factor.rs`);
+  - email verification, password reset (3/15 min throttle) and workspace invitations with
+    upstream per-type storage rules (`account_tokens.rs`);
+  - second-workspace creation + activation with per-workspace role seeding, impersonation
+    start/exchange/stop with cookie parking and restore (`workspace_lifecycle.rs`);
+  - the first user receives `canImpersonate` + `canAccessFullAdminPanel`
+    (`shouldGrantServerAdmin`, in `service.rs`);
+  - SSO: Google/Microsoft OAuth, OIDC PKCE S256 with real RS256 JWKS verification, SAML flows
+    with signature verification flag-gated off (ADR-013) (`sso.rs` + `sso/`);
+  - CI (fmt, clippy, tests, e2e against Postgres/Redis services in both grace modes), the
+    production Dockerfile and `docker-compose.prod.yml` (image build + healthz smoke tested).
+- **Next: wave 3**, the metadata engine. The full plan with citations is
+  `research/workspace-migrations.md`: units U1-U10, critical path U1 → U2 → U4 → U6 → U7.
 
 ## How to run everything
 ```
@@ -36,88 +47,68 @@ export APP_SECRET=dev-secret-change-me
 cargo run -p nudge-server                                      # http://127.0.0.1:3000
 curl http://127.0.0.1:3000/healthz
 ```
-Reference database `nudge_ref` (migrated 2.61.0 schema, dumped into `rust/baseline/`).
-The reference container `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001) is stopped;
-recreate it only if a fresh dump is needed:
-```
-docker run -d --name twenty-ref --network infra_default -p 3001:3001 \
-  -e NODE_PORT=3001 \
-  -e PG_DATABASE_URL="postgres://postgres:postgres@infra-db-1:5432/twenty_ref" \
-  -e REDIS_URL="redis://infra-redis-1:6379/1" -e REDIS_CACHE_PREFIX=twentyref \
-  -e SERVER_URL="http://localhost:3001" -e FRONTEND_URL="http://localhost:3001" \
-  -e PUBLIC_DOMAIN_URL="http://localhost:3001" \
-  -e SERVER_ID="8f7d1e2c-3b4a-4c5d-9e6f-7a8b9c0d1e2f" \
-  -e APP_SECRET="reference-only-secret-not-a-real-credential" \
-  -e DISABLE_CRON_JOBS_REGISTRATION=true -e EMAIL_DRIVER=LOGGER -e STORAGE_TYPE=LOCAL \
-  twentycrm/twenty:v2.61.0
-```
+If ports 5432/6379 are taken by another stack, run the compose with a port override file
+(`ports: !override ["5433:5432"]`) and point the env vars at those ports.
 
-## Regenerating the core baseline (only if Twenty is re-pinned to a new version)
+## How to run the tests
 ```
-docker exec infra-db-1 pg_dump -U postgres -d nudge_ref --schema-only --schema=core \
-  --no-owner --no-privileges > rust/baseline/core-2.61.0.sql
-rust/tools/extract-core-baseline.sh
-cd rust && docker exec infra-db-1 psql -U postgres -d default \
-  -c "DROP SCHEMA IF EXISTS core CASCADE; DROP TABLE IF EXISTS public._sqlx_migrations;" \
-  && cargo run -p nudge-server
-rust/tools/verify-core-schema.sh
+cd rust && cargo test                                          # 130 unit tests
+cargo run -p nudge-server &                                    # the server on :3000
+rust/tools/auth-e2e.sh                                         # 297 end-to-end checks
+EXPECT_ROTATED_REUSE=401 rust/tools/auth-e2e.sh                # against REFRESH_TOKEN_REUSE_GRACE_PERIOD=0s
 ```
+The script sources every `tools/e2e/*.inc.sh` fragment after the core checks. The cookie and
+impersonation fragments hardcode `origin: http://127.0.0.1:3000`, so run the server on port
+3000 (the CSRF origin check is origin-strict by design).
 
 ## Hard rules (see RULES.md)
 - R-001: no comments in code (Rust, SQL, shell). Prose goes in the .md docs instead.
 - Migrations are append-only once they have run; never rewrite one, add a new file.
 - Keep every env var name identical to the Node server's (`research/auth-permissions.md` section 4).
 
-## Wave 2 (auth) reading list
-1. `research/auth-permissions.md` in full; section 6 is the bit-compatibility checklist
-   (bcrypt cost 10, ES256 P-256 with rotating `core.signingKey`, legacy HS256
-   `sha256(APP_SECRET‖body‖type)`, `enc:v2:` AES-256-GCM + HKDF envelopes, token shapes,
-   invitation tokens stored verbatim in `core.appToken.value`).
-2. `research/graphql-rest-api.md` section 1 for the `/auth` routes and middleware order.
-3. Already done: sign-up, sign-in through the single-use login token, refresh rotation under a
-   shared advisory lock, the bearer auth context dispatch. In `crates/server/src/auth/`.
+## Wave 3 (metadata engine) reading list
+1. `research/workspace-migrations.md` in full — the action model, the builder pipeline, the
+   runner transaction, the metadata-to-DDL rules (column types, composite flattening, enum
+   lifecycle, relation FKs, deterministic index names, searchVector), standard object seeding,
+   and the metadata API validation.
+2. `research/data-model.md` for the physical schema contract.
+3. The baseline dump `baseline/core-2.61.0.sql` for the metadata tables
+   (`object`, `field`, `index`, `deferredWorkspaceOperation`, ...).
 
-## Next steps (rest of wave 2, auth)
-1. API keys: `core.apiKey` has no token column; the key is a JWT with `type=API_KEY`, `sub` the
-   workspace id and `jti` the api key id; a key has exactly one role through `core.roleTarget`.
-2. 2FA: TOTP (sha1, 6 digits, 30 s step, window 1), backup and recovery codes, enrolment and the
-   OTP step in the login exchange.
-3. Invitations, email verification and password reset tokens (password change revokes all
-   sessions with reason `PASSWORD_CHANGED`).
-4. Impersonation (server and workspace level, the impersonator cookie parking).
-5. Workspace creation without a sign-up.
-6. SSO: Google, Microsoft, OIDC (PKCE S256) and SAML, each with its own callback route.
-7. The permission checks in the query runner: roles, object and field permissions, row level
-   predicates.
+## Wave 3 units (from the research doc, each independently verifiable)
+- U1 `metadata::names` + `ids` — pure naming/hash functions with golden vectors.
+- U2 `workspace_migrations::ddl` primitives — emitted SQL byte-equal to upstream strings.
+- U3 `metadata::flat` + cache — flat maps loaded from the migrated `core` schema.
+- U4 `column_defs` + `tsvector` — per-type columns; person tsvector expression byte-equal.
+- U5 actions + builders + aggregate + order — pure ordering/relation-pairing tests.
+- U6 runner transaction loop — one run creates object+field; failure rolls back rows AND DDL.
+- U7 standard-object registry + activation seeding — `pg_dump` of a workspace schema equal to
+  a live 2.61.0 reference workspace (the primary equivalence gate).
 
-Session cookie facts (done, in `crates/server/src/auth/session.rs` and `csrf.rs`): the cookie is
-read and written only when the `x-twenty-session-cookie` opt-in header is present or
-`Sec-Fetch-Mode: navigate`; unsafe methods with a session cookie require an allowed `Origin`
-(fail closed, `CSRF_ORIGIN_MISMATCH`); a `sess_` token as a Bearer token is rejected; the
-absolute lifetime is `SESSION_ABSOLUTE_LIFETIME` (180 d), the idle timeout `SESSION_IDLE_TIMEOUT`
-(30 d), touched at most every `min(5 min, idle/2)`; the Redis cache key is
-`engine:auth-session:<sha256hex>` with a 60 s TTL.
-
-## How to run the auth tests
-```
-cd rust && cargo test                                   # unit tests, including the Node signed JWT vectors
-cargo run -p nudge-server &                            # the server on :3000
-rust/tools/auth-e2e.sh                                 # 48 end-to-end checks
-EXPECT_ROTATED_REUSE=401 rust/tools/auth-e2e.sh        # same, against a server with
-                                                         # REFRESH_TOKEN_REUSE_GRACE_PERIOD=0s
-```
+## Known gaps / deferred (documented, deliberate)
+- SAML signature verification: callback returns 403 `SSO_AUTH_FAILED` unless
+  `AUTH_SAML_ACCEPT_UNVERIFIED_ASSERTIONS=true` (ADR-013). No sound pure-Rust path; revisit
+  samael+xmlsec1 or contribute exclusive c14n upstream.
+- OIDC verifies RS256 only; other advertised algorithms fail closed (ADR-012).
+- SSO billing entitlement gate awaits the billing module (wave 7).
+- Email delivery is LOGGER-only (`tracing::info`), SMTP lands in wave 6.
+- Rate limiting beyond the upstream-specific throttles lands in wave 6.
+- Workspace-level impersonation needs the IMPERSONATE permission flag, which lands with the
+  query runner enforcement (wave 4).
 
 ## Known traps
 - A failed sqlx migration is recorded and blocks reruns while developing; reset with
   `DROP SCHEMA core CASCADE; DROP TABLE public._sqlx_migrations;` (dev databases only).
-- `pg_get_constraintdef` output does not round-trip; the baseline migration carries the original
-  source SQL for `CHK_CMD_MENU_ITEM_ENGINE_KEY_COHERENCE` via a fixup file. If regenerating the
-  baseline, keep `tools/fixups/` in sync.
-- Do not run `docker rm -f` on containers you did not create; the permission system blocks it.
+- `pg_get_constraintdef` output does not round-trip; keep `tools/fixups/` in sync if the
+  baseline is regenerated.
+- Do not run `docker rm -f` on containers you did not create.
+- The e2e fragments require the server on port 3000 (origin-strict CSRF).
 
 ## Git
-- Repo root: `C:\Users\tonminh123\Downloads\rust-crm`, remote `origin` = `https://github.com/tonminhce/nudge.git`.
-- `rust/target/` is git-ignored; `rust/baseline/` dumps are committed on purpose.
+- Repo root: this repository; remote `origin` = `https://github.com/tonminhce/nudge.git`.
+- `rust/target/` and `worktrees/` are git-ignored; `rust/baseline/` dumps are committed on
+  purpose. Parallel units are developed in git worktrees on `wave2/*`-style branches, then
+  merged one by one with the full gate and e2e re-run.
 
 ## Skill to load next
 `rust-anything` (this session's skill), then follow `whole-app.md` from the map.

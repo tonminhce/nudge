@@ -65,15 +65,15 @@ Roughly 3 of about 90 feature areas are done. The rest is the port.
 | Two step sign-in through a single use login token | **done** | 2 | |
 | Refresh rotation under the shared advisory lock | **done** | 2 | 1 minute reuse grace |
 | Bearer auth context dispatch | **done** | 2 | |
-| Workspace creation without a sign-up | todo | 2 | |
+| Workspace creation without a sign-up | **done** | 2 | `signUpInNewWorkspace` + `activateWorkspace` mirrors with per-workspace role seeding |
 | API keys | **done** | 2 | JWT `type=API_KEY` (`sub`=workspace, `jti`=key id), one roleTarget per key, DB re-check on every request (revoked/expired take effect immediately) |
 | Session cookies and the CSRF origin check | **done** | 2 | `sess_` tokens, `sha256` storage, opt-in header, origin allowlist, renewal bridge, daily cleanup |
-| Two factor authentication (TOTP, backup and recovery codes) | todo | 2 | |
-| SSO: Google, Microsoft, OIDC, SAML | todo | 2 | |
-| Impersonation (server and workspace level) | todo | 2 | |
-| Invitations | todo | 2 | tokens stored verbatim |
-| Email verification and password reset | todo | 2 | |
-| Role, object, field and row level permission enforcement | todo | 2 | 27 permission flags |
+| Two factor authentication (TOTP, backup and recovery codes) | **done** | 2 | otplib-exact TOTP, `enc:v2:` workspace-scoped secrets, OTP replay guard, backup codes, admin recovery codes, login-token consumed only after OTP |
+| SSO: Google, Microsoft, OIDC, SAML | **part** | 2 | Google/Microsoft OAuth + OIDC PKCE S256 with real RS256 JWKS verification done; SAML flows done but signature verification is flag-gated off (ADR-013, no sound Rust path yet); billing entitlement gate awaits the billing module |
+| Impersonation (server and workspace level) | **done** | 2 | start/exchange/stop, 1 d sessions, parked-cookie restore; workspace level gated on permission flags (flags land with the query runner) |
+| Invitations | **done** | 2 | verbatim tokens, resend rotation, upstream throttle set |
+| Email verification and password reset | **done** | 2 | hashed tokens, upstream error matrix, 3/15 min reset throttle, `PASSWORD_CHANGED` revocations |
+| Role, object, field and row level permission enforcement | todo | 2→4 | roles, roleTargets and flags seeded; enforcement lands with the query runner |
 
 ## D. Web interface (Leptos)
 
