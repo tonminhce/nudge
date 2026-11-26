@@ -1,6 +1,7 @@
 mod auth;
 mod db;
 mod metadata;
+pub mod query;
 mod routes;
 mod standard_objects;
 mod state;
