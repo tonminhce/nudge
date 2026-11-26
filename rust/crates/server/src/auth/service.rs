@@ -207,13 +207,24 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
     .execute(&mut *transaction)
     .await?;
 
+    let (should_grant_server_admin,): (bool,) = sqlx::query_as(
+        "SELECT NOT EXISTS( \
+             SELECT 1 FROM core.\"user\" WHERE \"canAccessFullAdminPanel\" IS TRUE \
+         )",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+
     let user_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO core.\"user\" (email, \"isEmailVerified\", \"passwordHash\", locale) \
-         VALUES ($1, true, $2, $3) RETURNING id",
+        "INSERT INTO core.\"user\" \
+         (email, \"isEmailVerified\", \"passwordHash\", locale, \
+          \"canImpersonate\", \"canAccessFullAdminPanel\") \
+         VALUES ($1, true, $2, $3, $4, $4) RETURNING id",
     )
     .bind(&email)
     .bind(&password_hash)
     .bind(&locale)
+    .bind(should_grant_server_admin)
     .fetch_one(&mut *transaction)
     .await?;
 
