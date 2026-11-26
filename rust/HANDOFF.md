@@ -130,8 +130,13 @@ gated once a workspace exists in single-workspace mode — the first user is the
 - U4 `column_defs` + `tsvector` — per-type columns; person tsvector expression byte-equal.
 - U5 actions + builders + aggregate + order — pure ordering/relation-pairing tests.
 - U6 runner transaction loop — one run creates object+field; failure rolls back rows AND DDL.
-- U7 standard-object registry + activation seeding — `pg_dump` of a workspace schema equal to
-  a live 2.61.0 reference workspace (the primary equivalence gate).
+- U7 standard-object registry + activation seeding — `pg_dump --schema-only` of a workspace
+  schema equal to a live 2.61.0 reference workspace (the primary equivalence gate). The literal
+  gate ran: a real activated workspace dumped inside `infra-db-1` and normalized against
+  `baseline/workspace-schema-2.61.0.sql` via `tools/dump-normalize.py` (normalizes the schema
+  name, the per-workspace random `objectMetadata` id in the enrichment-index names, and CREATE
+  TABLE column heap order) reports 434 vs 434 statements, 0 differences; the total-order sort
+  proves every table's column set is byte-identical to the reference.
 
 ## Known gaps / deferred (documented, deliberate)
 - Live-reference row audit (U7 parity work, `tools/metadata-parity.sh`): seeded `fieldMetadata`
