@@ -20,7 +20,7 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 |------|---------|-------|
 | 0 | Grilling, ADRs, research (data model, API, auth, workers, UI) | **done** — 5 research docs in `research/` |
 | 1 | Server foundation: config, Postgres/Redis, core-schema migrations, health | **done** — schema parity verified against the live 2.61.0 reference |
-| 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | open (next) |
+| 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **in progress** — passwords, ES256 signing, login tokens, refresh rotation done; SSO, 2FA enrolment, API keys, sessions pending |
 | 3 | Metadata engine: standard objects seeding, workspace schema creation | open |
 | 4 | Workspace GraphQL (dynamic schema) + REST + query runner (filter/sort/paginate/groupBy/aggregate) | open |
 | 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open |
@@ -59,6 +59,28 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 - Extensions must live in `public` (the pool sets `search_path = core, public`).
 - `core.workspace` <-> `core.application` form a cycle; the workspace FK is
   `DEFERRABLE INITIALLY DEFERRED`.
+- `sqlx::migrate!` creates `_sqlx_migrations` unqualified: with the pool's `search_path` set to
+  `core, public` the table lands in whichever schema exists first and a later start re-runs
+  applied migrations. Migrations run on a dedicated connection pinned to `search_path public`.
+- `core."twoFactorAuthenticationMethod"` is keyed by `userWorkspaceId`, not `userId`.
+- The legacy HS256 secret is `sha256(APP_SECRET ‖ body ‖ type)` with **no separator** between parts.
+- A rotated refresh token stays usable for `REFRESH_TOKEN_REUSE_GRACE_PERIOD` (1 minute).
+
+## Wave 2 progress (auth)
+Done and verified: the `enc:v2:` envelope (AES-256-GCM, HKDF-SHA256, key id from the first 8 hex
+of `sha256(rawKey)`), ES256 signing with a rotating `core.signingKey` (PKCS#8/SPKI PEM, `kid`
+header), the legacy HS256 verification path, bcrypt cost 10 with the `^.{8,50}$` policy, sign-up
+(workspace + Admin/Member roles with the fixed universal identifiers + workspace schema), the
+two-step sign-in through a single-use login token held in Redis, refresh rotation under a shared
+Postgres advisory lock, and the bearer auth context dispatch.
+
+Verification: 16 unit tests (including JWT vectors signed by Node, see
+`tools/generate-jwt-test-vectors.mjs`) and `tools/auth-e2e.sh` with 23 checks, passing both with
+the default 1 minute reuse grace and with it set to 0.
+
+Still to do in wave 2: SSO (Google, Microsoft, OIDC, SAML), 2FA enrolment and the OTP step,
+session cookies, API keys, the permission checks in the query runner, invitation flows and the
+email verification and password reset tokens.
 
 ## Open questions
 - None blocking wave 2.

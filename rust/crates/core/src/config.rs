@@ -38,6 +38,13 @@ pub struct Config {
     pub redis_url: String,
     pub redis_cache_prefix: String,
     pub app_secret: String,
+    pub encryption_key: Option<String>,
+    pub fallback_encryption_key: Option<String>,
+    pub access_token_expires_in_secs: u64,
+    pub refresh_token_expires_in_secs: u64,
+    pub login_token_expires_in_secs: u64,
+    pub workspace_agnostic_token_expires_in_secs: u64,
+    pub refresh_token_reuse_grace_period_secs: u64,
 }
 
 impl Config {
@@ -54,7 +61,45 @@ impl Config {
             redis_url: require("REDIS_URL")?,
             redis_cache_prefix: var_or("REDIS_CACHE_PREFIX", ""),
             app_secret: require("APP_SECRET")?,
+            encryption_key: var("ENCRYPTION_KEY"),
+            fallback_encryption_key: var("FALLBACK_ENCRYPTION_KEY"),
+            access_token_expires_in_secs: parse_duration_or("ACCESS_TOKEN_EXPIRES_IN", 30 * 60)?,
+            refresh_token_expires_in_secs: parse_duration_or(
+                "REFRESH_TOKEN_EXPIRES_IN",
+                60 * 24 * 60 * 60,
+            )?,
+            login_token_expires_in_secs: parse_duration_or("LOGIN_TOKEN_EXPIRES_IN", 15 * 60)?,
+            workspace_agnostic_token_expires_in_secs: parse_duration_or(
+                "WORKSPACE_AGNOSTIC_TOKEN_EXPIRES_IN",
+                30 * 60,
+            )?,
+            refresh_token_reuse_grace_period_secs: parse_duration_or(
+                "REFRESH_TOKEN_REUSE_GRACE_PERIOD",
+                60,
+            )?,
         })
+    }
+}
+
+pub fn parse_duration(raw: &str) -> Option<u64> {
+    let (digits, unit) = raw.split_at(raw.find(|c: char| !c.is_ascii_digit()).unwrap_or(raw.len()));
+
+    let value = digits.parse::<u64>().ok()?;
+    let multiplier = match unit {
+        "s" | "" => 1,
+        "m" => 60,
+        "h" => 60 * 60,
+        "d" => 24 * 60 * 60,
+        _ => return None,
+    };
+
+    value.checked_mul(multiplier)
+}
+
+fn parse_duration_or(key: &'static str, default_secs: u64) -> Result<u64> {
+    match var(key) {
+        Some(raw) => parse_duration(&raw).ok_or(Error::InvalidValue { key, value: raw }),
+        None => Ok(default_secs),
     }
 }
 
@@ -108,5 +153,16 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn durations_match_the_ms_package_formats_the_original_uses() {
+        assert_eq!(parse_duration("30m"), Some(30 * 60));
+        assert_eq!(parse_duration("60d"), Some(60 * 24 * 60 * 60));
+        assert_eq!(parse_duration("1h"), Some(3600));
+        assert_eq!(parse_duration("5m"), Some(300));
+        assert_eq!(parse_duration("900"), Some(900));
+        assert_eq!(parse_duration("1y"), None);
+        assert_eq!(parse_duration("m"), None);
     }
 }

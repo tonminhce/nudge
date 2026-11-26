@@ -7,3 +7,4 @@ rust/.local-storage/
 .DS_Store
 Thumbs.db
 analyze.json
+.idea/
