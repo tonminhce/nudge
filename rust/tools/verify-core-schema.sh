@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-reference_db="${REFERENCE_DB:-twenty_ref}"
+reference_db="${REFERENCE_DB:-nudge_ref}"
 target_db="${TARGET_DB:-default}"
 postgres_container="${POSTGRES_CONTAINER:-infra-db-1}"
 

@@ -1,4 +1,3 @@
-# Postgres + Redis for the Rust Twenty server.
 services:
   db:
     image: postgres:16

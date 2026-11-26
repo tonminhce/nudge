@@ -1,7 +1,7 @@
 [package]
-name = "twenty-core"
+name = "nudge-core"
 version = "0.1.0"
-description = "Shared primitives for the Rust port of Twenty CRM: configuration, errors and identifiers."
+description = "Shared primitives for the Nudge server: configuration, errors and identifiers."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

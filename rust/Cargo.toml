@@ -10,7 +10,7 @@ license = "AGPL-3.0"
 rust-version = "1.85"
 
 [workspace.dependencies]
-twenty-core = { path = "crates/core" }
+nudge-core = { path = "crates/core" }
 
 anyhow = "1"
 axum = { version = "0.8", features = ["macros"] }

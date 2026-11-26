@@ -25,11 +25,12 @@ cd rust
 export PG_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/default
 export REDIS_URL=redis://127.0.0.1:6379
 export APP_SECRET=dev-secret-change-me
-cargo run -p twenty-server                                     # http://127.0.0.1:3000
+cargo run -p nudge-server                                      # http://127.0.0.1:3000
 curl http://127.0.0.1:3000/healthz
 ```
-Reference instance (Twenty 2.61.0 Node server, user approved):
-container `twenty-ref` on port 3001, database `twenty_ref`, started with:
+Reference database `nudge_ref` (migrated 2.61.0 schema, dumped into `rust/baseline/`).
+The reference container `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001) is stopped;
+recreate it only if a fresh dump is needed:
 ```
 docker run -d --name twenty-ref --network infra_default -p 3001:3001 \
   -e NODE_PORT=3001 \
@@ -45,12 +46,12 @@ docker run -d --name twenty-ref --network infra_default -p 3001:3001 \
 
 ## Regenerating the core baseline (only if Twenty is re-pinned to a new version)
 ```
-docker exec infra-db-1 pg_dump -U postgres -d twenty_ref --schema-only --schema=core \
+docker exec infra-db-1 pg_dump -U postgres -d nudge_ref --schema-only --schema=core \
   --no-owner --no-privileges > rust/baseline/core-2.61.0.sql
 rust/tools/extract-core-baseline.sh
 cd rust && docker exec infra-db-1 psql -U postgres -d default \
   -c "DROP SCHEMA IF EXISTS core CASCADE; DROP TABLE IF EXISTS public._sqlx_migrations;" \
-  && cargo run -p twenty-server
+  && cargo run -p nudge-server
 rust/tools/verify-core-schema.sh
 ```
 

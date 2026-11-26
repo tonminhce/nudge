@@ -3,7 +3,7 @@ mod routes;
 mod state;
 
 use anyhow::Context;
-use twenty_core::Config;
+use nudge_core::Config;
 
 use crate::state::AppState;
 
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("binding {address}"))?;
 
-    tracing::info!(port = config.node_port, "twenty server listening");
+    tracing::info!(port = config.node_port, "nudge server listening");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

@@ -987,6 +987,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "nudge-core"
+version = "0.1.0"
+dependencies = [
+ "redis",
+ "sqlx",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "nudge-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "nudge-core",
+ "redis",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1980,33 +2007,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "twenty-core"
-version = "0.1.0"
-dependencies = [
- "redis",
- "sqlx",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "twenty-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "redis",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "twenty-core",
- "uuid",
 ]
 
 [[package]]

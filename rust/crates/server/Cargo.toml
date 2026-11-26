@@ -1,17 +1,17 @@
 [package]
-name = "twenty-server"
+name = "nudge-server"
 version = "0.1.0"
-description = "Rust server for the Twenty CRM port: GraphQL, REST and the metadata engine."
+description = "Nudge server: GraphQL, REST and the metadata engine."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "twenty-server"
+name = "nudge-server"
 path = "src/main.rs"
 
 [dependencies]
-twenty-core = { workspace = true }
+nudge-core = { workspace = true }
 
 anyhow = { workspace = true }
 axum = { workspace = true }

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use nudge_core::{Config, Result};
 use redis::Client;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use twenty_core::{Config, Result};
 
 #[derive(Clone)]
 pub struct AppState {

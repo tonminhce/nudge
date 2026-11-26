@@ -12,8 +12,8 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 - rustc/cargo 1.98.1 (msvc), wasm32-unknown-unknown added. Docker 29.8.2 present.
 - Not installed yet: `trunk`, `cargo-tauri`.
 - Postgres 16 + Redis 7 in Docker (`infra/docker-compose.yml`, network `infra_default`).
-- Twenty 2.61.0 reference running in Docker: container `twenty-ref`, port 3001, database `twenty_ref`,
-  image `twentycrm/twenty:v2.61.0` (user approved pulling and running it).
+- Reference database `nudge_ref` holds the migrated 2.61.0 schema; its container (`twenty-ref`,
+  image `twentycrm/twenty:v2.61.0`) is stopped now that the baseline dump is committed.
 
 ## Waves (each wave must build, pass tests, run end to end)
 | Wave | Content | State |
@@ -28,9 +28,9 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 | 7 | Workers/queues (own queue, not BullMQ — ADR-007), workflows, messaging + calendar sync, AI agents, MCP, billing | open |
 
 ## Wave 1 result (verified)
-- `crates/core` (`twenty-core`): config from the environment (Twenty's variable names), error type,
+- `crates/core` (`nudge-core`): config from the environment (upstream-compatible variable names), error type,
   `uuid_to_base36` / `workspace_schema_name`.
-- `crates/server` (`twenty-server`): axum app, `GET /healthz`, sqlx pool (`search_path = core, public`),
+- `crates/server` (`nudge-server`): axum app, `GET /healthz`, sqlx pool (`search_path = core, public`),
   Redis client, sqlx migrations for the `core` schema.
 - Migrations: `20260101000000_core_bootstrap.sql` (schemas, extensions, `public.unaccent_immutable`)
   and `20260101000100_core_baseline.sql`, generated from the `pg_dump` of the live reference by
