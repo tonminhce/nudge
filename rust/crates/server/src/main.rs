@@ -21,6 +21,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("running the core schema migrations")?;
 
+    tokio::spawn(crate::auth::session::cleanup_loop(state.clone()));
+
     let app = routes::router(state);
     let address = format!("0.0.0.0:{}", config.node_port);
     let listener = tokio::net::TcpListener::bind(&address)
@@ -29,10 +31,13 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(port = config.node_port, "nudge server listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("the http server stopped with an error")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("the http server stopped with an error")?;
 
     Ok(())
 }

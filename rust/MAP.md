@@ -73,15 +73,25 @@ of `sha256(rawKey)`), ES256 signing with a rotating `core.signingKey` (PKCS#8/SP
 header), the legacy HS256 verification path, bcrypt cost 10 with the `^.{8,50}$` policy, sign-up
 (workspace + Admin/Member roles with the fixed universal identifiers + workspace schema), the
 two-step sign-in through a single-use login token held in Redis, refresh rotation under a shared
-Postgres advisory lock, and the bearer auth context dispatch.
+Postgres advisory lock, the bearer auth context dispatch, and session cookies: `sess_` +
+base64url tokens stored as `sha256` hex in `core.userSession`, the
+`x-twenty-session-cookie` opt-in plus `Sec-Fetch-Mode: navigate` access rules, the
+`__Host-twenty-session` / `twenty-session` cookie pair with the upstream attribute set, the
+Redis session cache (60 s TTL) with the idle-touch logic, superseded-session replacement on
+sign-in, the renewal bridge reuse, the CSRF origin middleware (fail closed, `CSRF_ORIGIN_MISMATCH`),
+session-token-as-Bearer rejection, and the daily 03:00 cleanup of sessions and refresh tokens
+older than 30 days.
 
-Verification: 16 unit tests (including JWT vectors signed by Node, see
-`tools/generate-jwt-test-vectors.mjs`) and `tools/auth-e2e.sh` with 23 checks, passing both with
-the default 1 minute reuse grace and with it set to 0.
+Verification: 34 unit tests (JWT vectors signed by Node, cookie and origin rules, payload shapes,
+see `tools/generate-jwt-test-vectors.mjs`) and `tools/auth-e2e.sh` with 48 checks, passing both
+with the default 1 minute reuse grace and with it set to 0. The signed-out refresh token stays
+renewable inside the grace window, matching upstream
+(`is-revoked-refresh-token-still-renewable.util.ts`: a recorded reason blocks renewal, sign-out
+sets none).
 
 Still to do in wave 2: SSO (Google, Microsoft, OIDC, SAML), 2FA enrolment and the OTP step,
-session cookies, API keys, the permission checks in the query runner, invitation flows and the
-email verification and password reset tokens.
+API keys, the permission checks in the query runner, invitation flows and the email verification
+and password reset tokens, impersonation, and the workspace-creation-without-sign-up route.
 
 ## Open questions
 - None blocking wave 2.

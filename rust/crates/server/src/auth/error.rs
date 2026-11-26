@@ -52,6 +52,12 @@ impl AuthError {
     }
 }
 
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.messages.join(", "))
+    }
+}
+
 impl From<nudge_core::Error> for AuthError {
     fn from(error: nudge_core::Error) -> Self {
         tracing::error!(%error, "unexpected error");

@@ -98,18 +98,38 @@ impl FromRequestParts<AppState> for AuthContext {
         let header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| AuthError::unauthenticated("Missing authorization header"))?;
+            .and_then(|value| value.to_str().ok());
 
-        let token = header
-            .strip_prefix("Bearer ")
-            .filter(|token| !token.is_empty())
-            .ok_or_else(|| {
-                AuthError::unauthenticated("Authorization header must use the Bearer scheme")
-            })?;
+        let bearer_token = header
+            .and_then(|header| header.strip_prefix("Bearer "))
+            .filter(|token| !token.is_empty());
 
-        let payload = state.jwt.verify(token).await?;
+        if let Some(token) = bearer_token {
+            if token.starts_with(super::session::USER_SESSION_TOKEN_PREFIX) {
+                return Err(AuthError::unauthenticated(
+                    "Session tokens are only accepted from the session cookie",
+                ));
+            }
 
-        parse_payload(&payload)
+            let payload = state.jwt.verify(token).await?;
+
+            return parse_payload(&payload);
+        }
+
+        if header.is_some() {
+            return Err(AuthError::unauthenticated(
+                "Authorization header must use the Bearer scheme",
+            ));
+        }
+
+        if let Some(session_token) =
+            super::session::extract_session_token(&parts.headers, &state.config)
+        {
+            let resolved = super::session::resolve_session(state, &session_token).await?;
+
+            return parse_payload(&resolved.payload);
+        }
+
+        Err(AuthError::unauthenticated("Missing authorization header"))
     }
 }

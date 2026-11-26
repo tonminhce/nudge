@@ -113,6 +113,18 @@ impl JwtService {
         ))
     }
 
+    pub fn decode_payload(token: &str) -> Option<Value> {
+        let parts: Vec<&str> = token.split('.').collect();
+
+        if parts.len() != 3 {
+            return None;
+        }
+
+        let bytes = URL_SAFE_NO_PAD.decode(parts[1]).ok()?;
+
+        serde_json::from_slice(&bytes).ok()
+    }
+
     pub async fn verify(&self, token: &str) -> AuthResult<Value> {
         let (encoded_header, encoded_payload, encoded_signature) = split_token(token)?;
         let header: Value = decode_json(encoded_header)?;

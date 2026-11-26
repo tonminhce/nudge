@@ -16,9 +16,14 @@ first; obey R-001 (no comments in code) everywhere.
   `tools/verify-core-schema.sh` proves schema parity with the live reference
   (columns 1207/1207, enums 57/57, indexes 368/368, constraints 389/389, functions 390/390).
 - Wave 2 in progress: passwords, ES256 signing, the `enc:v2:` envelope, sign-up, the two-step
-  sign-in and refresh rotation are done and verified (16 unit tests, 23 end-to-end checks).
-  SSO, 2FA enrolment, session cookies, API keys and the permission checks remain.
-- **Next unit: the rest of wave 2**, then wave 3 (workspace schemas + standard objects), wave 4
+  sign-in, refresh rotation, the bearer dispatch, session cookies, the CSRF origin check, the
+  session cache with idle touch, superseded-session replacement, the renewal bridge and the
+  daily cleanup cron are done and verified (34 unit tests, 48 end-to-end checks in both grace
+  modes). SSO, 2FA enrolment, API keys, impersonation, invitations and the permission checks
+  remain.
+- **Next unit: API keys** (`core.apiKey`, JWT `type=API_KEY` with `sub` = workspace id and
+  `jti` = key id, exactly one role through `core.roleTarget`), then 2FA, invitations, SSO,
+  impersonation, permissions. Then wave 3 (workspace schemas + standard objects), wave 4
   (GraphQL + REST), wave 5 (Leptos UI + Tauri).
 
 ## How to run everything
@@ -73,22 +78,31 @@ rust/tools/verify-core-schema.sh
    shared advisory lock, the bearer auth context dispatch. In `crates/server/src/auth/`.
 
 ## Next steps (rest of wave 2, auth)
-1. Session cookies: `sess_` + base64url token stored as `sha256(token)` hex in `core.userSession`,
-   cookie `__Host-twenty-session` (https) or `twenty-session` (http), plus the CSRF origin check.
-2. API keys: `core.apiKey` has no token column; the key is a JWT with `type=API_KEY`, `sub` the
+1. API keys: `core.apiKey` has no token column; the key is a JWT with `type=API_KEY`, `sub` the
    workspace id and `jti` the api key id; a key has exactly one role through `core.roleTarget`.
-3. 2FA: TOTP (sha1, 6 digits, 30 s step, window 1), backup and recovery codes, enrolment and the
+2. 2FA: TOTP (sha1, 6 digits, 30 s step, window 1), backup and recovery codes, enrolment and the
    OTP step in the login exchange.
-4. SSO: Google, Microsoft, OIDC (PKCE S256) and SAML, each with its own callback route.
-5. The permission checks in the query runner: roles, object and field permissions, row level
+3. Invitations, email verification and password reset tokens (password change revokes all
+   sessions with reason `PASSWORD_CHANGED`).
+4. Impersonation (server and workspace level, the impersonator cookie parking).
+5. Workspace creation without a sign-up.
+6. SSO: Google, Microsoft, OIDC (PKCE S256) and SAML, each with its own callback route.
+7. The permission checks in the query runner: roles, object and field permissions, row level
    predicates.
-6. Invitations, email verification and password reset tokens.
+
+Session cookie facts (done, in `crates/server/src/auth/session.rs` and `csrf.rs`): the cookie is
+read and written only when the `x-twenty-session-cookie` opt-in header is present or
+`Sec-Fetch-Mode: navigate`; unsafe methods with a session cookie require an allowed `Origin`
+(fail closed, `CSRF_ORIGIN_MISMATCH`); a `sess_` token as a Bearer token is rejected; the
+absolute lifetime is `SESSION_ABSOLUTE_LIFETIME` (180 d), the idle timeout `SESSION_IDLE_TIMEOUT`
+(30 d), touched at most every `min(5 min, idle/2)`; the Redis cache key is
+`engine:auth-session:<sha256hex>` with a 60 s TTL.
 
 ## How to run the auth tests
 ```
 cd rust && cargo test                                   # unit tests, including the Node signed JWT vectors
 cargo run -p nudge-server &                            # the server on :3000
-rust/tools/auth-e2e.sh                                 # 23 end-to-end checks
+rust/tools/auth-e2e.sh                                 # 48 end-to-end checks
 EXPECT_ROTATED_REUSE=401 rust/tools/auth-e2e.sh        # same, against a server with
                                                          # REFRESH_TOKEN_REUSE_GRACE_PERIOD=0s
 ```

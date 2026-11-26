@@ -45,6 +45,12 @@ pub struct Config {
     pub login_token_expires_in_secs: u64,
     pub workspace_agnostic_token_expires_in_secs: u64,
     pub refresh_token_reuse_grace_period_secs: u64,
+    pub frontend_url: String,
+    pub auth_cookie_same_site: String,
+    pub auth_cookie_allowed_origins: String,
+    pub session_absolute_lifetime_secs: u64,
+    pub session_idle_timeout_secs: u64,
+    pub is_cloudflare_geolocation_enabled: bool,
 }
 
 impl Config {
@@ -77,7 +83,35 @@ impl Config {
                 "REFRESH_TOKEN_REUSE_GRACE_PERIOD",
                 60,
             )?,
+            frontend_url: var("FRONTEND_URL").unwrap_or_else(|| {
+                var("SERVER_URL").unwrap_or_else(|| "http://localhost:3000".to_string())
+            }),
+            auth_cookie_same_site: var_or("AUTH_COOKIE_SAME_SITE", "lax"),
+            auth_cookie_allowed_origins: var_or("AUTH_COOKIE_ALLOWED_ORIGINS", ""),
+            session_absolute_lifetime_secs: parse_duration_or(
+                "SESSION_ABSOLUTE_LIFETIME",
+                180 * 24 * 60 * 60,
+            )?,
+            session_idle_timeout_secs: parse_duration_or(
+                "SESSION_IDLE_TIMEOUT",
+                30 * 24 * 60 * 60,
+            )?,
+            is_cloudflare_geolocation_enabled: parse_bool_or(
+                "IS_CLOUDFLARE_GEOLOCATION_ENABLED",
+                false,
+            )?,
         })
+    }
+}
+
+fn parse_bool_or(key: &'static str, default: bool) -> Result<bool> {
+    match var(key) {
+        Some(raw) => match raw.as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            _ => Err(Error::InvalidValue { key, value: raw }),
+        },
+        None => Ok(default),
     }
 }
 

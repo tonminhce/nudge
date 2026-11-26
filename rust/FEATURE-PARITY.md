@@ -67,7 +67,7 @@ Roughly 3 of about 90 feature areas are done. The rest is the port.
 | Bearer auth context dispatch | **done** | 2 | |
 | Workspace creation without a sign-up | todo | 2 | |
 | API keys | todo | 2 | one role per key |
-| Session cookies and the CSRF origin check | todo | 2 | |
+| Session cookies and the CSRF origin check | **done** | 2 | `sess_` tokens, `sha256` storage, opt-in header, origin allowlist, renewal bridge, daily cleanup |
 | Two factor authentication (TOTP, backup and recovery codes) | todo | 2 | |
 | SSO: Google, Microsoft, OIDC, SAML | todo | 2 | |
 | Impersonation (server and workspace level) | todo | 2 | |

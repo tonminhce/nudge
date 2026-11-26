@@ -1,14 +1,18 @@
+use axum::extract::ConnectInfo;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::header::SET_COOKIE;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
 use serde_json::json;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 use super::error::AuthResult;
 use super::middleware::AuthContext;
-use super::service::{self, CredentialsInput, LoginTokenInput, RenewTokenInput, SignUpInput};
+use super::service::{self, CredentialsInput, LoginTokenInput, SignUpInput};
+use super::session::{self, CreationOrigin, SessionRequestContext};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -22,11 +26,25 @@ pub fn router() -> Router<AppState> {
         .route("/auth/me", get(me))
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TokensResponse {
-    access_token: String,
-    refresh_token: String,
+fn response_with_cookies(
+    status: StatusCode,
+    body: serde_json::Value,
+    cookies: Vec<HeaderValue>,
+) -> Response {
+    let mut response = (status, Json(body)).into_response();
+
+    for cookie in cookies {
+        response.headers_mut().append(SET_COOKIE, cookie);
+    }
+
+    response
+}
+
+fn session_context(headers: &HeaderMap, addr: Option<SocketAddr>) -> SessionRequestContext<'_> {
+    SessionRequestContext {
+        headers,
+        ip_address: addr.map(|addr| addr.ip().to_string()),
+    }
 }
 
 async fn check_user(
@@ -46,19 +64,31 @@ async fn check_user(
 
 async fn sign_up(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(input): Json<SignUpInput>,
-) -> AuthResult<(StatusCode, Json<serde_json::Value>)> {
+) -> AuthResult<Response> {
     let signed_up = service::sign_up(&state, input).await?;
 
-    Ok((
+    let context = session_context(&headers, Some(addr));
+    let cookies = session::issue_session_for_token_pair(
+        &state,
+        &context,
+        &signed_up.tokens,
+        CreationOrigin::SignIn,
+    )
+    .await?;
+
+    Ok(response_with_cookies(
         StatusCode::CREATED,
-        Json(json!({
+        json!({
             "user": { "id": signed_up.user_id },
             "workspace": { "id": signed_up.workspace_id },
             "workspaceId": signed_up.workspace_id,
             "accessToken": signed_up.tokens.access_token,
             "refreshToken": signed_up.tokens.refresh_token,
-        })),
+        }),
+        cookies,
     ))
 }
 
@@ -73,36 +103,77 @@ async fn login_token(
 
 async fn auth_tokens(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(input): Json<LoginTokenInput>,
-) -> AuthResult<Json<serde_json::Value>> {
+) -> AuthResult<Response> {
     let (issued, email, user_id) = service::get_auth_tokens_from_login_token(&state, input).await?;
 
-    Ok(Json(json!({
-        "accessToken": issued.access_token,
-        "refreshToken": issued.refresh_token,
-        "user": { "id": user_id, "email": email },
-    })))
+    let context = session_context(&headers, Some(addr));
+    let cookies =
+        session::issue_session_for_token_pair(&state, &context, &issued, CreationOrigin::SignIn)
+            .await?;
+
+    Ok(response_with_cookies(
+        StatusCode::OK,
+        json!({
+            "accessToken": issued.access_token,
+            "refreshToken": issued.refresh_token,
+            "user": { "id": user_id, "email": email },
+        }),
+        cookies,
+    ))
 }
 
 async fn renew_token(
     State(state): State<AppState>,
-    Json(input): Json<RenewTokenInput>,
-) -> AuthResult<Json<TokensResponse>> {
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(input): Json<service::RenewTokenInput>,
+) -> AuthResult<Response> {
     let issued = service::renew_token(&state, &input.refresh_token).await?;
 
-    Ok(Json(TokensResponse {
-        access_token: issued.access_token,
-        refresh_token: issued.refresh_token,
-    }))
+    let context = session_context(&headers, Some(addr));
+    let cookies = session::issue_session_for_token_pair(
+        &state,
+        &context,
+        &issued,
+        CreationOrigin::RenewalBridge,
+    )
+    .await?;
+
+    Ok(response_with_cookies(
+        StatusCode::OK,
+        json!({
+            "accessToken": issued.access_token,
+            "refreshToken": issued.refresh_token,
+        }),
+        cookies,
+    ))
 }
 
 async fn sign_out(
     State(state): State<AppState>,
-    Json(input): Json<RenewTokenInput>,
-) -> AuthResult<(StatusCode, Json<serde_json::Value>)> {
-    service::sign_out(&state, &input.refresh_token).await?;
+    headers: HeaderMap,
+    body: Option<Json<service::SignOutInput>>,
+) -> AuthResult<Response> {
+    let session_token = session::extract_session_token(&headers, &state.config);
 
-    Ok((StatusCode::OK, Json(json!({ "success": true }))))
+    let refresh_token = body.and_then(|Json(body)| body.refresh_token);
+
+    session::sign_out(&state, session_token.as_deref(), refresh_token.as_deref()).await?;
+
+    let mut cookies = Vec::new();
+
+    if session::has_session_cookie(&headers) {
+        cookies = session::session_cookie_clear_values(&state.config);
+    }
+
+    Ok(response_with_cookies(
+        StatusCode::OK,
+        json!({ "success": true }),
+        cookies,
+    ))
 }
 
 async fn me(

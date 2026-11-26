@@ -49,6 +49,13 @@ pub struct RenewTokenInput {
     pub refresh_token: String,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SignOutInput {
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+}
+
 pub struct SignedUp {
     pub user_id: Uuid,
     pub workspace_id: Uuid,
@@ -529,20 +536,4 @@ pub async fn renew_token(state: &AppState, refresh_token: &str) -> AuthResult<Is
         access_token: access_or_agnostic,
         refresh_token: new_refresh,
     })
-}
-
-pub async fn sign_out(state: &AppState, refresh_token: &str) -> AuthResult<()> {
-    let verified = tokens::verify_refresh_token(state, refresh_token).await?;
-
-    sqlx::query(
-        "UPDATE core.\"appToken\" \
-         SET \"revokedAt\" = now(), \"updatedAt\" = now(), \
-             context = COALESCE(context, '{}'::jsonb) || '{\"revokedReason\":\"USER_SIGN_OUT\"}'::jsonb \
-         WHERE id = $1",
-    )
-    .bind(verified.jwt_id)
-    .execute(&state.core_pool)
-    .await?;
-
-    Ok(())
 }

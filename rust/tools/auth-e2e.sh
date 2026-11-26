@@ -118,7 +118,111 @@ post /auth/sign-out "{\"refreshToken\":\"$NEW_REFRESH_TOKEN\"}"
 check "sign out" 200 "$STATUS"
 
 post /auth/token "{\"refreshToken\":\"$NEW_REFRESH_TOKEN\"}"
-check "signed out token rejected" 401 "$STATUS"
+check "signed out token beyond grace" "$EXPECT_ROTATED_REUSE" "$STATUS"
+
+HDRS="$(mktemp)"
+COOKIE_EMAIL="cookies-$SUFFIX@nudge.test"
+COOKIE_SUBDOMAIN="nudge-cookies-$SUFFIX"
+
+post_cookie_flow() {
+  local path="$1" body="$2"
+  shift 2
+  local response
+  response="$(curl -s -D "$HDRS" -w $'\n%{http_code}' -X POST "$BASE$path" \
+    -H 'content-type: application/json' -H "$SESSION_OPT_IN" "$@" -d "$body")"
+  STATUS="${response##*$'\n'}"
+  BODY="${response%$'\n'*}"
+}
+
+get_cookie_flow() {
+  local path="$1"
+  shift
+  local response
+  response="$(curl -s -w $'\n%{http_code}' "$BASE$path" "$@" )"
+  STATUS="${response##*$'\n'}"
+  BODY="${response%$'\n'*}"
+}
+
+SESSION_OPT_IN="x-twenty-session-cookie: 1"
+
+post_cookie_flow /auth/sign-up "{\"email\":\"$COOKIE_EMAIL\",\"password\":\"$PASSWORD\",\"workspaceDisplayName\":\"Cookie HQ\",\"subdomain\":\"$COOKIE_SUBDOMAIN\"}" \
+  -H "$SESSION_OPT_IN"
+check "cookie sign up" 201 "$STATUS"
+SESSION_COOKIE="$(grep -o 'twenty-session=sess_[A-Za-z0-9_-]*' "$HDRS" | head -1 | cut -d= -f2)"
+check_value "  session cookie issued" "$([ -n "$SESSION_COOKIE" ] && echo 1 || echo 0)"
+
+get_cookie_flow /auth/me -H "cookie: twenty-session=$SESSION_COOKIE" -H "$SESSION_OPT_IN"
+check "me with session cookie" 200 "$STATUS"
+check_value "  returns the cookie user" "$(printf '%s' "$BODY" | grep -c "\"email\":\"$COOKIE_EMAIL\"")"
+
+get_cookie_flow /auth/me -H "cookie: twenty-session=$SESSION_COOKIE"
+check "me with cookie without opt-in" 401 "$STATUS"
+
+get_cookie_flow /auth/me -H "authorization: Bearer $SESSION_COOKIE" -H "$SESSION_OPT_IN"
+check "session token as bearer rejected" 401 "$STATUS"
+check_value "  cookie-only message" "$(printf '%s' "$BODY" | grep -c 'only accepted from the session cookie')"
+
+post_cookie_flow /auth/token "{\"refreshToken\":\"garbage\"}" -H "cookie: twenty-session=$SESSION_COOKIE" \
+  -H "$SESSION_OPT_IN" -H "origin: http://evil.example"
+check "csrf foreign origin blocked" 403 "$STATUS"
+check_value "  csrf error code" "$([ "$(error_code)" = "CSRF_ORIGIN_MISMATCH" ] && echo 1 || echo 0)"
+
+post_cookie_flow /auth/token "{\"refreshToken\":\"garbage\"}" -H "cookie: twenty-session=$SESSION_COOKIE" \
+  -H "$SESSION_OPT_IN"
+check "csrf missing origin fails closed" 403 "$STATUS"
+
+get_cookie_flow /auth/me -H "cookie: twenty-session=$SESSION_COOKIE" -H "$SESSION_OPT_IN"
+COOKIE_WORKSPACE_ID="$(printf '%s' "$BODY" | grep -o '"workspace":{"id":"[^"]*"' | cut -d'"' -f6)"
+
+post_cookie_flow /auth/login-token "{\"email\":\"$COOKIE_EMAIL\",\"password\":\"$PASSWORD\",\"workspaceId\":\"$COOKIE_WORKSPACE_ID\"}" \
+  -H "cookie: twenty-session=$SESSION_COOKIE" -H "$SESSION_OPT_IN" -H "origin: http://127.0.0.1:3000"
+check "login token with allowed origin" 200 "$STATUS"
+COOKIE_LOGIN_TOKEN="$(extract loginToken)"
+
+post_cookie_flow /auth/tokens "{\"loginToken\":\"$COOKIE_LOGIN_TOKEN\",\"workspaceId\":\"$COOKIE_WORKSPACE_ID\"}" \
+  -H "cookie: twenty-session=$SESSION_COOKIE" -H "$SESSION_OPT_IN" -H "origin: http://127.0.0.1:3000"
+check "exchange with allowed origin" 200 "$STATUS"
+NEW_SESSION_COOKIE="$(grep -o 'twenty-session=sess_[A-Za-z0-9_-]*' "$HDRS" | head -1 | cut -d= -f2)"
+check_value "  replacement cookie issued" "$([ -n "$NEW_SESSION_COOKIE" ] && echo 1 || echo 0)"
+check_value "  replacement differs" "$([ "$NEW_SESSION_COOKIE" != "$SESSION_COOKIE" ] && echo 1 || echo 0)"
+
+get_cookie_flow /auth/me -H "cookie: twenty-session=$SESSION_COOKIE" -H "$SESSION_OPT_IN"
+check "old session superseded" 401 "$STATUS"
+
+get_cookie_flow /auth/me -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SESSION_OPT_IN"
+check "replacement session works" 200 "$STATUS"
+
+post_cookie_flow /auth/login-token "{\"email\":\"$COOKIE_EMAIL\",\"password\":\"$PASSWORD\",\"workspaceId\":\"$COOKIE_WORKSPACE_ID\"}" \
+  -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SESSION_OPT_IN" -H "origin: http://127.0.0.1:3000"
+check "login token for bridge flow" 200 "$STATUS"
+COOKIE_LOGIN_TOKEN="$(extract loginToken)"
+
+post_cookie_flow /auth/tokens "{\"loginToken\":\"$COOKIE_LOGIN_TOKEN\",\"workspaceId\":\"$COOKIE_WORKSPACE_ID\"}" \
+  -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SESSION_OPT_IN" \
+  -H "origin: http://127.0.0.1:3000"
+check "bridge exchange" 200 "$STATUS"
+COOKIE_REFRESH_TOKEN="$(extract refreshToken)"
+NEW_SESSION_COOKIE="$(grep -o 'twenty-session=sess_[A-Za-z0-9_-]*' "$HDRS" | head -1 | cut -d= -f2)"
+check_value "  bridge cookie captured" "$([ -n "$NEW_SESSION_COOKIE" ] && echo 1 || echo 0)"
+
+post_cookie_flow /auth/token "{\"refreshToken\":\"$COOKIE_REFRESH_TOKEN\"}" \
+  -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SESSION_OPT_IN" \
+  -H "origin: http://127.0.0.1:3000"
+check "renewal with presented session" 200 "$STATUS"
+check_value "  bridge reuses the session" "$([ -z "$(grep -o 'twenty-session=sess_' "$HDRS" | head -1)" ] && echo 1 || echo 0)"
+
+get_cookie_flow /auth/me -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SESSION_OPT_IN"
+check "reused session still active" 200 "$STATUS"
+
+post_cookie_flow /auth/sign-out "{}" -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SESSION_OPT_IN" \
+  -H "origin: http://127.0.0.1:3000"
+check "cookie sign out" 200 "$STATUS"
+check_value "  cookie cleared" "$([ "$(grep -c 'Expires=Thu, 01 Jan 1970 00:00:00 GMT' "$HDRS")" -ge 1 ] && echo 1 || echo 0)"
+
+get_cookie_flow /auth/me -H "cookie: twenty-session=$NEW_SESSION_COOKIE" -H "$SESSION_OPT_IN"
+check "signed out session rejected" 401 "$STATUS"
+
+rm -f "$HDRS"
 
 printf '\n%d checks, %d failures\n' "$results" "$failures"
 
