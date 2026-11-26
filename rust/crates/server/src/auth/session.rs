@@ -40,6 +40,7 @@ pub enum CreationOrigin {
 pub enum RevocationReason {
     UserSignOut,
     Superseded,
+    ImpersonationEnded,
 }
 
 impl RevocationReason {
@@ -47,6 +48,7 @@ impl RevocationReason {
         match self {
             RevocationReason::UserSignOut => "USER_SIGN_OUT",
             RevocationReason::Superseded => "SUPERSEDED",
+            RevocationReason::ImpersonationEnded => "IMPERSONATION_ENDED",
         }
     }
 }
@@ -77,7 +79,6 @@ pub struct ResolvedSession {
     pub payload: Value,
     #[expect(dead_code, reason = "surfaced by the sessions UI in a later wave")]
     pub authenticated_at: DateTime<Utc>,
-    #[expect(dead_code, reason = "surfaced by the sessions UI in a later wave")]
     pub expires_at: DateTime<Utc>,
 }
 
@@ -240,6 +241,27 @@ fn read_cookie_value(cookie_header: &str, cookie_name: &str) -> Option<String> {
 }
 
 pub fn extract_session_token(headers: &HeaderMap, config: &nudge_core::Config) -> Option<String> {
+    extract_cookie_token(headers, config, SECURE_COOKIE_NAME, INSECURE_COOKIE_NAME)
+}
+
+pub fn extract_impersonator_session_token(
+    headers: &HeaderMap,
+    config: &nudge_core::Config,
+) -> Option<String> {
+    extract_cookie_token(
+        headers,
+        config,
+        SECURE_IMPERSONATOR_COOKIE_NAME,
+        INSECURE_IMPERSONATOR_COOKIE_NAME,
+    )
+}
+
+fn extract_cookie_token(
+    headers: &HeaderMap,
+    config: &nudge_core::Config,
+    secure_name: &str,
+    insecure_name: &str,
+) -> Option<String> {
     if resolve_cookie_access(headers) == CookieAccess::Denied {
         return None;
     }
@@ -250,9 +272,9 @@ pub fn extract_session_token(headers: &HeaderMap, config: &nudge_core::Config) -
 
     let allow_insecure_name = !is_secure_deployment(config);
 
-    let token = read_cookie_value(cookie_header, SECURE_COOKIE_NAME).or_else(|| {
+    let token = read_cookie_value(cookie_header, secure_name).or_else(|| {
         if allow_insecure_name {
-            read_cookie_value(cookie_header, INSECURE_COOKIE_NAME)
+            read_cookie_value(cookie_header, insecure_name)
         } else {
             None
         }
@@ -350,6 +372,22 @@ pub fn impersonator_cookie_value(config: &nudge_core::Config, token: &str) -> He
         secure_attribute(config)
     ))
     .expect("cookie header value is ascii")
+}
+
+pub fn impersonator_cookie_clear_values(config: &nudge_core::Config) -> Vec<HeaderValue> {
+    let suffix = format!(
+        "=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; {};{}",
+        same_site_attribute(config),
+        secure_attribute(config)
+    );
+
+    [
+        SECURE_IMPERSONATOR_COOKIE_NAME,
+        INSECURE_IMPERSONATOR_COOKIE_NAME,
+    ]
+    .iter()
+    .map(|name| HeaderValue::from_str(&format!("{name}{suffix}")).expect("cookie header is ascii"))
+    .collect()
 }
 
 fn parse_url_parts(raw: &str) -> Option<(String, String, Option<String>)> {
@@ -1794,12 +1832,63 @@ mod tests {
     fn revocation_reasons_use_the_upstream_strings() {
         let mut mapping = HashMap::new();
 
-        for reason in [RevocationReason::UserSignOut, RevocationReason::Superseded] {
+        for reason in [
+            RevocationReason::UserSignOut,
+            RevocationReason::Superseded,
+            RevocationReason::ImpersonationEnded,
+        ] {
             mapping.insert(reason.as_str().to_string(), reason);
         }
 
-        assert_eq!(mapping.len(), 2);
+        assert_eq!(mapping.len(), 3);
         assert_eq!(mapping["USER_SIGN_OUT"], RevocationReason::UserSignOut);
         assert_eq!(mapping["SUPERSEDED"], RevocationReason::Superseded);
+        assert_eq!(
+            mapping["IMPERSONATION_ENDED"],
+            RevocationReason::ImpersonationEnded
+        );
+    }
+
+    #[test]
+    fn impersonator_cookies_are_read_and_cleared_by_both_names() {
+        let settings = config();
+
+        let parked = headers(&[
+            (SESSION_COOKIE_OPT_IN_HEADER, "1"),
+            ("cookie", "twenty-impersonator-session=sess_parked"),
+        ]);
+        assert_eq!(
+            extract_impersonator_session_token(&parked, &settings).as_deref(),
+            Some("sess_parked")
+        );
+
+        let secure_settings_only = headers(&[
+            (SESSION_COOKIE_OPT_IN_HEADER, "1"),
+            ("cookie", "__Host-twenty-impersonator-session=sess_sec"),
+        ]);
+        assert_eq!(
+            extract_impersonator_session_token(&secure_settings_only, &settings).as_deref(),
+            Some("sess_sec")
+        );
+
+        let plain_session = headers(&[
+            (SESSION_COOKIE_OPT_IN_HEADER, "1"),
+            ("cookie", "twenty-session=sess_aaa"),
+        ]);
+        assert_eq!(
+            extract_impersonator_session_token(&plain_session, &settings),
+            None
+        );
+
+        let cleared = impersonator_cookie_clear_values(&settings);
+        assert_eq!(cleared.len(), 2);
+        assert!(cleared[0]
+            .to_str()
+            .unwrap()
+            .starts_with("__Host-twenty-impersonator-session=;"));
+        assert!(cleared[1]
+            .to_str()
+            .unwrap()
+            .starts_with("twenty-impersonator-session=;"));
     }
 }

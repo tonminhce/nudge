@@ -101,3 +101,49 @@ and password reset tokens, impersonation, and the workspace-creation-without-sig
 
 ## Units
 Claims are recorded here: `open`, `claimed by <session> <date>`, or `done` with gate/replay results.
+
+### wave2/workspace-lifecycle (done 2026-11-26)
+Workspace creation for an existing user plus impersonation, in
+`crates/server/src/auth/workspace_lifecycle.rs` (additive helpers in `session.rs`).
+- `POST /auth/workspace` mirrors the upstream `signUpInNewWorkspace` mutation
+  (`engine/core-modules/auth/auth.resolver.ts:740` → `sign-in-up.service.ts`
+  `signUpOnNewWorkspace:691`): workspace row in `PENDING_CREATION`, the `Custom`
+  workspace application (`application.service.ts:572`), the `userWorkspace` row, then a
+  LOGIN token. Response `{ loginToken, workspace: { id } }`.
+- `POST /auth/workspace/activate` mirrors `activateWorkspace`
+  (`workspace.resolver.ts:164` → `workspace.service.ts:689`): the
+  `PENDING_CREATION → ONGOING_CREATION` lock with the 5 minute stale reclaim, the
+  `workspace_<base36>` schema, the Admin/Member/Workspace-Custom-Application roles with the
+  fixed per-workspace universal identifiers (`core.role` uniqueness is
+  `(workspaceId, "universalIdentifier")`, so the same identifiers are reused for every
+  workspace; `standard-role.constant.ts`, `twenty-shared MemberRoleUniversalIdentifier`),
+  the Admin roleTarget assignment from `setupDefaultRoles`
+  (`workspace-manager.service.ts:116`), `defaultRoleId` = Member, `CREATED`.
+- `POST /auth/impersonate` mirrors the `impersonate` mutation (`impersonation.resolver.ts`):
+  the standard-session guard, the `canImpersonate OR IMPERSONATE-flag` check
+  (`impersonate-permission.guard.ts`, role-wide access via `canUpdateAllSettings` in
+  `has-role-wide-access-to-permission-flag.util.ts`), the self-impersonation rejection and
+  the server/workspace level authorization (`impersonation-authorization.service.ts`).
+  Issues an impersonation LOGIN token naming the impersonator `userWorkspaceId`.
+- `POST /auth/impersonation/tokens` is the impersonation branch of upstream
+  `getAuthTokensFromLoginToken` (`auth.resolver.ts:897-970`) as its own REST route because
+  the shared `/auth/tokens` handler is outside this unit: re-validation, single-use
+  consumption, the 1 day refresh token (`refresh-token.service.ts:113`), the impersonation
+  access claims (`access-token.service.ts:130`), then the session cookie with the
+  impersonator parking from `session.issue_session_for_token_pair`.
+- `POST /auth/stop-impersonation` mirrors `stopImpersonation`
+  (`impersonation.service.ts`): revokes the presented session with
+  `IMPERSONATION_ENDED`, restores the parked impersonator cookie session only when it is a
+  standard ACCESS payload for the impersonator `userWorkspaceId`, always clears the
+  impersonator cookies, returns `{ canRestoreImpersonatorSession }`.
+- Deviations: `SERVER_ADMIN_WORKSPACE_ID` is not in the port config yet, so the
+  server-admin workspace gate treats it as unset (allowed, the upstream default); the
+  email-derived subdomain skips the free-mail provider list (not ported); the
+  success-path impersonation e2e needs the invitations unit because no upstream-faithful
+  REST surface seats a second member into an existing workspace yet — the e2e covers the
+  full denial matrix, the admin context through the role assignment, the second workspace
+  lifecycle, and the cookie flows (127 checks, both grace modes).
+- Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test -p nudge-server -p nudge-core` (50 tests) all green;
+  `tools/auth-e2e.sh` + `tools/e2e/workspace-lifecycle.inc.sh` 127/127 with and without
+  `REFRESH_TOKEN_REUSE_GRACE_PERIOD=0s`.
