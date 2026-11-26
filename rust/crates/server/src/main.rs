@@ -25,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
         .context("running the core schema migrations")?;
 
     tokio::spawn(crate::auth::session::cleanup_loop(state.clone()));
+    crate::workspace_migrations::worker::spawn_deferred_worker(state.clone());
 
     let app = routes::router(state);
     let address = format!("0.0.0.0:{}", config.node_port);
