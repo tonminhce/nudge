@@ -102,6 +102,33 @@ and password reset tokens, impersonation, and the workspace-creation-without-sig
 ## Units
 Claims are recorded here: `open`, `claimed by <session> <date>`, or `done` with gate/replay results.
 
+### wave2/account-tokens (done 2026-11-26)
+Email verification, password reset and workspace invitations, in
+`crates/server/src/auth/account_tokens.rs`.
+- Token storage per type (all `core.appToken`): `EMAIL_VERIFICATION_TOKEN` sha256-hashed,
+  1 h, row deleted on verify; `PASSWORD_RESET_TOKEN` sha256-hashed, 5 min, one live per user;
+  `INVITATION_TOKEN` / `ONBOARDING_INVITATION_TOKEN` verbatim, 30 d. Plain tokens are
+  `randomBytes(32).hex`.
+- Reset-link throttle 3 per 15 min per email (atomic Redis), unknown emails silently ignored;
+  invitation throttles 10/7 d per email, 500/7 d per workspace, 20 + 50/1 d per sender.
+- Password change revokes all refresh tokens and all sessions with `PASSWORD_CHANGED`
+  (`session.revoke_all_sessions_for_user`).
+- Gate green; e2e fragments in `tools/e2e/account-tokens.inc.sh`.
+
+### wave2/two-factor (done 2026-11-26)
+TOTP enrolment, backup codes, admin recovery codes and the OTP login step, in
+`crates/server/src/auth/two_factor.rs`.
+- TOTP sha1/6 digits/30 s, window ±1, secrets ascii-masked then base32 (otplib quirk preserved),
+  stored as `enc:v2:` workspace-scoped envelopes; otpauth URI byte-identical to otplib 12.0.1.
+- OTP replay guard 120 s; PENDING→VERIFIED under the user advisory lock; 10 backup codes
+  (`5-5-5-5`, sha256-hashed) issued at enrolment; admin recovery codes 1 h, one pending per
+  (userId, workspaceId); redemption consumes backup code first, else full 2FA reset with
+  `TWO_FACTOR_AUTHENTICATION_RESET` revocations.
+- The login token is consumed only AFTER the OTP passes (`service.rs` fix, upstream
+  `auth.resolver.ts:944-946`).
+- Vectors: RFC 6238 plus Node cross-check (`tools/generate-totp-test-vectors.mjs`).
+- Gate green; e2e fragments in `tools/e2e/two-factor.inc.sh`.
+
 ### wave2/workspace-lifecycle (done 2026-11-26)
 Workspace creation for an existing user plus impersonation, in
 `crates/server/src/auth/workspace_lifecycle.rs` (additive helpers in `session.rs`).
@@ -138,12 +165,21 @@ Workspace creation for an existing user plus impersonation, in
   impersonator cookies, returns `{ canRestoreImpersonatorSession }`.
 - Deviations: `SERVER_ADMIN_WORKSPACE_ID` is not in the port config yet, so the
   server-admin workspace gate treats it as unset (allowed, the upstream default); the
-  email-derived subdomain skips the free-mail provider list (not ported); the
-  success-path impersonation e2e needs the invitations unit because no upstream-faithful
-  REST surface seats a second member into an existing workspace yet — the e2e covers the
-  full denial matrix, the admin context through the role assignment, the second workspace
-  lifecycle, and the cookie flows (127 checks, both grace modes).
+  email-derived subdomain skips the free-mail provider list (not ported).
+- The success-path impersonation e2e landed in `tools/e2e/impersonation-success.inc.sh`
+  after `service.rs` gained the first-user `shouldGrantServerAdmin` grant: server admin
+  lookup, cross-workspace impersonation, token exchange with the parked impersonator
+  cookie, stop restoring the admin session and clearing the impersonator cookies.
 - Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test -p nudge-server -p nudge-core` (50 tests) all green;
-  `tools/auth-e2e.sh` + `tools/e2e/workspace-lifecycle.inc.sh` 127/127 with and without
-  `REFRESH_TOKEN_REUSE_GRACE_PERIOD=0s`.
+  `cargo test -p nudge-server -p nudge-core` all green; the combined suite passes in both
+  reuse-grace modes.
+
+### wave2/sso (done 2026-11-26)
+SSO (Google, Microsoft, OIDC PKCE S256, SAML) — done (wave2/sso, 2026-11-26). Routes
+`/auth/google`, `/auth/google/redirect`, `/auth/microsoft`, `/auth/microsoft/redirect`,
+`/auth/oidc/login/{id}`, `/auth/oidc/callback`, `/auth/saml/metadata/{id}`, `/auth/saml/login/{id}`,
+`/auth/saml/callback/{id}`, plus the REST mirror `POST /auth/sso/exchange-token` of the upstream
+`getAuthTokensFromSSOExchangeToken` mutation. Gate: cargo fmt --check, clippy -D warnings clean,
+76 unit tests, e2e 99 checks (0 failures) without IdP credentials and 104 checks (0 failures)
+with AUTH_GOOGLE_* set. SAML signature verification is a flagged gap (ADR-013); OIDC verifies
+RS256 only (ADR-012); the SSO billing entitlement gate is not enforced (no billing module).
