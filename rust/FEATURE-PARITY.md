@@ -10,10 +10,10 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 
 | Area | Upstream size | Nudge today |
 |---|---|---|
-| A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | todo |
-| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | todo |
-| C. Auth and access control | ~12k LOC server | **part** (password auth done) |
-| D. Web interface (Leptos) | ~330k LOC React | todo |
+| A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (wave 3: seeding, DDL runner and deferred queue merged; metadata API and update/delete matrix in progress) |
+| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | todo (spec done: `research/query-layer.md`) |
+| C. Auth and access control | ~12k LOC server | **part** (wave 2 complete) |
+| D. Web interface (Leptos) | ~330k LOC React | todo (spec done: `research/frontend-architecture.md`) |
 | E. Automations and integrations | ~60k LOC server | todo |
 | F. Platform and operations | ~10k LOC | **part** |
 
@@ -25,13 +25,16 @@ Roughly 3 of about 90 feature areas are done. The rest is the port.
 |---|---|---|---|
 | `core` schema, byte-identical to the reference | **done** | 1 | 80 tables, 57 enums, 368 indexes, 389 constraints; 0 differences |
 | Workspace schema per tenant (`workspace_<base36>`) | **done** | 1 | created on sign-up |
-| Object and field metadata CRUD | todo | 3 | the metadata API is the contract for everything below |
-| Standard objects (person, company, opportunity, note, task, attachment, timeline, workspace member) | todo | 3 | |
-| Runtime DDL: create and alter workspace tables from metadata | todo | 3 | the metadata to DDL migration runner |
-| Composite fields (full name, emails, phones, links, address, currency) and their flattening rule | todo | 3 | `<field><SubProperty>` column names |
-| Field types: 25+ (select with options, rating, relation, morph relation, raw json, ts vector, ...) | todo | 3 | |
-| Index metadata and physical index creation (hashed names) | todo | 3 | |
-| Search vectors and the GIN index | todo | 3 | |
+| Object and field metadata CRUD | **part** | 3 | builders, aggregate, ordering and the runner are done (U5+U6); the `/metadata` GraphQL surface lands with U9 |
+| Standard objects (person, company, opportunity, note, task, attachment, timeline, workspace member) | **done** | 3 | U7: 37 objects / 636 fields / 123 indexes / 34 search fields / 65 options seeded on activation; `tools/metadata-parity.sh` proves field/option/index/search-field content is 0-diff vs the live reference and the catalog parity test proves the workspace schema is equivalent (one open column: `targetTableName='DEPRECATED'` semantics, U10) |
+| Runtime DDL: create and alter workspace tables from metadata | **part** | 3 | create/delete/rename-table+enum + the 4-pass builder are done; the full field-update matrix (nullable/default/onDelete swap, tsvector rebuild) is U10 |
+| Composite fields (full name, emails, phones, links, address, currency) and their flattening rule | **done** | 3 | `<field><SubProperty>` column names, U4 column_defs (2.61.0 has no server-only composite columns — verified against the tag and the live schema) |
+| Field types: 25+ (select with options, rating, relation, morph relation, raw json, ts vector, ...) | **done** | 3 | U4 + U7 (composite enum types created, morph heads skipped, relation join columns + FK `onDelete` from settings) |
+| Index metadata and physical index creation (hashed names) | **done** | 3 | U6 runner (hashed deterministic names, `indexFieldMetadata` rows) + U8 deferred `build_index` CONCURRENTLY |
+| Search vectors and the GIN index | **done** | 3 | inline `to_tsvector('simple', ...)` generated column with the upstream expression + GIN index; search-field rows pre-inserted against the deferrable core FKs |
+| Access storage tables (`accessGroup`, `recordShare`) | **done** | 3 | U7 `standard_objects/permissions.rs`: enums, identity, CHECK, 8 named indexes, created before the metadata migration exactly like upstream |
+| `_isPrivate` / `_accessGroupIds` enrichment + derived indexes | **done** | 3 | U7, per `enrich-record-table-schema-*.util.ts` (GIN on `integer[]`, partial btree on `id WHERE "_isPrivate"`) |
+| Deferred workspace operations (queue) | **done** | 3 | U8: claim SKIP LOCKED, delete-on-success, `30s*2^n` backoff, FAILED at 3 attempts, stale recovery, worker loop from startup |
 | Validation rules | todo | 5 | 3.9k LOC upstream |
 | Custom fields and objects edited from the UI | todo | 5 | |
 | Data model settings screens | todo | 5 | 5.8k LOC upstream |

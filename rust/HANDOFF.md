@@ -13,8 +13,8 @@ R-002 (verify auth behaviour against upstream, never guess).
   workers/workflows, front-end inventory, workspace migrations).
 - Wave 1 done and verified: server boots, migrates the `core` schema,
   `tools/verify-core-schema.sh` proves parity with the live reference.
-- **Wave 2 done** and verified end to end (297 e2e checks, 0 failures, in both refresh-grace
-  modes; 130 unit tests):
+- Wave 2 done and verified end to end (297 e2e checks, 0 failures, in both refresh-grace
+  modes; 312 unit tests):
   - password auth, ES256 signing with rotating keys, the `enc:v2:` envelope, the two-step
     sign-in, refresh rotation with the reuse grace, bearer dispatch (`auth/` core files);
   - session cookies: `sess_` tokens, sha256 storage, opt-in + navigation access, CSRF origin
@@ -34,8 +34,28 @@ R-002 (verify auth behaviour against upstream, never guess).
     with signature verification flag-gated off (ADR-013) (`sso.rs` + `sso/`);
   - CI (fmt, clippy, tests, e2e against Postgres/Redis services in both grace modes), the
     production Dockerfile and `docker-compose.prod.yml` (image build + healthz smoke tested).
-- **Next: wave 3**, the metadata engine. The full plan with citations is
-  `research/workspace-migrations.md`: units U1-U10, critical path U1 → U2 → U4 → U6 → U7.
+- **Wave 3 mostly done** (U1–U8 merged; U9 + U10 on their branches):
+  - U1/U2 naming+ids and DDL primitives; U3/U5 flat maps, the universal action model,
+    builders, aggregate and ordering; U4 column defs + tsvector (person expression byte-equal).
+  - U6 runner: single transaction with `SET LOCAL lock_timeout`, per-action dispatch, guards,
+    cache invalidation, `metadataVersion` bump, rollback of rows AND DDL (DB-gated tests).
+  - U7 standard objects: `standard_objects/definitions.rs` (generated from the 2.61.0 dumps:
+    37 objects / 636 fields / 123 indexes / 34 search fields / 65 options via
+    `tools/generate-standard-objects.py`), `permissions.rs` (the reference `accessGroup` /
+    `recordShare` storage tables), enrichment on every metadata table
+    (`_accessGroupIds`, `_isPrivate` + the two derived indexes), preallocated ids so
+    search-field rows insert first against the deferrable core FKs; seeded from
+    `/auth/workspace/activate` (idempotent, retryable). DB-gated parity test compares the
+    seeded workspace catalog against the live Node reference; `tools/metadata-parity.sh`
+    compares seeded metadata content (all five tables, zero-diff on the reference).
+  - U8 deferred queue: claim with `FOR UPDATE SKIP LOCKED`, delete-on-success,
+    `30s * 2^n` retry backoff, FAILED at `MAX_ATTEMPTS=3`, stale recovery,
+    non-transactional execution for `CREATE INDEX CONCURRENTLY`;
+    `workspace_migrations::worker::spawn_deferred_worker` runs from `main.rs`.
+  - Next: merge `wave3/u9` (metadata GraphQL API) and `wave3/u10` (update/delete matrix,
+    includes the `targetTableName='DEPRECATED'` parity fix), then wave 4 (record query
+    layer — spec in `research/query-layer.md`) and wave 5 (Leptos front — spec in
+    `research/frontend-architecture.md`).
 
 ## How to run everything
 ```
@@ -52,14 +72,22 @@ If ports 5432/6379 are taken by another stack, run the compose with a port overr
 
 ## How to run the tests
 ```
-cd rust && cargo test                                          # 130 unit tests
+cd rust && cargo test                                          # 312 unit tests
 cargo run -p nudge-server &                                    # the server on :3000
 rust/tools/auth-e2e.sh                                         # 297 end-to-end checks
 EXPECT_ROTATED_REUSE=401 rust/tools/auth-e2e.sh                # against REFRESH_TOKEN_REUSE_GRACE_PERIOD=0s
 ```
-The script sources every `tools/e2e/*.inc.sh` fragment after the core checks. The cookie and
-impersonation fragments hardcode `origin: http://127.0.0.1:3000`, so run the server on port
-3000 (the CSRF origin check is origin-strict by design).
+The DB-gated suites need a scratch Postgres: `docker exec infra-db-1 createdb -U postgres
+<name>` then run with `NUDGE_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/<name>
+NUDGE_REFERENCE_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/twenty_ref cargo test
+-p nudge-server` (the U7 parity test skips unless both env vars are set). The e2e harness reads
+the metadata tables directly with `at_db`; it defaults to `-d default` but honors
+`E2E_DATABASE_NAME` so both the server and the harness can target another database (e.g.
+`e2e_u7`). The script sources every `tools/e2e/*.inc.sh` fragment after the core checks. The
+cookie and impersonation fragments hardcode `origin: http://127.0.0.1:3000` while
+workspace-lifecycle uses `http://localhost:3000`, so start the server with
+`SERVER_URL=http://localhost:3000` and hit it on `127.0.0.1:3000` — the CSRF check allows both
+(the request base origin plus the derived allowlist) and the check is origin-strict by design.
 
 ## Comparing against the live Node reference
 The reference container `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001, database

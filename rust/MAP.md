@@ -28,7 +28,7 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 | 0 | Grilling, ADRs, research (data model, API, auth, workers, UI) | **done** — 5 research docs in `research/` |
 | 1 | Server foundation: config, Postgres/Redis, core-schema migrations, health | **done** — schema parity verified against the live 2.61.0 reference |
 | 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **done** — passwords, tokens, sessions, CSRF, API keys, 2FA, invitations, email verification, password reset, workspace lifecycle, impersonation, SSO (SAML signature verification flag-gated, ADR-013); permission *enforcement* moves to wave 4 with the query runner |
-| 3 | Metadata engine: standard objects seeding, workspace schema creation | **in progress** — U1, U2, U3, U4, U5 done and merged; U6 runner and U7 seeding open |
+| 3 | Metadata engine: standard objects seeding, workspace schema creation | **mostly done** — U1–U6 + U8 merged (runner, seeding, deferred worker, DB parity vs live reference, 312 unit tests, both e2e gates green); U9 metadata API and U10 update/delete matrix in progress on their branches |
 | 4 | Workspace GraphQL (dynamic schema) + REST + query runner (filter/sort/paginate/groupBy/aggregate) | open |
 | 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open |
 | 6 | Webhooks, files, email (SMTP), search, import/export, timeline, favorites, notes/tasks | open |
@@ -233,10 +233,25 @@ Units U3 and U5.
 - `metadata/error.rs`: upstream-compatible metadata error codes.
 - Verification: 36 new tests; the combined tree is 272 unit tests plus the 297-check e2e.
 
-### Next wave 3 units
+### Wave 3 units landed
 - U6 `workspace_migrations/runner.rs`: one transaction, `SET LOCAL lock_timeout`, guards,
   core-row writes and workspace DDL together, cache invalidation and the `metadataVersion`
-  bump, failure rollback semantics.
-- U7 `standard_objects/`: the standard object and field registry (37 objects, 636 fields from
-  `baseline/*.json`) plus activation seeding; the acceptance gate is `pg_dump --schema-only
-  --schema=workspace_<b36>` identical to `baseline/workspace-schema-2.61.0.sql`.
+  bump, failure rollback semantics (DB-gated integration tests).
+- U7 `standard_objects/`: the generated 2.61.0 registry (37 objects, 636 fields, 123 indexes,
+  34 search fields, 65 options) plus `permissions.rs` (the `accessGroup`/`recordShare` storage
+  tables) and activation seeding, wired into `/auth/workspace/activate`. The DB-gated parity
+  test compares the seeded workspace catalog against the live Node reference (columns,
+  indexes, constraints, enums), normalizing only the schema name and the per-workspace random
+  `objectMetadata` ids inside the enrichment index names; `tools/metadata-parity.sh` compares
+  the seeded metadata content by universal identifier against the reference database.
+- U8 `workspace_migrations/deferred.rs` + `worker.rs`: deferred queue semantics (claim with
+  `FOR UPDATE SKIP LOCKED`, delete-on-success, retry backoff `30s * 2^n`, FAILED at
+  `MAX_ATTEMPTS=3`, stale recovery), non-transactional execution so `CREATE INDEX
+  CONCURRENTLY` works; `spawn_deferred_worker` runs from server startup.
+
+### Next wave 3 units
+- U9 `metadata/api/`: the metadata GraphQL API surface (in progress on `wave3/u9`).
+- U10 `workspace_migrations` (in progress on `wave3/u10`): the object/field update+delete
+  matrix verified against the live reference, including the `targetTableName='DEPRECATED'`
+  parity fix (upstream stores the literal and derives the physical table name from
+  `nameSingular` + application identifier; the runner must derive, not read the column).
