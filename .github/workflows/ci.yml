@@ -24,6 +24,40 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p nudge-server -p nudge-core
 
+  db-tests:
+    name: database-gated integration suites
+    runs-on: ubuntu-latest
+    needs: gate
+    defaults:
+      run:
+        working-directory: rust
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nudge_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo test -p nudge-server workspace_migrations
+        env:
+          NUDGE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/nudge_ci
+      - run: cargo test -p nudge-server standard_objects
+        env:
+          NUDGE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/nudge_ci
+
   e2e:
     name: auth end to end
     runs-on: ubuntu-latest
