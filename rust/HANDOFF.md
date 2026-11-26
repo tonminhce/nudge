@@ -134,6 +134,29 @@ gated once a workspace exists in single-workspace mode — the first user is the
   a live 2.61.0 reference workspace (the primary equivalence gate).
 
 ## Known gaps / deferred (documented, deliberate)
+- Live-reference row audit (U7 parity work, `tools/metadata-parity.sh`): seeded `fieldMetadata`
+  (636), `fieldMetadataOption` (65), `indexMetadata` (123) and `searchFieldMetadata` (34) rows
+  are byte-identical to the reference when keyed by universal identifier; `objectMetadata`
+  (37) matches on every column EXCEPT `targetTableName`, which upstream stores as the literal
+  `'DEPRECATED'` while the Nudge seed writes the computed physical name — the fix (derive the
+  table name from `nameSingular` + application id everywhere instead of reading the column)
+  is U10's (`wave3/u10`, priority row-0). The seeded standard `application` row shape was
+  corrected to the reference (`Standard`/`cli-sync`/`local`/`1.0.1`, id ≠ universalIdentifier)
+  and both custom-application writers to `Custom`/`workspace-custom`/`local`/`1.0.1`
+  (id = universalIdentifier) — verified row-for-row against `twenty_ref`.
+- The reference seeds a 4th role per workspace, label `Standard role` (universalIdentifier
+  `96321d41-8e4d-5046-bef7-e48fffca9c7e`, a deterministic v5 uuid), created by
+  `applicationGrantRoleService.upsertGrantRole` during the standard-application sync (a grant
+  role that copies the application's requested role,
+  `application-grant-role.service.ts:21`, called at `twenty-standard-application.service.ts:139`).
+  Nudge's activation seed does not yet create grant roles, nor the non-schema standard-application
+  content the full upstream sync also seeds (views 53, viewFields 360, viewFieldGroups 36,
+  pageLayouts 59, pageLayoutTabs 97, pageLayoutWidgets 115, commandMenuItems 114,
+  navigationMenuItems 13, timelineActivityTypes 16 — verified row counts against `twenty_ref`).
+  These are metadata rows, not workspace-schema objects, so they are outside the U7
+  schema-parity gate; tracked for the permissions wave (grant-role plumbing) and a
+  standard-application-content follow-on unit. There is no `core.applicationGrantRole` table;
+  grants live in `roleTarget`/`rolePermissionFlag`.
 - SAML signature verification: callback returns 403 `SSO_AUTH_FAILED` unless
   `AUTH_SAML_ACCEPT_UNVERIFIED_ASSERTIONS=true` (ADR-013). No sound pure-Rust path; revisit
   samael+xmlsec1 or contribute exclusive c14n upstream.
