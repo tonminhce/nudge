@@ -56,6 +56,8 @@ pub const SCHEMA_AFFECTING_METADATA_NAMES: [MetadataName; 4] = [
 
 const SEARCH_VECTOR_FIELD_NAME: &str = "searchVector";
 
+pub const DEPRECATED_TARGET_TABLE_NAME: &str = "DEPRECATED";
+
 #[derive(Debug)]
 pub struct RunnerError {
     pub code: &'static str,
@@ -590,15 +592,38 @@ pub struct FieldRow {
     pub name: String,
     pub label: String,
     pub field_type: FlatFieldMetadataType,
+    pub is_nullable: bool,
+    pub default_value: Option<Value>,
+    pub settings: Option<Value>,
+    pub relation_target_object_metadata_id: Option<Uuid>,
+    pub universal_identifier: String,
+    pub morph_id: Option<Uuid>,
 }
+
+type FieldRowTuple = (
+    Uuid,
+    Uuid,
+    String,
+    String,
+    String,
+    bool,
+    Option<Value>,
+    Option<Value>,
+    Option<Uuid>,
+    String,
+    Option<Uuid>,
+);
 
 pub async fn lookup_field_row(
     connection: &mut PgConnection,
     runtime: &WorkspaceRuntime,
     universal_identifier: &str,
 ) -> Result<Option<FieldRow>, RunnerError> {
-    let row: Option<(Uuid, Uuid, String, String, String)> = sqlx::query_as(
-        "SELECT id, \"objectMetadataId\", name, label, type FROM core.\"fieldMetadata\" \
+    let row: Option<FieldRowTuple> = sqlx::query_as(
+        "SELECT id, \"objectMetadataId\", name, label, type, COALESCE(\"isNullable\", true), \
+         \"defaultValue\", settings, \"relationTargetObjectMetadataId\", \
+         \"universalIdentifier\"::text, \"morphId\" \
+         FROM core.\"fieldMetadata\" \
          WHERE \"workspaceId\" = $1 AND \"universalIdentifier\" = $2",
     )
     .bind(runtime.workspace_id)
@@ -606,30 +631,68 @@ pub async fn lookup_field_row(
     .fetch_optional(&mut *connection)
     .await?;
 
-    Ok(row.and_then(|(id, object_id, name, label, field_type)| {
-        Some(FieldRow {
+    Ok(row.and_then(
+        |(
             id,
-            object_metadata_id: object_id,
+            object_id,
             name,
             label,
-            field_type: FlatFieldMetadataType::parse(&field_type)?,
-        })
-    }))
+            field_type,
+            is_nullable,
+            default_value,
+            settings,
+            relation_target_object_metadata_id,
+            universal_identifier,
+            morph_id,
+        )| {
+            FlatFieldMetadataType::parse(&field_type).map(|parsed| FieldRow {
+                id,
+                object_metadata_id: object_id,
+                name,
+                label,
+                field_type: parsed,
+                is_nullable,
+                default_value,
+                settings,
+                relation_target_object_metadata_id,
+                universal_identifier,
+                morph_id,
+            })
+        },
+    ))
+}
+
+pub fn is_morph_or_relation_field_type(field_type: FlatFieldMetadataType) -> bool {
+    matches!(
+        field_type,
+        FlatFieldMetadataType::Relation | FlatFieldMetadataType::MorphRelation
+    )
+}
+
+pub fn is_morph_relation_head_row(row: &FieldRow) -> bool {
+    row.field_type == FlatFieldMetadataType::MorphRelation
+        && row.morph_id.is_some()
+        && row.morph_id.map(|id| id.to_string()) == Some(row.universal_identifier.clone())
 }
 
 pub async fn object_table_name(
     connection: &mut PgConnection,
     object_id: Uuid,
 ) -> Result<String, RunnerError> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT \"targetTableName\" FROM core.\"objectMetadata\" WHERE id = $1")
-            .bind(object_id)
-            .fetch_optional(&mut *connection)
-            .await?;
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT om.\"nameSingular\", a.\"universalIdentifier\"::text \
+         FROM core.\"objectMetadata\" om \
+         JOIN core.\"application\" a ON a.id = om.\"applicationId\" \
+         WHERE om.id = $1",
+    )
+    .bind(object_id)
+    .fetch_optional(&mut *connection)
+    .await?;
 
-    row.map(|(table_name,)| table_name).ok_or_else(|| {
-        RunnerError::execution_failed(format!("object metadata {object_id} not found"))
+    row.map(|(name_singular, application_universal_identifier)| {
+        compute_object_target_table(&name_singular, &application_universal_identifier)
     })
+    .ok_or_else(|| RunnerError::execution_failed(format!("object metadata {object_id} not found")))
 }
 
 pub async fn search_vector_expression(
@@ -755,6 +818,15 @@ fn enum_values_from_field(field: &UniversalFlatFieldMetadata) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn is_enum_field_type(field_type: FlatFieldMetadataType) -> bool {
+    matches!(
+        field_type,
+        FlatFieldMetadataType::Select
+            | FlatFieldMetadataType::MultiSelect
+            | FlatFieldMetadataType::Rating
+    )
+}
+
 async fn create_select_enum(
     connection: &mut PgConnection,
     runtime: &WorkspaceRuntime,
@@ -767,16 +839,45 @@ async fn create_select_enum(
         return Ok(());
     }
 
-    let column_name = if field.field_type == FlatFieldMetadataType::MultiSelect {
-        compute_composite_column_name(&field.name, "primary")
-    } else {
-        field.name.clone()
-    };
-
-    let enum_name = compute_postgres_enum_name(table_name, &column_name);
+    let enum_name = compute_postgres_enum_name(table_name, &field.name);
     let value_refs: Vec<&str> = values.iter().map(String::as_str).collect();
 
     enum_types::create_enum(connection, &runtime.schema_name, &enum_name, &value_refs).await?;
+
+    Ok(())
+}
+
+async fn enum_type_exists(
+    connection: &mut PgConnection,
+    schema_name: &str,
+    enum_name: &str,
+) -> Result<bool, RunnerError> {
+    let row: (bool,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM pg_type t \
+         JOIN pg_namespace n ON n.oid = t.typnamespace \
+         WHERE n.nspname = $1 AND t.typname = $2 AND t.typtype = 'e')",
+    )
+    .bind(schema_name)
+    .bind(enum_name)
+    .fetch_one(&mut *connection)
+    .await?;
+
+    Ok(row.0)
+}
+
+async fn rename_enum_type_if_exists(
+    connection: &mut PgConnection,
+    schema_name: &str,
+    old_enum_name: &str,
+    new_enum_name: &str,
+) -> Result<(), RunnerError> {
+    if old_enum_name == new_enum_name
+        || !enum_type_exists(connection, schema_name, old_enum_name).await?
+    {
+        return Ok(());
+    }
+
+    enum_types::rename_enum(connection, schema_name, old_enum_name, new_enum_name).await?;
 
     Ok(())
 }
@@ -795,13 +896,7 @@ async fn insert_object_row(
         universal_uuid(&object.universal_identifier)?
     };
 
-    let target_table_name = match &object.target_table_name {
-        Some(name) if name != "DEPRECATED" => name.clone(),
-        _ => compute_object_target_table(
-            &object.name_singular,
-            &runtime.application_universal_identifier,
-        ),
-    };
+    let target_table_name = DEPRECATED_TARGET_TABLE_NAME;
 
     sqlx::query(
         "INSERT INTO core.\"objectMetadata\" \
@@ -827,7 +922,7 @@ async fn insert_object_row(
     .bind(&object.description)
     .bind(&object.icon)
     .bind(&object.color)
-    .bind(&target_table_name)
+    .bind(target_table_name)
     .bind(object.is_remote)
     .bind(object.is_active)
     .bind(object.is_system)
@@ -1026,11 +1121,7 @@ async fn create_composite_enum_columns(
     }
 
     for property in composite_types::composite_properties(ddl_field_type(field.field_type)) {
-        if !matches!(
-            property.field_type,
-            super::column_defs::FieldMetadataType::Select
-                | super::column_defs::FieldMetadataType::MultiSelect
-        ) {
+        if !composite_property_is_enum(property.field_type) {
             continue;
         }
 
@@ -1121,13 +1212,10 @@ async fn apply_object_create(
         }
     }
 
-    let table_name = match &object.target_table_name {
-        Some(name) if name != "DEPRECATED" => name.clone(),
-        _ => compute_object_target_table(
-            &object.name_singular,
-            &runtime.application_universal_identifier,
-        ),
-    };
+    let table_name = compute_object_target_table(
+        &object.name_singular,
+        &runtime.application_universal_identifier,
+    );
 
     let label_identifier_field_id = object
         .label_identifier_field_metadata_universal_identifier
@@ -1162,10 +1250,7 @@ async fn apply_object_create(
         )
         .await?;
 
-        if matches!(
-            field.field_type,
-            FlatFieldMetadataType::Select | FlatFieldMetadataType::MultiSelect
-        ) {
+        if is_enum_field_type(field.field_type) {
             create_select_enum(connection, runtime, &table_name, field).await?;
         }
 
@@ -1258,6 +1343,73 @@ async fn apply_object_create(
     Ok(())
 }
 
+pub async fn object_enum_column_names(
+    connection: &mut PgConnection,
+    object_id: Uuid,
+) -> Result<Vec<String>, RunnerError> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT name, type FROM core.\"fieldMetadata\" WHERE \"objectMetadataId\" = $1",
+    )
+    .bind(object_id)
+    .fetch_all(&mut *connection)
+    .await?;
+
+    let mut columns: Vec<String> = Vec::new();
+
+    for (name, raw_type) in rows {
+        let Some(field_type) = FlatFieldMetadataType::parse(&raw_type) else {
+            continue;
+        };
+
+        if is_enum_field_type(field_type) {
+            if !columns.contains(&name) {
+                columns.push(name);
+            }
+            continue;
+        }
+
+        let ddl_type = ddl_field_type(field_type);
+
+        if composite_types::is_composite_field_metadata_type(ddl_type) {
+            for property in composite_types::composite_properties(ddl_type) {
+                if !matches!(
+                    property.field_type,
+                    super::column_defs::FieldMetadataType::Select
+                        | super::column_defs::FieldMetadataType::MultiSelect
+                        | super::column_defs::FieldMetadataType::Rating
+                ) {
+                    continue;
+                }
+
+                let column = compute_composite_column_name(&name, property.name);
+
+                if !columns.contains(&column) {
+                    columns.push(column);
+                }
+            }
+        }
+    }
+
+    Ok(columns)
+}
+
+pub async fn rename_object_enum_types(
+    connection: &mut PgConnection,
+    schema_name: &str,
+    old_table_name: &str,
+    new_table_name: &str,
+    column_names: &[String],
+) -> Result<(), RunnerError> {
+    for column in column_names {
+        let old_enum = compute_postgres_enum_name(old_table_name, column);
+        let new_enum = compute_postgres_enum_name(new_table_name, column);
+
+        rename_enum_type_if_exists(connection, schema_name, &old_enum, &new_enum).await?;
+    }
+
+    Ok(())
+}
+
 async fn apply_object_update(
     connection: &mut PgConnection,
     runtime: &WorkspaceRuntime,
@@ -1265,11 +1417,21 @@ async fn apply_object_update(
 ) -> Result<(), RunnerError> {
     let object_id = lookup_object_id(connection, runtime, &update.universal_identifier).await?;
 
-    let previous_table: (String,) =
-        sqlx::query_as("SELECT \"targetTableName\" FROM core.\"objectMetadata\" WHERE id = $1")
-            .bind(object_id)
-            .fetch_one(&mut *connection)
-            .await?;
+    let (previous_name_singular, object_application_universal_identifier): (String, String) =
+        sqlx::query_as(
+            "SELECT om.\"nameSingular\", a.\"universalIdentifier\"::text \
+             FROM core.\"objectMetadata\" om \
+             JOIN core.\"application\" a ON a.id = om.\"applicationId\" \
+             WHERE om.id = $1",
+        )
+        .bind(object_id)
+        .fetch_one(&mut *connection)
+        .await?;
+
+    let previous_table = compute_object_target_table(
+        &previous_name_singular,
+        &object_application_universal_identifier,
+    );
 
     sqlx::query(
         "UPDATE core.\"objectMetadata\" SET \
@@ -1300,24 +1462,26 @@ async fn apply_object_update(
 
     if let Some(new_name) = update.update.get("nameSingular").and_then(Value::as_str) {
         let new_table =
-            compute_object_target_table(new_name, &runtime.application_universal_identifier);
+            compute_object_target_table(new_name, &object_application_universal_identifier);
 
-        if new_table != previous_table.0 {
+        if new_table != previous_table {
             table::rename_table(
                 connection,
                 &runtime.schema_name,
-                &previous_table.0,
+                &previous_table,
                 &new_table,
             )
             .await?;
 
-            sqlx::query(
-                "UPDATE core.\"objectMetadata\" SET \"targetTableName\" = $2, \
-                 \"updatedAt\" = now() WHERE id = $1",
+            let enum_columns = object_enum_column_names(connection, object_id).await?;
+
+            rename_object_enum_types(
+                connection,
+                &runtime.schema_name,
+                &previous_table,
+                &new_table,
+                &enum_columns,
             )
-            .bind(object_id)
-            .bind(&new_table)
-            .execute(&mut *connection)
             .await?;
         }
     }
@@ -1332,19 +1496,19 @@ async fn apply_object_delete(
 ) -> Result<(), RunnerError> {
     let object_id = lookup_object_id(connection, runtime, &delete.universal_identifier).await?;
 
-    let table_name: Option<(String,)> =
-        sqlx::query_as("SELECT \"targetTableName\" FROM core.\"objectMetadata\" WHERE id = $1")
-            .bind(object_id)
-            .fetch_optional(&mut *connection)
-            .await?;
+    let table_name = object_table_name(connection, object_id).await?;
+    let enum_columns = object_enum_column_names(connection, object_id).await?;
 
     sqlx::query("DELETE FROM core.\"objectMetadata\" WHERE id = $1")
         .bind(object_id)
         .execute(&mut *connection)
         .await?;
 
-    if let Some((table_name,)) = table_name {
-        table::drop_table(connection, &runtime.schema_name, &table_name, true).await?;
+    table::drop_table(connection, &runtime.schema_name, &table_name, true).await?;
+
+    for column in &enum_columns {
+        let enum_name = compute_postgres_enum_name(&table_name, column);
+        enum_types::drop_enum(connection, &runtime.schema_name, &enum_name).await?;
     }
 
     Ok(())
@@ -1393,10 +1557,7 @@ async fn apply_field_create(
         return Ok(None);
     }
 
-    if matches!(
-        field.field_type,
-        FlatFieldMetadataType::Select | FlatFieldMetadataType::MultiSelect
-    ) {
+    if is_enum_field_type(field.field_type) {
         create_select_enum(connection, runtime, &table_name, &field).await?;
     }
 
@@ -1491,6 +1652,8 @@ async fn apply_field_update(
             ))
         })?;
 
+    let is_morph_head = is_morph_relation_head_row(&existing);
+
     sqlx::query(
         "UPDATE core.\"fieldMetadata\" SET \
          name = COALESCE($2, name), \
@@ -1500,6 +1663,10 @@ async fn apply_field_update(
          \"isActive\" = COALESCE($6, \"isActive\"), \
          description = COALESCE($7, description), \
          options = COALESCE($8, options), \
+         icon = COALESCE($9, icon), \
+         settings = COALESCE($10, settings), \
+         \"relationTargetObjectMetadataId\" = COALESCE($11, \"relationTargetObjectMetadataId\"), \
+         \"relationTargetFieldMetadataId\" = COALESCE($12, \"relationTargetFieldMetadataId\"), \
          \"updatedAt\" = now() \
          WHERE id = $1",
     )
@@ -1511,21 +1678,186 @@ async fn apply_field_update(
     .bind(update.update.get("isActive").and_then(Value::as_bool))
     .bind(update.update.get("description").and_then(Value::as_str))
     .bind(update.update.get("options"))
+    .bind(update.update.get("icon").and_then(Value::as_str))
+    .bind(update.update.get("universalSettings"))
+    .bind(
+        update
+            .update
+            .get("relationTargetObjectMetadataUniversalIdentifier")
+            .and_then(Value::as_str)
+            .map(universal_uuid)
+            .transpose()?,
+    )
+    .bind(
+        update
+            .update
+            .get("relationTargetFieldMetadataUniversalIdentifier")
+            .and_then(Value::as_str)
+            .map(universal_uuid)
+            .transpose()?,
+    )
     .execute(&mut *connection)
     .await?;
 
+    if is_morph_head {
+        return Ok(());
+    }
+
     let table_name = object_table_name(connection, existing.object_metadata_id).await?;
+    let ddl_type = ddl_field_type(existing.field_type);
+    let is_composite = composite_types::is_composite_field_metadata_type(ddl_type);
+    let is_relation = is_morph_or_relation_field_type(existing.field_type);
+
+    let optimistic_name = update
+        .update
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(&existing.name)
+        .to_string();
 
     if let Some(new_name) = update.update.get("name").and_then(Value::as_str) {
         if new_name != existing.name {
-            column::rename_column(
+            if is_composite {
+                for property in composite_types::composite_properties(ddl_type) {
+                    let from_column = compute_composite_column_name(&existing.name, property.name);
+                    let to_column = compute_composite_column_name(new_name, property.name);
+                    column::rename_column(
+                        connection,
+                        &runtime.schema_name,
+                        &table_name,
+                        &from_column,
+                        &to_column,
+                    )
+                    .await?;
+                }
+            } else if is_relation {
+                if relation_type_from_settings(&existing.settings).as_deref() == Some("MANY_TO_ONE")
+                {
+                    column::rename_column(
+                        connection,
+                        &runtime.schema_name,
+                        &table_name,
+                        &compute_relation_join_column_name(&existing.name),
+                        &compute_relation_join_column_name(new_name),
+                    )
+                    .await?;
+                }
+            } else {
+                column::rename_column(
+                    connection,
+                    &runtime.schema_name,
+                    &table_name,
+                    &existing.name,
+                    new_name,
+                )
+                .await?;
+            }
+
+            let enum_columns = enum_columns_for_rename(
+                &existing.name,
+                new_name,
+                ddl_type,
+                is_enum_field_type(existing.field_type),
+            );
+
+            for (old_column, new_column) in enum_columns {
+                let old_enum = compute_postgres_enum_name(&table_name, &old_column);
+                let new_enum = compute_postgres_enum_name(&table_name, &new_column);
+                rename_enum_type_if_exists(connection, &runtime.schema_name, &old_enum, &new_enum)
+                    .await?;
+            }
+        }
+    }
+
+    let optimistic_default = match update.update.get("defaultValue") {
+        Some(value) if !value.is_null() => Some(value.clone()),
+        Some(_) => Some(Value::Null),
+        None => existing.default_value.clone(),
+    };
+
+    if update.update.get("defaultValue").is_some() {
+        apply_field_default_update(
+            connection,
+            runtime,
+            &table_name,
+            &optimistic_name,
+            ddl_type,
+            optimistic_default.as_ref(),
+        )
+        .await?;
+    }
+
+    if update.update.get("isNullable").is_some() {
+        let to_is_nullable = update
+            .update
+            .get("isNullable")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+        apply_field_nullable_update(
+            connection,
+            runtime,
+            &table_name,
+            &optimistic_name,
+            ddl_type,
+            to_is_nullable,
+            optimistic_default.as_ref(),
+        )
+        .await?;
+    }
+
+    if update.update.get("universalSettings").is_some() && is_relation {
+        let from_on_delete = foreign_key_on_delete_from_settings(&existing.settings);
+        let to_settings = update.update.get("universalSettings");
+        let to_on_delete = foreign_key_on_delete_from_settings(&to_settings.cloned());
+
+        let is_many_to_one =
+            relation_type_from_settings(&existing.settings).as_deref() == Some("MANY_TO_ONE");
+
+        if is_many_to_one && to_on_delete != from_on_delete {
+            let join_column = compute_relation_join_column_name(&optimistic_name);
+
+            let foreign_key_name = foreign_key::get_foreign_key_name(
                 connection,
                 &runtime.schema_name,
                 &table_name,
-                &existing.name,
-                new_name,
+                &join_column,
+            )
+            .await?
+            .ok_or_else(|| {
+                RunnerError::execution_failed(format!(
+                    "NOT_SUPPORTED: Foreign key not found on {table_name}.{join_column}"
+                ))
+            })?;
+
+            let target_object_id =
+                existing.relation_target_object_metadata_id.ok_or_else(|| {
+                    RunnerError::execution_failed(
+                        "OBJECT_METADATA_NOT_FOUND: relation field has no target object metadata",
+                    )
+                })?;
+
+            let target_table = object_table_name(connection, target_object_id).await?;
+
+            foreign_key::drop_foreign_key(
+                connection,
+                &runtime.schema_name,
+                &table_name,
+                &foreign_key_name,
             )
             .await?;
+
+            let foreign_key = WorkspaceSchemaForeignKeyDefinition {
+                table_name: table_name.clone(),
+                column_name: join_column,
+                referenced_table_name: target_table,
+                referenced_column_name: "id".to_string(),
+                on_delete: to_on_delete,
+                on_update: None,
+            };
+
+            foreign_key::create_foreign_key(connection, &runtime.schema_name, &foreign_key, false)
+                .await?;
         }
     }
 
@@ -1539,13 +1871,13 @@ async fn apply_field_update(
             connection,
             &runtime.schema_name,
             &table_name,
-            &[SEARCH_VECTOR_FIELD_NAME],
-            true,
+            &[optimistic_name.as_str()],
+            false,
         )
         .await?;
 
         let definitions = vec![WorkspaceSchemaColumnDefinition {
-            name: SEARCH_VECTOR_FIELD_NAME.to_string(),
+            name: optimistic_name.clone(),
             column_type: "tsvector".to_string(),
             is_nullable: Some(true),
             default: None,
@@ -1561,12 +1893,220 @@ async fn apply_field_update(
             &runtime.schema_name,
             &table_name,
             &definitions,
-            true,
+            false,
         )
         .await?;
+
+        let related_indexes: Vec<(String, bool, Option<String>, String)> = sqlx::query_as(
+            "SELECT im.name, im.\"isUnique\", im.\"indexWhereClause\", im.\"indexType\"::text \
+             FROM core.\"indexMetadata\" im \
+             JOIN core.\"indexFieldMetadata\" ifm ON ifm.\"indexMetadataId\" = im.id \
+             WHERE ifm.\"fieldMetadataId\" = $1",
+        )
+        .bind(existing.id)
+        .fetch_all(&mut *connection)
+        .await?;
+
+        for (index_name, is_unique, where_clause, index_type) in related_indexes {
+            let definition = WorkspaceSchemaIndexDefinition {
+                name: index_name,
+                columns: vec![optimistic_name.clone()],
+                is_unique,
+                index_type: Some(index_type),
+                where_clause,
+            };
+
+            index::create_index(connection, &runtime.schema_name, &table_name, &definition).await?;
+        }
     }
 
     Ok(())
+}
+
+fn composite_property_is_enum(field_type: super::column_defs::FieldMetadataType) -> bool {
+    matches!(
+        field_type,
+        super::column_defs::FieldMetadataType::Select
+            | super::column_defs::FieldMetadataType::MultiSelect
+            | super::column_defs::FieldMetadataType::Rating
+    )
+}
+
+fn enum_columns_for_rename(
+    old_name: &str,
+    new_name: &str,
+    ddl_type: super::column_defs::FieldMetadataType,
+    is_enum_field: bool,
+) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+
+    if is_enum_field {
+        pairs.push((old_name.to_string(), new_name.to_string()));
+    }
+
+    if composite_types::is_composite_field_metadata_type(ddl_type) {
+        for property in composite_types::composite_properties(ddl_type) {
+            if !composite_property_is_enum(property.field_type) {
+                continue;
+            }
+
+            pairs.push((
+                compute_composite_column_name(old_name, property.name),
+                compute_composite_column_name(new_name, property.name),
+            ));
+        }
+    }
+
+    pairs
+}
+
+async fn apply_field_default_update(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    table_name: &str,
+    field_name: &str,
+    ddl_type: super::column_defs::FieldMetadataType,
+    default_value: Option<&Value>,
+) -> Result<(), RunnerError> {
+    if ddl_type == super::column_defs::FieldMetadataType::TsVector {
+        return Ok(());
+    }
+
+    if composite_types::is_composite_field_metadata_type(ddl_type) {
+        for property in composite_types::composite_properties(ddl_type) {
+            let column_name = compute_composite_column_name(field_name, property.name);
+            let column_type = column_defs::field_metadata_type_to_column_type(property.field_type)
+                .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+            let property_default = default_value
+                .filter(|value| value.is_object())
+                .and_then(|value| value.get(property.name));
+
+            let serialized = column_defs::serialize_default_value(
+                property_default,
+                column_type,
+                &runtime.schema_name,
+                table_name,
+                &column_name,
+            )
+            .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+            let alteration = if serialized == "NULL" {
+                column::AlterColumnDefault::SetNull
+            } else {
+                column::AlterColumnDefault::Literal(serialized)
+            };
+
+            column::alter_column_default(
+                connection,
+                &runtime.schema_name,
+                table_name,
+                &column_name,
+                alteration,
+            )
+            .await?;
+        }
+
+        return Ok(());
+    }
+
+    let column_type = column_defs::field_metadata_type_to_column_type(ddl_type)
+        .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+    let serialized = column_defs::serialize_default_value(
+        default_value,
+        column_type,
+        &runtime.schema_name,
+        table_name,
+        field_name,
+    )
+    .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+    let alteration = if serialized == "NULL" {
+        column::AlterColumnDefault::SetNull
+    } else {
+        column::AlterColumnDefault::Literal(serialized)
+    };
+
+    column::alter_column_default(
+        connection,
+        &runtime.schema_name,
+        table_name,
+        field_name,
+        alteration,
+    )
+    .await
+    .map_err(|error| RunnerError::execution_failed(error.to_string()))
+}
+
+async fn apply_field_nullable_update(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    table_name: &str,
+    field_name: &str,
+    ddl_type: super::column_defs::FieldMetadataType,
+    to_is_nullable: bool,
+    default_value: Option<&Value>,
+) -> Result<(), RunnerError> {
+    if matches!(
+        ddl_type,
+        super::column_defs::FieldMetadataType::Relation
+            | super::column_defs::FieldMetadataType::MorphRelation
+    ) || ddl_type == super::column_defs::FieldMetadataType::TsVector
+    {
+        return Ok(());
+    }
+
+    if composite_types::is_composite_field_metadata_type(ddl_type) {
+        for property in composite_types::composite_properties(ddl_type) {
+            let column_name = compute_composite_column_name(field_name, property.name);
+
+            column::alter_column_nullable(
+                connection,
+                &runtime.schema_name,
+                table_name,
+                &column_name,
+                true,
+                None,
+            )
+            .await?;
+        }
+
+        return Ok(());
+    }
+
+    let backfill_value = if to_is_nullable {
+        None
+    } else {
+        let column_type = column_defs::field_metadata_type_to_column_type(ddl_type)
+            .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+        let serialized = column_defs::serialize_default_value(
+            default_value,
+            column_type,
+            &runtime.schema_name,
+            table_name,
+            field_name,
+        )
+        .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+        if serialized == "NULL" {
+            None
+        } else {
+            Some(serialized)
+        }
+    };
+
+    column::alter_column_nullable(
+        connection,
+        &runtime.schema_name,
+        table_name,
+        field_name,
+        to_is_nullable,
+        backfill_value.as_deref(),
+    )
+    .await
+    .map_err(|error| RunnerError::execution_failed(error.to_string()))
 }
 
 async fn apply_field_delete(
@@ -1585,9 +2125,22 @@ async fn apply_field_delete(
         .execute(&mut *connection)
         .await?;
 
-    let table_name = object_table_name(connection, existing.object_metadata_id).await?;
+    if is_morph_relation_head_row(&existing) {
+        return Ok(());
+    }
 
-    let column_names = if existing.field_type == FlatFieldMetadataType::Relation {
+    let table_name = object_table_name(connection, existing.object_metadata_id).await?;
+    let ddl_type = ddl_field_type(existing.field_type);
+
+    let column_names = if composite_types::is_composite_field_metadata_type(ddl_type) {
+        composite_types::composite_properties(ddl_type)
+            .iter()
+            .map(|property| compute_composite_column_name(&existing.name, property.name))
+            .collect()
+    } else if matches!(
+        existing.field_type,
+        FlatFieldMetadataType::Relation | FlatFieldMetadataType::MorphRelation
+    ) {
         vec![compute_relation_join_column_name(&existing.name)]
     } else {
         vec![existing.name.clone()]
@@ -1603,6 +2156,24 @@ async fn apply_field_delete(
         true,
     )
     .await?;
+
+    if is_enum_field_type(existing.field_type) {
+        let enum_name = compute_postgres_enum_name(&table_name, &existing.name);
+        enum_types::drop_enum(connection, &runtime.schema_name, &enum_name).await?;
+    }
+
+    if composite_types::is_composite_field_metadata_type(ddl_type) {
+        for property in composite_types::composite_properties(ddl_type) {
+            if !composite_property_is_enum(property.field_type) {
+                continue;
+            }
+
+            let column_name = compute_composite_column_name(&existing.name, property.name);
+            let enum_name = compute_postgres_enum_name(&table_name, &column_name);
+
+            enum_types::drop_enum(connection, &runtime.schema_name, &enum_name).await?;
+        }
+    }
 
     Ok(())
 }
@@ -1818,7 +2389,10 @@ async fn apply_index_update(
     .await?;
 
     let Some((index_id, previous_name)) = existing else {
-        return Ok(());
+        return Err(RunnerError::execution_failed(format!(
+            "FLAT_ENTITY_NOT_FOUND: index metadata {} not found",
+            update.universal_identifier
+        )));
     };
 
     let object_id = lookup_object_id(
@@ -1827,27 +2401,34 @@ async fn apply_index_update(
         &updated_index.object_metadata_universal_identifier,
     )
     .await?;
-    if previous_name != updated_index.name {
-        let _ = index::drop_index(connection, &runtime.schema_name, &previous_name, false).await;
+    let table_name = object_table_name(connection, object_id).await?;
 
-        let table_name = object_table_name(connection, object_id).await?;
-        let definition = index_definition(connection, runtime, &updated_index).await?;
+    index::drop_index(connection, &runtime.schema_name, &previous_name, false).await?;
 
-        index::create_index(connection, &runtime.schema_name, &table_name, &definition).await?;
-
-        sqlx::query(
-            "UPDATE core.\"indexMetadata\" SET name = $2, \"isUnique\" = $3, \
-             \"indexWhereClause\" = $4, \"indexType\" = $5, \"updatedAt\" = now() \
-             WHERE id = $1",
-        )
+    sqlx::query("DELETE FROM core.\"indexMetadata\" WHERE id = $1")
         .bind(index_id)
-        .bind(&updated_index.name)
-        .bind(updated_index.is_unique)
-        .bind(&updated_index.index_where_clause)
-        .bind(updated_index.index_type.as_str())
         .execute(&mut *connection)
         .await?;
-    }
+
+    insert_index_row(
+        connection,
+        runtime,
+        &updated_index,
+        &PreallocatedIds::default(),
+    )
+    .await?;
+
+    let definition = index_definition(connection, runtime, &updated_index).await?;
+
+    let validated =
+        index::validate_and_return_index_where_clause(definition.where_clause.as_deref())?;
+
+    let definition = WorkspaceSchemaIndexDefinition {
+        where_clause: validated,
+        ..definition
+    };
+
+    index::create_index(connection, &runtime.schema_name, &table_name, &definition).await?;
 
     Ok(())
 }
@@ -1880,6 +2461,251 @@ async fn apply_index_delete(
     Ok(())
 }
 
+pub struct OptionRow {
+    pub universal_identifier: String,
+    pub value: String,
+    pub position: f64,
+}
+
+async fn option_rows_for_field(
+    connection: &mut PgConnection,
+    field_id: Uuid,
+) -> Result<Vec<OptionRow>, RunnerError> {
+    let rows: Vec<(String, String, f64)> = sqlx::query_as(
+        "SELECT \"universalIdentifier\"::text, value, \"position\" \
+         FROM core.\"fieldMetadataOption\" WHERE \"fieldMetadataId\" = $1",
+    )
+    .bind(field_id)
+    .fetch_all(&mut *connection)
+    .await?;
+
+    let mut options: Vec<OptionRow> = rows
+        .into_iter()
+        .map(|(universal_identifier, value, position)| OptionRow {
+            universal_identifier,
+            value,
+            position,
+        })
+        .collect();
+
+    options.sort_by(|a, b| {
+        a.position
+            .partial_cmp(&b.position)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.universal_identifier.cmp(&b.universal_identifier))
+    });
+
+    Ok(options)
+}
+
+async fn current_enum_values(
+    connection: &mut PgConnection,
+    schema_name: &str,
+    enum_name: &str,
+) -> Result<Vec<String>, RunnerError> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT e.enumlabel::text FROM pg_type t \
+         JOIN pg_namespace n ON n.oid = t.typnamespace \
+         JOIN pg_enum e ON e.enumtypid = t.oid \
+         WHERE n.nspname = $1 AND t.typname = $2 AND t.typtype = 'e' \
+         ORDER BY e.enumsortorder ASC",
+    )
+    .bind(schema_name)
+    .bind(enum_name)
+    .fetch_all(&mut *connection)
+    .await?;
+
+    Ok(rows.into_iter().map(|(label,)| label).collect())
+}
+
+pub async fn apply_enum_change_from_option_rows(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    field: &FieldRow,
+    table_name: &str,
+    from_rows: &[OptionRow],
+    to_rows: &[OptionRow],
+) -> Result<bool, RunnerError> {
+    if to_rows.is_empty() {
+        return Ok(false);
+    }
+
+    let to_value_by_identifier: std::collections::HashMap<&str, &str> = to_rows
+        .iter()
+        .map(|row| (row.universal_identifier.as_str(), row.value.as_str()))
+        .collect();
+
+    let mut to_values: Vec<String> = Vec::new();
+    for row in to_rows {
+        if !to_values.iter().any(|value| value == &row.value) {
+            to_values.push(row.value.clone());
+        }
+    }
+
+    let mut old_to_new_map: Vec<(String, String)> = Vec::new();
+    for row in from_rows {
+        let mapped = to_value_by_identifier
+            .get(row.universal_identifier.as_str())
+            .map(|value| value.to_string())
+            .or_else(|| {
+                to_values
+                    .iter()
+                    .any(|value| value == &row.value)
+                    .then(|| row.value.clone())
+            });
+
+        if let Some(to_value) = mapped {
+            if !old_to_new_map
+                .iter()
+                .any(|(from_value, _)| from_value == &row.value)
+            {
+                old_to_new_map.push((row.value.clone(), to_value));
+            }
+        }
+    }
+
+    let is_value_moved = old_to_new_map
+        .iter()
+        .any(|(from_value, to_value)| from_value != to_value);
+
+    let from_values: Vec<&str> = from_rows.iter().map(|row| row.value.as_str()).collect();
+
+    let enum_name = compute_postgres_enum_name(table_name, &field.name);
+    let current_values = current_enum_values(connection, &runtime.schema_name, &enum_name).await?;
+
+    let mut enum_values = to_values.clone();
+    for value in &current_values {
+        if !from_values.contains(&value.as_str()) && !enum_values.iter().any(|v| v == value) {
+            enum_values.push(value.clone());
+        }
+    }
+
+    if !is_value_moved
+        && enum_values.len() == current_values.len()
+        && enum_values
+            .iter()
+            .zip(current_values.iter())
+            .all(|(a, b)| a == b)
+    {
+        return Ok(false);
+    }
+
+    for value in enum_values
+        .iter()
+        .filter(|value| {
+            !old_to_new_map
+                .iter()
+                .any(|(from_value, _)| from_value == *value)
+                && !current_values.contains(value)
+        })
+        .cloned()
+        .collect::<Vec<String>>()
+    {
+        old_to_new_map.push((value.clone(), value.clone()));
+    }
+
+    let column_type = if enum_name.is_empty() {
+        String::new()
+    } else {
+        format!("\"{}\".\"{}\"", runtime.schema_name, enum_name)
+    };
+
+    let is_array = field.field_type == FlatFieldMetadataType::MultiSelect;
+
+    let serialized_default = column_defs::serialize_default_value(
+        field.default_value.as_ref(),
+        "enum",
+        &runtime.schema_name,
+        table_name,
+        &field.name,
+    )
+    .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+    let column_definition = WorkspaceSchemaColumnDefinition {
+        name: field.name.clone(),
+        column_type,
+        is_nullable: Some(field.is_nullable),
+        default: Some(serialized_default),
+        is_primary: false,
+        is_array,
+        as_expression: None,
+        generated_type: None,
+        is_generated_always_as_identity: false,
+    };
+
+    let value_refs: Vec<&str> = enum_values.iter().map(String::as_str).collect();
+
+    enum_types::alter_enum_values(
+        connection,
+        &runtime.schema_name,
+        table_name,
+        &column_definition,
+        &value_refs,
+        &old_to_new_map,
+    )
+    .await?;
+
+    Ok(true)
+}
+
+async fn sync_field_enum_from_option_rows(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    field_id: Uuid,
+    from_rows: &[OptionRow],
+) -> Result<(), RunnerError> {
+    let field: Option<(Uuid, String, String, String, bool, Option<Value>)> = sqlx::query_as(
+        "SELECT id, \"objectMetadataId\"::text, name, type, COALESCE(\"isNullable\", true), \
+         \"defaultValue\" \
+         FROM core.\"fieldMetadata\" WHERE id = $1",
+    )
+    .bind(field_id)
+    .fetch_optional(&mut *connection)
+    .await?;
+
+    let Some((id, object_id_raw, name, raw_type, is_nullable, default_value)) = field else {
+        return Ok(());
+    };
+
+    let Some(field_type) = FlatFieldMetadataType::parse(&raw_type) else {
+        return Ok(());
+    };
+
+    if !is_enum_field_type(field_type) {
+        return Ok(());
+    }
+
+    let object_id = universal_uuid(&object_id_raw)?;
+    let table_name = object_table_name(connection, object_id).await?;
+    let to_rows = option_rows_for_field(connection, id).await?;
+
+    let field_row = FieldRow {
+        id,
+        object_metadata_id: object_id,
+        label: name.clone(),
+        name,
+        field_type,
+        is_nullable,
+        default_value,
+        settings: None,
+        relation_target_object_metadata_id: None,
+        universal_identifier: String::new(),
+        morph_id: None,
+    };
+
+    apply_enum_change_from_option_rows(
+        connection,
+        runtime,
+        &field_row,
+        &table_name,
+        from_rows,
+        &to_rows,
+    )
+    .await?;
+
+    Ok(())
+}
+
 async fn apply_option_create(
     connection: &mut PgConnection,
     runtime: &WorkspaceRuntime,
@@ -1887,14 +2713,15 @@ async fn apply_option_create(
 ) -> Result<(), RunnerError> {
     let option = option_entity(create.flat_entity.as_ref())?.clone();
 
-    let field_id = lookup_field_row(
+    let field = lookup_field_row(
         connection,
         runtime,
         &option.field_metadata_universal_identifier,
     )
     .await?
-    .ok_or_else(|| RunnerError::execution_failed("option field metadata not found"))?
-    .id;
+    .ok_or_else(|| RunnerError::execution_failed("option field metadata not found"))?;
+
+    let from_rows = option_rows_for_field(connection, field.id).await?;
 
     sqlx::query(
         "INSERT INTO core.\"fieldMetadataOption\" \
@@ -1908,13 +2735,15 @@ async fn apply_option_create(
     .bind(runtime.application_id)
     .bind(&option.overrides)
     .bind(option.is_active)
-    .bind(field_id)
+    .bind(field.id)
     .bind(&option.value)
     .bind(&option.label)
     .bind(&option.color)
     .bind(option.position)
     .execute(&mut *connection)
     .await?;
+
+    sync_field_enum_from_option_rows(connection, runtime, field.id, &from_rows).await?;
 
     Ok(())
 }
@@ -1924,6 +2753,21 @@ async fn apply_option_update(
     runtime: &WorkspaceRuntime,
     update: &UniversalUpdateAction,
 ) -> Result<(), RunnerError> {
+    let existing: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, \"fieldMetadataId\" FROM core.\"fieldMetadataOption\" \
+         WHERE \"workspaceId\" = $1 AND \"universalIdentifier\" = $2",
+    )
+    .bind(runtime.workspace_id)
+    .bind(universal_uuid(&update.universal_identifier)?)
+    .fetch_optional(&mut *connection)
+    .await?;
+
+    let Some((option_id, field_id)) = existing else {
+        return Ok(());
+    };
+
+    let from_rows = option_rows_for_field(connection, field_id).await?;
+
     sqlx::query(
         "UPDATE core.\"fieldMetadataOption\" SET \
          value = COALESCE($3, value), \
@@ -1932,10 +2776,9 @@ async fn apply_option_update(
          \"position\" = COALESCE($6, \"position\"), \
          \"isActive\" = COALESCE($7, \"isActive\"), \
          \"updatedAt\" = now() \
-         WHERE \"workspaceId\" = $1 AND \"universalIdentifier\" = $2",
+         WHERE id = $1",
     )
-    .bind(runtime.workspace_id)
-    .bind(universal_uuid(&update.universal_identifier)?)
+    .bind(option_id)
     .bind(update.update.get("value").and_then(Value::as_str))
     .bind(update.update.get("label").and_then(Value::as_str))
     .bind(update.update.get("color").and_then(Value::as_str))
@@ -1943,6 +2786,8 @@ async fn apply_option_update(
     .bind(update.update.get("isActive").and_then(Value::as_bool))
     .execute(&mut *connection)
     .await?;
+
+    sync_field_enum_from_option_rows(connection, runtime, field_id, &from_rows).await?;
 
     Ok(())
 }
@@ -1952,14 +2797,27 @@ async fn apply_option_delete(
     runtime: &WorkspaceRuntime,
     delete: &UniversalDeleteAction,
 ) -> Result<(), RunnerError> {
-    sqlx::query(
-        "DELETE FROM core.\"fieldMetadataOption\" \
+    let existing: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, \"fieldMetadataId\" FROM core.\"fieldMetadataOption\" \
          WHERE \"workspaceId\" = $1 AND \"universalIdentifier\" = $2",
     )
     .bind(runtime.workspace_id)
     .bind(universal_uuid(&delete.universal_identifier)?)
-    .execute(&mut *connection)
+    .fetch_optional(&mut *connection)
     .await?;
+
+    let Some((option_id, field_id)) = existing else {
+        return Ok(());
+    };
+
+    let from_rows = option_rows_for_field(connection, field_id).await?;
+
+    sqlx::query("DELETE FROM core.\"fieldMetadataOption\" WHERE id = $1")
+        .bind(option_id)
+        .execute(&mut *connection)
+        .await?;
+
+    sync_field_enum_from_option_rows(connection, runtime, field_id, &from_rows).await?;
 
     Ok(())
 }
