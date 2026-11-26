@@ -1433,6 +1433,38 @@ async fn apply_object_update(
         &object_application_universal_identifier,
     );
 
+    let label_identifier_universal = update
+        .update
+        .get("labelIdentifierFieldMetadataUniversalIdentifier")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    let label_identifier_field_id = match label_identifier_universal {
+        Some(identifier) => Some(resolve_field_id(
+            connection,
+            runtime,
+            identifier,
+            &PreallocatedIds::default(),
+        )
+        .await?),
+        None => None,
+    };
+
+    let image_identifier_universal = update
+        .update
+        .get("imageIdentifierFieldMetadataUniversalIdentifier")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    let image_identifier_field_id = match image_identifier_universal {
+        Some(identifier) => Some(resolve_field_id(
+            connection,
+            runtime,
+            identifier,
+            &PreallocatedIds::default(),
+        )
+        .await?),
+        None => None,
+    };
+
     sqlx::query(
         "UPDATE core.\"objectMetadata\" SET \
          \"nameSingular\" = COALESCE($2, \"nameSingular\"), \
@@ -1444,6 +1476,8 @@ async fn apply_object_update(
          color = COALESCE($8, color), \
          \"isActive\" = COALESCE($9, \"isActive\"), \
          \"isSearchable\" = COALESCE($10, \"isSearchable\"), \
+         \"labelIdentifierFieldMetadataId\" = COALESCE($11, \"labelIdentifierFieldMetadataId\"), \
+         \"imageIdentifierFieldMetadataId\" = COALESCE($12, \"imageIdentifierFieldMetadataId\"), \
          \"updatedAt\" = now() \
          WHERE id = $1",
     )
@@ -1457,6 +1491,8 @@ async fn apply_object_update(
     .bind(update.update.get("color").and_then(Value::as_str))
     .bind(update.update.get("isActive").and_then(Value::as_bool))
     .bind(update.update.get("isSearchable").and_then(Value::as_bool))
+    .bind(label_identifier_field_id)
+    .bind(image_identifier_field_id)
     .execute(&mut *connection)
     .await?;
 
