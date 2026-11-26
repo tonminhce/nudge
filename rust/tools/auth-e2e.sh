@@ -224,6 +224,10 @@ check "signed out session rejected" 401 "$STATUS"
 
 rm -f "$HDRS"
 
+for section in "$(dirname "$0")"/e2e/*.inc.sh; do
+  [ -f "$section" ] && source "$section"
+done
+
 plus_one_year="$(date -u -v+1y "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+1 year" "+%Y-%m-%dT%H:%M:%SZ")"
 
 get /auth/roles -H "authorization: Bearer $ACCESS_TOKEN"

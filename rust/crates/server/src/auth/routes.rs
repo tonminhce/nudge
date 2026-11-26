@@ -28,6 +28,9 @@ pub fn router() -> Router<AppState> {
         .route("/auth/api-keys", post(create_api_key))
         .route("/auth/api-keys/token", post(api_key_token))
         .route("/auth/api-keys/revoke", post(revoke_api_key))
+        .merge(super::two_factor::router())
+        .merge(super::account_tokens::router())
+        .merge(super::workspace_lifecycle::router())
 }
 
 fn response_with_cookies(
