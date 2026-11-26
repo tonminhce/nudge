@@ -1,0 +1,67 @@
+{
+  "normalized": {
+    "page1": {
+      "data": {
+        "people": {
+          "edges": [
+            {
+              "cursor": "<cursor>",
+              "node": {
+                "name": {
+                  "lastName": "Zhao"
+                }
+              }
+            },
+            {
+              "cursor": "<cursor>",
+              "node": {
+                "name": {
+                  "lastName": "Field"
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "<cursor>",
+            "hasNextPage": true,
+            "hasPreviousPage": false,
+            "startCursor": "<cursor>"
+          },
+          "totalCount": 5
+        }
+      }
+    },
+    "page2": {
+      "data": {
+        "people": {
+          "edges": [
+            {
+              "cursor": "<cursor>",
+              "node": {
+                "name": {
+                  "lastName": "Collison"
+                }
+              }
+            },
+            {
+              "cursor": "<cursor>",
+              "node": {
+                "name": {
+                  "lastName": "Chesky"
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "<cursor>",
+            "hasNextPage": true,
+            "hasPreviousPage": true,
+            "startCursor": "<cursor>"
+          },
+          "totalCount": 5
+        }
+      }
+    }
+  },
+  "scenario": "orderBy-pagination"
+}

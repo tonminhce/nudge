@@ -1,0 +1,20 @@
+{
+  "normalized": {
+    "companyFilter": {
+      "data": {
+        "companies": {
+          "edges": [
+            {
+              "node": {
+                "id": "<uuid>",
+                "name": "Notion"
+              }
+            }
+          ],
+          "totalCount": 1
+        }
+      }
+    }
+  },
+  "scenario": "company-filter"
+}

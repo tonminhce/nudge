@@ -1,0 +1,87 @@
+{
+  "normalized": {
+    "create": {
+      "data": {
+        "createPerson": {
+          "createdAt": "<iso>",
+          "id": "<uuid>",
+          "name": {
+            "firstName": "Parity"
+          },
+          "position": 0
+        }
+      }
+    },
+    "destroy": {
+      "data": {
+        "destroyPerson": {
+          "id": "<uuid>"
+        }
+      }
+    },
+    "gone": {
+      "data": {
+        "person": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "NOT_FOUND",
+            "subCode": "RECORD_NOT_FOUND",
+            "userFriendlyMessage": "This record does not exist or has been deleted."
+          },
+          "message": "Record not found"
+        }
+      ]
+    },
+    "hiddenRead": {
+      "data": {
+        "person": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "NOT_FOUND",
+            "subCode": "RECORD_NOT_FOUND",
+            "userFriendlyMessage": "This record does not exist or has been deleted."
+          },
+          "message": "Record not found"
+        }
+      ]
+    },
+    "read": {
+      "data": {
+        "person": {
+          "deletedAt": null,
+          "id": "<uuid>"
+        }
+      }
+    },
+    "restore": {
+      "data": {
+        "restorePerson": {
+          "deletedAt": null,
+          "id": "<uuid>"
+        }
+      }
+    },
+    "softDelete": {
+      "data": {
+        "deletePerson": {
+          "deletedAt": "<iso>",
+          "id": "<uuid>"
+        }
+      }
+    },
+    "update": {
+      "data": {
+        "updatePerson": {
+          "id": "<uuid>",
+          "jobTitle": "Harness",
+          "updatedAt": "<iso>"
+        }
+      }
+    }
+  },
+  "scenario": "mutation-roundtrip"
+}
