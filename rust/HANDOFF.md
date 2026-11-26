@@ -61,6 +61,26 @@ The script sources every `tools/e2e/*.inc.sh` fragment after the core checks. Th
 impersonation fragments hardcode `origin: http://127.0.0.1:3000`, so run the server on port
 3000 (the CSRF origin check is origin-strict by design).
 
+## Comparing against the live Node reference
+The reference container `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001, database
+`twenty_ref`) runs the REAL product. Seed one workspace with `python3 -I /tmp/seed-ref.py`
+(recreate the container per MAP.md's toolchain section first if it was removed; sign-up is
+gated once a workspace exists in single-workspace mode — the first user is the admin).
+- `python3 -I tools/parity-compare.py` — same request set against both servers, normalized
+  and diffed. Current scoreboard: `/healthz` (Terminus shape) and the NestJS fallback 404
+  body match; `/graphql` + `/metadata` answers are the wave 4 gap; the SPA catch-all is the
+  wave 5 gap.
+- `python3 -I tools/parity-bench.py` — 8 workers x 250 requests per scenario on this
+  10-core machine: healthz rust 2125 rps / p99 7.9ms vs node 1466 rps / p99 73.8ms.
+- `rust-anything app record --http` against the reference is wired in
+  `rust/app-cases/rust-anything.json` but currently unusable: the tool abandons server starts
+  slower than ~30-60s (the Node image boots in 2-5 minutes) even with `--ready-timeout 600`.
+  A later session should retry with a start wrapper that blocks until the port answers.
+- Wave 3 golden fixtures live in `rust/baseline/`: `workspace-schema-2.61.0.sql` (39 tables,
+  the U7 equivalence target), `object-metadata-2.61.0.json` (37 objects),
+  `field-metadata-2.61.0.json` (636), `index-metadata-2.61.0.json` (123),
+  `field-metadata-option-2.61.0.json`.
+
 ## Hard rules (see RULES.md)
 - R-001: no comments in code (Rust, SQL, shell). Prose goes in the .md docs instead.
 - Migrations are append-only once they have run; never rewrite one, add a new file.
