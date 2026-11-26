@@ -1,0 +1,25 @@
+[package]
+name = "twenty-server"
+version = "0.1.0"
+description = "Rust server for the Twenty CRM port: GraphQL, REST and the metadata engine."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "twenty-server"
+path = "src/main.rs"
+
+[dependencies]
+twenty-core = { workspace = true }
+
+anyhow = { workspace = true }
+axum = { workspace = true }
+redis = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }

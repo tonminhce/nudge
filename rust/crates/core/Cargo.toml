@@ -1,0 +1,13 @@
+[package]
+name = "twenty-core"
+version = "0.1.0"
+description = "Shared primitives for the Rust port of Twenty CRM: configuration, errors and identifiers."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+redis = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }

@@ -1,0 +1,9 @@
+rust/target/
+rust/trunk/
+rust/dist/
+rust/.env
+rust/.local-storage/
+**/*.rs.bk
+.DS_Store
+Thumbs.db
+analyze.json
