@@ -148,7 +148,10 @@ pub fn select_operation(request: &ExecutionRequest) -> Result<SelectedOperation,
     if operation.fields.len() > 1 {
         return Err(GraphQlError::validation(format!(
             "Operation \"{}\" has more than one root field.",
-            request.operation_name.clone().unwrap_or_else(|| operation.kind.as_str().to_string())
+            request
+                .operation_name
+                .clone()
+                .unwrap_or_else(|| operation.kind.as_str().to_string())
         )));
     }
 
@@ -317,7 +320,9 @@ impl<'a> Parser<'a> {
         }
 
         if operations.is_empty() && fragments.is_empty() {
-            return Err(GraphQlError::parse("Syntax Error: Expected Name, found <EOF>."));
+            return Err(GraphQlError::parse(
+                "Syntax Error: Expected Name, found <EOF>.",
+            ));
         }
 
         if operations.is_empty() {
@@ -332,7 +337,10 @@ impl<'a> Parser<'a> {
             operation.fields = resolved;
         }
 
-        Ok(ParsedDocument { operations, fragments })
+        Ok(ParsedDocument {
+            operations,
+            fragments,
+        })
     }
 
     fn parse_fragment_definition(
@@ -396,7 +404,10 @@ impl<'a> Parser<'a> {
 
         let mut name = None;
 
-        if self.peek_byte_after_skipping().is_some_and(|byte| NAME_START.contains(&byte)) {
+        if self
+            .peek_byte_after_skipping()
+            .is_some_and(|byte| NAME_START.contains(&byte))
+        {
             name = Some(self.read_name()?);
         }
 
@@ -503,11 +514,11 @@ impl<'a> Parser<'a> {
                         .is_some_and(|byte| byte != b'{')
                     {
                         if self.starts_with("on")
-                        && self
-                            .input
-                            .get(self.position + 2)
-                            .is_none_or(|byte| !Self::is_word_char(*byte))
-                    {
+                            && self
+                                .input
+                                .get(self.position + 2)
+                                .is_none_or(|byte| !Self::is_word_char(*byte))
+                        {
                             self.advance();
                             self.advance();
                             self.read_name()?;
@@ -787,8 +798,9 @@ impl<'a> Parser<'a> {
 
                     let end = self.position;
 
-                    let slice = std::str::from_utf8(&self.input[start..end])
-                        .map_err(|_| GraphQlError::parse("Syntax Error: Invalid UTF-8 in string."))?;
+                    let slice = std::str::from_utf8(&self.input[start..end]).map_err(|_| {
+                        GraphQlError::parse("Syntax Error: Invalid UTF-8 in string.")
+                    })?;
 
                     result.push_str(slice);
                 }
@@ -804,7 +816,10 @@ impl<'a> Parser<'a> {
         }
 
         while let Some(byte) = self.peek_byte() {
-            let previous = self.position.checked_sub(1).and_then(|index| self.input.get(index));
+            let previous = self
+                .position
+                .checked_sub(1)
+                .and_then(|index| self.input.get(index));
 
             let continues = byte.is_ascii_digit()
                 || byte == b'.'
@@ -915,10 +930,7 @@ mod tests {
             document.operations[0].fields[0].argument("input"),
             Some(&json!({ "object": { "nameSingular": "rocket" } }))
         );
-        assert_eq!(
-            document.operations[0].fields[0].selection[0].name,
-            "id"
-        );
+        assert_eq!(document.operations[0].fields[0].selection[0].name, "id");
     }
 
     #[test]
@@ -943,9 +955,11 @@ mod tests {
 
     #[test]
     fn anonymous_query_is_supported() {
-        let document =
-            parse("{ objects(filter: { isActive: { eq: true } }) { edges { node { id } } } }", json!({}))
-                .unwrap();
+        let document = parse(
+            "{ objects(filter: { isActive: { eq: true } }) { edges { node { id } } } }",
+            json!({}),
+        )
+        .unwrap();
 
         assert_eq!(document.operations[0].kind, OperationKind::Query);
         assert_eq!(document.operations[0].fields[0].name, "objects");
@@ -953,8 +967,11 @@ mod tests {
 
     #[test]
     fn aliases_are_tracked() {
-        let document = parse("query Q { first: objects { edges { node { id } } } }", json!({}))
-            .unwrap();
+        let document = parse(
+            "query Q { first: objects { edges { node { id } } } }",
+            json!({}),
+        )
+        .unwrap();
 
         assert_eq!(
             document.operations[0].fields[0].alias.as_deref(),
@@ -983,9 +1000,11 @@ mod tests {
 
     #[test]
     fn strings_with_escapes_are_decoded() {
-        let document =
-            parse("mutation { deleteOneObject(input: { id: \"a\\u0062c\" }) { id } }", json!({}))
-                .unwrap();
+        let document = parse(
+            "mutation { deleteOneObject(input: { id: \"a\\u0062c\" }) { id } }",
+            json!({}),
+        )
+        .unwrap();
 
         assert_eq!(
             document.operations[0].fields[0].argument("input"),
@@ -1006,9 +1025,11 @@ mod tests {
 
     #[test]
     fn variable_without_value_is_undefined() {
-        let error =
-            parse("query Q { objects(filter: $missing) { edges { node { id } } } }", json!({}))
-                .expect_err("undefined variables must fail");
+        let error = parse(
+            "query Q { objects(filter: $missing) { edges { node { id } } } }",
+            json!({}),
+        )
+        .expect_err("undefined variables must fail");
 
         assert_eq!(error.code, "GRAPHQL_VALIDATION_FAILED");
     }
@@ -1025,7 +1046,11 @@ mod tests {
 
         assert_eq!(node.name, "node");
 
-        let names: Vec<&str> = node.selection.iter().map(|field| field.name.as_str()).collect();
+        let names: Vec<&str> = node
+            .selection
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect();
 
         assert_eq!(names, vec!["id", "nameSingular"]);
     }
@@ -1092,8 +1117,11 @@ mod tests {
 
     #[test]
     fn subscription_is_refused() {
-        let error = parse("subscription S { objects { edges { node { id } } } }", json!({}))
-            .expect_err("subscriptions unsupported");
+        let error = parse(
+            "subscription S { objects { edges { node { id } } } }",
+            json!({}),
+        )
+        .expect_err("subscriptions unsupported");
 
         assert_eq!(error.code, "GRAPHQL_VALIDATION_FAILED");
     }

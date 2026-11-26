@@ -96,7 +96,7 @@ async fn graphql_endpoint(State(state): State<AppState>, request: Request) -> Re
             &parts.headers,
             error_payload(&[GraphQlError::forbidden("Could not retrieve workspace ID")
                 .with_sub_code("WORKSPACE_NOT_DEFINED")]),
-        )
+        );
     };
 
     let bytes = match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
@@ -127,12 +127,16 @@ async fn graphql_endpoint(State(state): State<AppState>, request: Request) -> Re
 
     let execution_request = match parse_request(body) {
         Ok(execution_request) => execution_request,
-        Err(error) => return graphql_json_response(StatusCode::OK, &parts.headers, error_payload(&[error])),
+        Err(error) => {
+            return graphql_json_response(StatusCode::OK, &parts.headers, error_payload(&[error]))
+        }
     };
 
     let selected = match select_operation(&execution_request) {
         Ok(selected) => selected,
-        Err(error) => return graphql_json_response(StatusCode::OK, &parts.headers, error_payload(&[error])),
+        Err(error) => {
+            return graphql_json_response(StatusCode::OK, &parts.headers, error_payload(&[error]))
+        }
     };
 
     let ctx = OperationContext {

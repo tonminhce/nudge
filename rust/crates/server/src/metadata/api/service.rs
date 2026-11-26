@@ -47,8 +47,6 @@ use crate::metadata::names::compute_composite_column_name;
 use crate::metadata::names::compute_metadata_name_from_label;
 use crate::metadata::names::compute_object_target_table;
 use crate::metadata::names::compute_relation_join_column_name;
-use crate::metadata::names::validate_field_metadata_name;
-use crate::metadata::names::validate_object_metadata_names;
 use crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER;
 use crate::state::AppState;
 
@@ -370,6 +368,8 @@ pub fn validate_create_object_input(input: &Value) -> Result<(), GraphQlError> {
     }
 
     for (field, value) in [
+        ("nameSingular", &name_singular),
+        ("namePlural", &name_plural),
         ("labelSingular", &label_singular),
         ("labelPlural", &label_plural),
     ] {
@@ -380,21 +380,10 @@ pub fn validate_create_object_input(input: &Value) -> Result<(), GraphQlError> {
         }
     }
 
-    if let Some(error) = validate_object_metadata_names(&name_singular, &name_plural)
-        .into_iter()
-        .next()
-    {
-        return Err(GraphQlError::user_input(&error.message)
-            .with_extensions(json!({ "subCode": error.code })));
-    }
-
     Ok(())
 }
 
-pub fn validate_create_field_input(
-    input: &Value,
-    is_standard_app_caller: bool,
-) -> Result<(), GraphQlError> {
+pub fn validate_create_field_input(input: &Value) -> Result<(), GraphQlError> {
     let field = input
         .get("field")
         .and_then(Value::as_object)
@@ -410,12 +399,8 @@ pub fn validate_create_field_input(
         ));
     }
 
-    if let Some(error) = validate_field_metadata_name(&name, is_standard_app_caller)
-        .into_iter()
-        .next()
-    {
-        return Err(GraphQlError::user_input(&error.message)
-            .with_extensions(json!({ "subCode": error.code })));
+    if name.is_empty() {
+        return Err(GraphQlError::user_input("name should not be empty"));
     }
 
     let type_raw = require_string(field, "type")?;
@@ -623,36 +608,45 @@ pub fn transpile_create_field(
 
     let mut sanitized = raw.clone();
 
-    sanitize_string_fields(&mut sanitized, &["description", "icon", "label", "name"]);
+    sanitize_string_fields(
+        &mut sanitized,
+        &["description", "icon", "label", "name", "objectMetadataId", "type"],
+    );
 
     if optional_bool(&sanitized, "isRemoteCreation").unwrap_or(false) {
-        return Err(GraphQlError::user_input("Remote fields aren't supported"));
+        return Err(super::errors::field_transpilation_failure(
+            "INVALID_FIELD_INPUT",
+            "Remote fields aren't supported",
+            "create",
+            "Multiple validation errors occurred while creating field",
+        ));
     }
 
     let object_metadata_id = require_string(&sanitized, "objectMetadataId")?;
     let object_metadata_id = require_uuid(&object_metadata_id, "objectMetadataId")?;
 
     let Some(parent_object) = maps.object_metadata_maps.find_by_id(&object_metadata_id) else {
-        return Err(
-            GraphQlError::not_found("Provided object metadata id does not exist")
-                .with_extensions(json!({ "subCode": "OBJECT_METADATA_NOT_FOUND" })),
-        );
+        return Err(super::errors::field_transpilation_failure(
+            "OBJECT_METADATA_NOT_FOUND",
+            "Provided object metadata id does not exist",
+            "create",
+            "Multiple validation errors occurred while creating field",
+        ));
     };
 
     let name = require_string(&sanitized, "name")?;
     let label = require_string(&sanitized, "label")?;
-
-    if name.is_empty() || label.is_empty() {
-        return Err(GraphQlError::user_input("name and label must not be empty"));
-    }
 
     let type_raw = require_string(&sanitized, "type")?;
     let field_type = FieldMetadataType::parse(&type_raw)
         .ok_or_else(|| GraphQlError::validation(format!("Invalid field type: {type_raw}")))?;
 
     if field_type == FieldMetadataType::TsVector {
-        return Err(GraphQlError::user_input(
+        return Err(super::errors::field_transpilation_failure(
+            "INVALID_FIELD_INPUT",
             "TS Vector is not supported for field creation",
+            "create",
+            "Multiple validation errors occurred while creating field",
         ));
     }
 
@@ -720,59 +714,101 @@ pub fn transpile_create_field(
         ..UniversalFlatFieldMetadata::default()
     };
 
-    if field.is_enum_type()
-        && field
-            .options
-            .as_ref()
-            .and_then(Value::as_array)
-            .map(Vec::len)
-            .unwrap_or(0)
-            == 0
-    {
-        return Err(GraphQlError::user_input(
-            "Enum fields require at least one option",
-        ));
-    }
-
     let mut inverse: Option<UniversalFlatFieldMetadata> = None;
     let mut indexes: Vec<UniversalFlatIndexMetadata> = Vec::new();
 
     if field_type == FieldMetadataType::Relation {
         let payload = sanitized
             .get("relationCreationPayload")
-            .and_then(Value::as_object)
-            .ok_or_else(|| GraphQlError::user_input("Relation creation payload is required"))?;
+            .cloned()
+            .filter(Value::is_object)
+            .unwrap_or(Value::Null);
 
-        let target_object_id = require_string(payload, "targetObjectMetadataId")?;
-        let target_object_id = require_uuid(&target_object_id, "targetObjectMetadataId")?;
-
-        let Some(target_object) = maps.object_metadata_maps.find_by_id(&target_object_id) else {
-            return Err(GraphQlError::user_input(
-                "Provided target object metadata id does not exist",
-            ));
-        };
-
-        let relation_type = payload
-            .get("type")
-            .and_then(Value::as_str)
-            .and_then(crate::metadata::flat::RelationType::parse)
-            .unwrap_or(crate::metadata::flat::RelationType::OneToMany);
-
-        let target_field_label = payload
-            .get("targetFieldLabel")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-
-        if target_field_label.is_empty() {
-            return Err(GraphQlError::user_input(
-                "Relation target field label is required",
+        if payload.is_null() {
+            return Err(super::errors::field_transpilation_failure(
+                "INVALID_FIELD_INPUT",
+                "Relation creation payload is required",
+                "create",
+                "Multiple validation errors occurred while creating field",
             ));
         }
 
+        let payload = payload.as_object().expect("checked object");
+        let mut payload = payload.clone();
+
+        sanitize_string_fields(
+            &mut payload,
+            &["targetFieldIcon", "targetFieldLabel", "targetObjectMetadataId", "type"],
+        );
+
+        let payload = &payload;
+
+        let target_object_id = match require_string(payload, "targetObjectMetadataId")
+            .and_then(|raw| require_uuid(&raw, "targetObjectMetadataId"))
+        {
+            Ok(raw) => raw,
+            Err(_) => {
+                return Err(super::errors::field_transpilation_failure(
+                    "FIELD_METADATA_RELATION_MALFORMED",
+                    "Relation creation payload is invalid: targetObjectMetadataId must be a UUID",
+                    "create",
+                    "Multiple validation errors occurred while creating field",
+                ));
+            }
+        };
+
+        let relation_type = match payload.get("type").and_then(Value::as_str) {
+            Some(raw) => match crate::metadata::flat::RelationType::parse(raw) {
+                Some(parsed) => parsed,
+                None => {
+                    return Err(super::errors::field_transpilation_failure(
+                        "FIELD_METADATA_RELATION_MALFORMED",
+                        "Relation creation payload is invalid: type must be a RelationType",
+                        "create",
+                        "Multiple validation errors occurred while creating field",
+                    ));
+                }
+            },
+            None => {
+                return Err(super::errors::field_transpilation_failure(
+                    "FIELD_METADATA_RELATION_MALFORMED",
+                    "Relation creation payload is invalid: type must be a RelationType",
+                    "create",
+                    "Multiple validation errors occurred while creating field",
+                ));
+            }
+        };
+
+        let target_field_label = match payload.get("targetFieldLabel").and_then(Value::as_str) {
+            Some(raw) if !raw.trim().is_empty() => raw.trim().to_string(),
+            _ => {
+                return Err(super::errors::field_transpilation_failure(
+                    "FIELD_METADATA_RELATION_MALFORMED",
+                    "Relation creation payload is invalid: targetFieldLabel must be a string",
+                    "create",
+                    "Multiple validation errors occurred while creating field",
+                ));
+            }
+        };
+
+        let Some(target_object) = maps.object_metadata_maps.find_by_id(&target_object_id) else {
+            return Err(super::errors::field_transpilation_failure(
+                "FIELD_METADATA_RELATION_MALFORMED",
+                "Object metadata relation target not found for relation creation payload",
+                "create",
+                "Multiple validation errors occurred while creating field",
+            ));
+        };
+
         let target_field_name = compute_metadata_name_from_label(&target_field_label, true)
-            .map_err(|error| GraphQlError::user_input(error.to_string()))?;
+            .map_err(|_| {
+                super::errors::field_transpilation_failure(
+                    "INVALID_FIELD_INPUT",
+                    "Relation target field label is invalid",
+                    "create",
+                    "Multiple validation errors occurred while creating field",
+                )
+            })?;
 
         let join_column = compute_relation_join_column_name(&name);
 
@@ -842,7 +878,6 @@ pub fn transpile_create_field(
         indexes.push(build_relation_backing_index(
             &flat_object_universal(indexed_object),
             indexed_field,
-            &field.application_universal_identifier,
         ));
 
         inverse = Some(inverse_field);
@@ -928,21 +963,20 @@ pub fn build_option_rows(
 pub fn build_relation_backing_index(
     object: &UniversalFlatObjectMetadata,
     field: &UniversalFlatFieldMetadata,
-    application_universal_identifier: &str,
 ) -> UniversalFlatIndexMetadata {
     let now = Utc::now();
     let index_universal_identifier = Uuid::new_v4().to_string();
 
     let column = compute_relation_join_column_name(&field.name);
     let table_name =
-        compute_object_target_table(&object.name_singular, application_universal_identifier);
+        compute_object_target_table(&object.name_singular, &object.application_universal_identifier);
 
     UniversalFlatIndexMetadata {
         universal_identifier: index_universal_identifier.clone(),
-        application_universal_identifier: application_universal_identifier.to_string(),
+        application_universal_identifier: field.application_universal_identifier.clone(),
         name: generate_deterministic_index_name(&table_name, &[column.as_str()], false, None),
         object_metadata_universal_identifier: object.universal_identifier.clone(),
-        is_unique: false,
+        is_unique: field.is_unique,
         index_where_clause: None,
         index_type: IndexType::Btree,
         is_system_side_effect: true,
@@ -962,7 +996,6 @@ pub fn build_relation_backing_index(
 pub fn build_unique_backing_index(
     object: &UniversalFlatObjectMetadata,
     field: &UniversalFlatFieldMetadata,
-    application_universal_identifier: &str,
 ) -> UniversalFlatIndexMetadata {
     let now = Utc::now();
     let index_universal_identifier = Uuid::new_v4().to_string();
@@ -972,12 +1005,15 @@ pub fn build_unique_backing_index(
 
     let table_name = match &object.target_table_name {
         Some(name) if name != DEPRECATED_TARGET_TABLE_NAME => name.clone(),
-        _ => compute_object_target_table(&object.name_singular, application_universal_identifier),
+        _ => compute_object_target_table(
+            &object.name_singular,
+            &object.application_universal_identifier,
+        ),
     };
 
     UniversalFlatIndexMetadata {
         universal_identifier: index_universal_identifier.clone(),
-        application_universal_identifier: application_universal_identifier.to_string(),
+        application_universal_identifier: field.application_universal_identifier.clone(),
         name: generate_deterministic_index_name(
             &table_name,
             &column_refs,

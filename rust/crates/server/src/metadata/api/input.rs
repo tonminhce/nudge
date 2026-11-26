@@ -239,7 +239,10 @@ mod tests {
 
     #[test]
     fn string_sanitization_collapses_inner_whitespace() {
-        let mut object = json!({ "name": "  hello   world  " }).as_object().cloned().unwrap();
+        let mut object = json!({ "name": "  hello   world  " })
+            .as_object()
+            .cloned()
+            .unwrap();
 
         sanitize_string_fields(&mut object, &["name"]);
 

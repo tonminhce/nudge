@@ -189,10 +189,7 @@ fn validation_summary_message(summary: &serde_json::Map<String, Value>) -> Strin
     let mut parts: Vec<String> = Vec::new();
 
     for metadata_name in crate::metadata::actions::MetadataName::all() {
-        let Some(count) = summary
-            .get(metadata_name.as_str())
-            .and_then(Value::as_u64)
-        else {
+        let Some(count) = summary.get(metadata_name.as_str()).and_then(Value::as_u64) else {
             continue;
         };
 
@@ -226,7 +223,10 @@ fn pluralize_label(label: &str) -> String {
         return format!("{stem}ies");
     }
 
-    if label.ends_with('s') || label.ends_with('x') || label.ends_with("ch") || label.ends_with("sh")
+    if label.ends_with('s')
+        || label.ends_with('x')
+        || label.ends_with("ch")
+        || label.ends_with("sh")
     {
         return format!("{label}es");
     }
@@ -239,6 +239,58 @@ pub fn first_failure_message(failures: &[FailedFlatEntityValidation]) -> Option<
         .iter()
         .find_map(|failure| failure.errors.first())
         .map(|error| error.message.clone())
+}
+
+pub fn field_transpilation_failure(
+    domain_code: &str,
+    message: &str,
+    validation_type: &str,
+    outer_message: &str,
+) -> GraphQlError {
+    let mut report = OrchestratorFailureReport::default();
+
+    report.push_all(
+        crate::metadata::actions::MetadataName::FieldMetadata,
+        vec![FailedFlatEntityValidation {
+            validation_type: validation_type.to_string(),
+            metadata_name: Some(crate::metadata::actions::MetadataName::FieldMetadata),
+            errors: vec![crate::metadata::builders::FlatEntityValidationError {
+                code: domain_code.to_string(),
+                message: message.to_string(),
+                user_friendly_message: Some(message.to_string()),
+                value: None,
+            }],
+            flat_entity_minimal_information: serde_json::json!({ "id": "" }),
+        }],
+    );
+
+    GraphQlError::builder_failure(outer_message, &report)
+}
+
+pub fn object_transpilation_failure(
+    domain_code: &str,
+    message: &str,
+    validation_type: &str,
+    outer_message: &str,
+) -> GraphQlError {
+    let mut report = OrchestratorFailureReport::default();
+
+    report.push_all(
+        crate::metadata::actions::MetadataName::ObjectMetadata,
+        vec![FailedFlatEntityValidation {
+            validation_type: validation_type.to_string(),
+            metadata_name: Some(crate::metadata::actions::MetadataName::ObjectMetadata),
+            errors: vec![crate::metadata::builders::FlatEntityValidationError {
+                code: domain_code.to_string(),
+                message: message.to_string(),
+                user_friendly_message: Some(message.to_string()),
+                value: None,
+            }],
+            flat_entity_minimal_information: serde_json::json!({ "id": "" }),
+        }],
+    );
+
+    GraphQlError::builder_failure(outer_message, &report)
 }
 
 pub fn field_domain_graphql_error(domain_code: &str, message: &str) -> GraphQlError {
@@ -361,8 +413,7 @@ mod tests {
             vec![failure("INVALID_OBJECT_INPUT", "Name is too long")],
         );
 
-        let error =
-            GraphQlError::builder_failure("Multiple validation errors occurred", &report);
+        let error = GraphQlError::builder_failure("Multiple validation errors occurred", &report);
         let value = serde_json::to_value(&error).unwrap();
 
         assert_eq!(
@@ -384,8 +435,9 @@ mod tests {
 
     #[test]
     fn domain_code_mappings_match_the_handlers() {
-        let value = serde_json::to_value(field_domain_graphql_error("FIELD_METADATA_NOT_FOUND", "x"))
-            .unwrap();
+        let value =
+            serde_json::to_value(field_domain_graphql_error("FIELD_METADATA_NOT_FOUND", "x"))
+                .unwrap();
         assert_eq!(value["extensions"]["code"], json!("NOT_FOUND"));
         assert_eq!(
             value["extensions"]["subCode"],

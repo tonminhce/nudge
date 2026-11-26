@@ -437,10 +437,7 @@ async fn create_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
 
     let applications = resolve_applications(ctx.state, ctx.workspace_id).await?;
 
-    super::service::validate_create_field_input(
-        &input,
-        applications.custom_universal_identifier == applications.standard_universal_identifier,
-    )?;
+    super::service::validate_create_field_input(&input)?;
 
     let flat_maps = load_flat_maps(ctx.state, ctx.workspace_id).await?;
 
@@ -477,11 +474,7 @@ async fn create_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
                 })?,
         );
 
-        let backing = super::service::build_unique_backing_index(
-            &object_universal,
-            &field,
-            &applications.custom_universal_identifier,
-        );
+        let backing = super::service::build_unique_backing_index(&object_universal, &field);
 
         add_to_create(
             &mut matrix,
@@ -529,8 +522,12 @@ async fn update_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
     let flat_maps = load_flat_maps(ctx.state, ctx.workspace_id).await?;
 
     let existing = resolve_target_field(&id, &flat_maps.field_metadata_maps).map_err(|_| {
-        GraphQlError::not_found("Field to update not found")
-            .with_extensions(json!({ "subCode": "FIELD_METADATA_NOT_FOUND" }))
+        super::errors::field_transpilation_failure(
+            "FIELD_METADATA_NOT_FOUND",
+            "Field metadata to update not found",
+            "update",
+            "Multiple validation errors occurred while updating field",
+        )
     })?;
 
     let merged = super::service::merged_field_entity(&flat_field_universal(&existing), &payload);
@@ -590,7 +587,6 @@ async fn update_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
             let backing = super::service::build_unique_backing_index(
                 &flat_object_universal(object),
                 &merged,
-                &applications.custom_universal_identifier,
             );
 
             add_to_create(
@@ -909,7 +905,7 @@ async fn create_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
         application_universal_identifier: applications.custom_universal_identifier.clone(),
         name: super::service::index_name_for_columns(
             &flat_object_universal(object),
-            &applications.custom_universal_identifier,
+            &object.application_universal_identifier,
             &columns,
             false,
             None,
@@ -1023,6 +1019,58 @@ async fn list_fields(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> 
     .await
 }
 
+const DEFAULT_METADATA_PAGE_SIZE: i64 = 10;
+const MAX_METADATA_PAGE_SIZE: i64 = 1000;
+
+struct ParsedPaging {
+    limit: i64,
+    backward: bool,
+    after_id: Option<Uuid>,
+    before_id: Option<Uuid>,
+}
+
+fn parse_paging(paging: &Value) -> Result<ParsedPaging, GraphQlError> {
+    let first = paging.get("first").and_then(Value::as_i64);
+    let last = paging.get("last").and_then(Value::as_i64);
+    let after = paging.get("after").and_then(Value::as_str);
+    let before = paging.get("before").and_then(Value::as_str);
+
+    if first.is_some() && last.is_some() {
+        return Err(GraphQlError::user_input("Cannot use both first and last"));
+    }
+
+    if first.is_some() && before.is_some() {
+        return Err(GraphQlError::user_input("Cannot use first with before"));
+    }
+
+    if last.is_some() && after.is_some() {
+        return Err(GraphQlError::user_input("Cannot use last with after"));
+    }
+
+    if after.is_some() && before.is_some() {
+        return Err(GraphQlError::user_input("Cannot use both after and before"));
+    }
+
+    if first.is_some_and(|value| value < 0) || last.is_some_and(|value| value < 0) {
+        return Err(GraphQlError::user_input("Page size cannot be negative"));
+    }
+
+    let limit = first.or(last).unwrap_or(DEFAULT_METADATA_PAGE_SIZE);
+
+    if limit > MAX_METADATA_PAGE_SIZE {
+        return Err(GraphQlError::user_input(format!(
+            "Requested page size of {limit} exceeds the maximum size of {MAX_METADATA_PAGE_SIZE}"
+        )));
+    }
+
+    Ok(ParsedPaging {
+        limit,
+        backward: last.is_some() || before.is_some(),
+        after_id: after.map(decode_cursor_id).transpose()?,
+        before_id: before.map(decode_cursor_id).transpose()?,
+    })
+}
+
 async fn list_page(
     ctx: &OperationContext<'_>,
     table: &str,
@@ -1031,19 +1079,7 @@ async fn list_page(
     let filter = argument_value(ctx, "filter");
     let paging = argument_value(ctx, "paging");
 
-    let first = paging.get("first").and_then(Value::as_i64).unwrap_or(10);
-
-    if first <= 0 || first > 1000 {
-        return Err(GraphQlError::user_input(format!(
-            "Invalid page size: {first}"
-        )));
-    }
-
-    let after_cursor = paging
-        .get("after")
-        .and_then(Value::as_str)
-        .map(decode_cursor_id)
-        .transpose()?;
+    let pagination = parse_paging(&paging)?;
 
     let mut sql = format!(
         "SELECT id FROM core.\"{table}\" WHERE \"workspaceId\" = $1 AND \"deletedAt\" IS NULL"
@@ -1051,17 +1087,27 @@ async fn list_page(
 
     let mut params: Vec<FilterParam> = Vec::new();
 
-    if let Some(after) = after_cursor {
+    if let Some(after) = pagination.after_id {
         sql.push_str(" AND id < $2");
 
         params.push(FilterParam::Uuid(after));
+    }
+
+    if let Some(before) = pagination.before_id {
+        let placeholder = params.len() + 2;
+
+        sql.push_str(&format!(" AND id > ${placeholder}"));
+
+        params.push(FilterParam::Uuid(before));
     }
 
     push_filter_clauses(&filter, &mut sql, &mut params, filter_fields)?;
 
     let limit_index = params.len() + 2;
 
-    sql.push_str(&format!(" ORDER BY id DESC LIMIT ${limit_index}"));
+    let order = if pagination.backward { "ASC" } else { "DESC" };
+
+    sql.push_str(&format!(" ORDER BY id {order} LIMIT ${limit_index}"));
 
     let mut rows_query = sqlx::query_as::<_, (Uuid,)>(&sql).bind(ctx.workspace_id);
 
@@ -1082,20 +1128,24 @@ async fn list_page(
         }
     }
 
-    rows_query = rows_query.bind(first + 1);
+    rows_query = rows_query.bind(pagination.limit + 1);
 
     let rows = rows_query
         .fetch_all(&ctx.state.core_pool)
         .await
         .map_err(|error| GraphQlError::internal(error.to_string()))?;
 
-    let has_next = rows.len() as i64 > first;
+    let has_more_items = rows.len() as i64 > pagination.limit;
 
-    let page: Vec<Uuid> = rows
+    let mut page: Vec<Uuid> = rows
         .into_iter()
-        .take(first as usize)
+        .take(pagination.limit as usize)
         .map(|(id,)| id)
         .collect();
+
+    if pagination.backward {
+        page.reverse();
+    }
 
     let flat_maps = load_flat_maps(ctx.state, ctx.workspace_id).await?;
 
@@ -1112,7 +1162,7 @@ async fn list_page(
             .collect(),
     };
 
-    Ok(cursor_connection(&nodes, has_next))
+    Ok(cursor_connection(&nodes, &pagination, has_more_items))
 }
 
 async fn get_object(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
@@ -1193,7 +1243,7 @@ fn base64url_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn cursor_connection(nodes: &[Value], has_next_page: bool) -> Value {
+fn cursor_connection(nodes: &[Value], pagination: &ParsedPaging, has_more_items: bool) -> Value {
     let edges: Vec<Value> = nodes
         .iter()
         .map(|node| {
@@ -1206,11 +1256,23 @@ fn cursor_connection(nodes: &[Value], has_next_page: bool) -> Value {
         })
         .collect();
 
+    let has_next_page = if pagination.backward {
+        pagination.before_id.is_some()
+    } else {
+        has_more_items
+    };
+
+    let has_previous_page = if pagination.backward {
+        has_more_items
+    } else {
+        pagination.after_id.is_some()
+    };
+
     json!({
         "edges": edges,
         "pageInfo": {
             "hasNextPage": has_next_page,
-            "hasPreviousPage": false,
+            "hasPreviousPage": has_previous_page,
             "startCursor": edges.first().and_then(|edge| edge.get("cursor")).cloned().unwrap_or(Value::Null),
             "endCursor": edges.last().and_then(|edge| edge.get("cursor")).cloned().unwrap_or(Value::Null)
         },
