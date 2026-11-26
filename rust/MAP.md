@@ -28,7 +28,7 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 | 0 | Grilling, ADRs, research (data model, API, auth, workers, UI) | **done** — 5 research docs in `research/` |
 | 1 | Server foundation: config, Postgres/Redis, core-schema migrations, health | **done** — schema parity verified against the live 2.61.0 reference |
 | 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **done** — passwords, tokens, sessions, CSRF, API keys, 2FA, invitations, email verification, password reset, workspace lifecycle, impersonation, SSO (SAML signature verification flag-gated, ADR-013); permission *enforcement* moves to wave 4 with the query runner |
-| 3 | Metadata engine: standard objects seeding, workspace schema creation | open — plan in `research/workspace-migrations.md` (units U1-U10) |
+| 3 | Metadata engine: standard objects seeding, workspace schema creation | **in progress** — U1, U2, U3, U4, U5 done and merged; U6 runner and U7 seeding open |
 | 4 | Workspace GraphQL (dynamic schema) + REST + query runner (filter/sort/paginate/groupBy/aggregate) | open |
 | 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open |
 | 6 | Webhooks, files, email (SMTP), search, import/export, timeline, favorites, notes/tasks | open |
@@ -180,8 +180,7 @@ Workspace creation for an existing user plus impersonation, in
   `cargo test -p nudge-server -p nudge-core` all green; the combined suite passes in both
   reuse-grace modes.
 
-### wave2/sso (done 2026-11-26)
-SSO (Google, Microsoft, OIDC PKCE S256, SAML) — done (wave2/sso, 2026-11-26). Routes
+### wave2/sso (done 2026-11-26)SSO (Google, Microsoft, OIDC PKCE S256, SAML) — done (wave2/sso, 2026-11-26). Routes
 `/auth/google`, `/auth/google/redirect`, `/auth/microsoft`, `/auth/microsoft/redirect`,
 `/auth/oidc/login/{id}`, `/auth/oidc/callback`, `/auth/saml/metadata/{id}`, `/auth/saml/login/{id}`,
 `/auth/saml/callback/{id}`, plus the REST mirror `POST /auth/sso/exchange-token` of the upstream
@@ -189,3 +188,55 @@ SSO (Google, Microsoft, OIDC PKCE S256, SAML) — done (wave2/sso, 2026-11-26). 
 76 unit tests, e2e 99 checks (0 failures) without IdP credentials and 104 checks (0 failures)
 with AUTH_GOOGLE_* set. SAML signature verification is a flagged gap (ADR-013); OIDC verifies
 RS256 only (ADR-012); the SSO billing entitlement gate is not enforced (no billing module).
+
+### wave3/foundation (done 2026-11-27)
+Units U1, U2, U4 of `research/workspace-migrations.md`.
+- `metadata/names.rs`: table/target-table/column/composite column naming, label→name
+  (lodash `camelcase` + `transliteration` golden vectors), pascal/camel helpers, the 70
+  reserved metadata keywords, identifier lengths (1..63), the object-name regex with the
+  camelCase identity check, the field-name validator, `computePostgresEnumName`.
+- `metadata/ids.rs`: `generateDeterministicIndexName` (`IDX_[UNIQUE_]` + sha256 hex[0:27]
+  over table‖cols‖where with no separators) and the TypeORM FK name
+  (`FK_<sha1("<table>_<column>")[0:27]>`) verified against five real upstream names, plus
+  `uuid_to_base36`.
+- `workspace_migrations/column_defs.rs` (+ `composite_types.rs`): the full field-type →
+  column-definition mapping, emission order, composite flattening with the server-only
+  columns, default serialization (pre-quoted strings, enum casts, function defaults), the
+  nullify family, morph/relation join columns.
+- `workspace_migrations/tsvector.rs`: per-type COALESCE/unaccent expressions with weights,
+  the PHONES/LINKS/EMAILS extras, ordering by position, and the person expression asserted
+  byte-equal to the upstream snapshot.
+- `workspace_migrations/ddl/`: the five workspace-schema managers as sqlx executors over
+  `&mut PgConnection` (table, column, enum with the full rename→recreate→backfill
+  `alterEnumValues`, index with the WHERE allowlist and the CONCURRENTLY guard, foreign key
+  with NOT VALID/VALIDATE/deferrable), escape helpers and DDL error codes.
+- Verification: 111 new unit tests (byte-equal SQL against the five upstream managers) and 6
+  database round-trip tests gated on `NUDGE_TEST_DATABASE_URL` (enum value migration
+  round-trips data; index/FK lifecycles verified through `information_schema`).
+
+### wave3/pipeline (done 2026-11-27)
+Units U3 and U5.
+- `metadata/flat/`: the flat entity structs and their `UniversalFlat` twins for object,
+  field, index, field option and search field metadata, serde shapes matching upstream JSON,
+  sqlx row mappers and the `UniversalFlatEntityMaps` containers.
+- `metadata/cache.rs`: load/merge/invalidate primitives over the flat maps.
+- `metadata/actions.rs`: the three verbs (`create`/`update`/`delete`), per-metadata action
+  structs, `WorkspaceMigration`, `OrchestratorActionsReport`, serde round trips.
+- `metadata/builders.rs` + `builders/`: per-entity from/to diffing into universal actions,
+  the `FailedFlatEntityValidation` report shape, and the side-effect expansions.
+- `metadata/aggregate.rs`: the four passes (fold fields into object creates, pair relation
+  sides, deprioritize tsvector creates, deprioritize/synthesize search-vector updates).
+- `metadata/order.rs`: `compute_ordered_migration_actions` with the CASCADE-driven ordering.
+- `metadata/validate.rs`: cross-entity validators and
+  `compute_search_vector_rebuild_target_universal_identifiers` (renames, creates, deletes and
+  search-field changes feed the rebuild set).
+- `metadata/error.rs`: upstream-compatible metadata error codes.
+- Verification: 36 new tests; the combined tree is 272 unit tests plus the 297-check e2e.
+
+### Next wave 3 units
+- U6 `workspace_migrations/runner.rs`: one transaction, `SET LOCAL lock_timeout`, guards,
+  core-row writes and workspace DDL together, cache invalidation and the `metadataVersion`
+  bump, failure rollback semantics.
+- U7 `standard_objects/`: the standard object and field registry (37 objects, 636 fields from
+  `baseline/*.json`) plus activation seeding; the acceptance gate is `pg_dump --schema-only
+  --schema=workspace_<b36>` identical to `baseline/workspace-schema-2.61.0.sql`.
