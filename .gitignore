@@ -8,3 +8,4 @@ rust/.local-storage/
 Thumbs.db
 analyze.json
 .idea/
+worktrees/
