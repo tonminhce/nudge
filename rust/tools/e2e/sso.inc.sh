@@ -1,5 +1,6 @@
 sso_hdrs="$(mktemp)"
 SSO_SUFFIX="SSO-$SUFFIX"
+SSO_SERVER_BASE="${SERVER_URL:-http://localhost:3000}"
 
 sso_get_redirect() {
   local response
@@ -72,9 +73,9 @@ check_value "  unknown state message" "$(printf '%s' "$SSO_LOCATION" | grep -c '
 
 get "/auth/saml/metadata/11111111-2222-3333-4444-555555555555"
 check "saml metadata renders" 200 "$STATUS"
-check_value "  entity id is the login url" "$(printf '%s' "$BODY" | grep -c "entityID=\"$BASE/auth/saml/login/11111111-2222-3333-4444-555555555555\"")"
+check_value "  entity id is the login url" "$(printf '%s' "$BODY" | grep -c "entityID=\"$SSO_SERVER_BASE/auth/saml/login/11111111-2222-3333-4444-555555555555\"")"
 check_value "  wants assertions signed" "$(printf '%s' "$BODY" | grep -c 'WantAssertionsSigned="true"')"
-check_value "  acs is the callback url" "$(printf '%s' "$BODY" | grep -c "Location=\"$BASE/auth/saml/callback/11111111-2222-3333-4444-555555555555\"")"
+check_value "  acs is the callback url" "$(printf '%s' "$BODY" | grep -c "Location=\"$SSO_SERVER_BASE/auth/saml/callback/11111111-2222-3333-4444-555555555555\"")"
 
 sso_get_redirect "/auth/saml/login/$SSO_UNKNOWN_IDP"
 check "saml login unknown idp redirects" 302 "$STATUS"
