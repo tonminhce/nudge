@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: default
+    volumes: [db-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+
+  server:
+    build:
+      context: ../..
+      dockerfile: rust/infra/Dockerfile
+    ports: ["${NODE_PORT:-3000}:3000"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      NODE_PORT: 3000
+      SERVER_URL: ${SERVER_URL:?set SERVER_URL}
+      FRONTEND_URL: ${FRONTEND_URL:?set FRONTEND_URL}
+      PG_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/default
+      REDIS_URL: redis://redis:6379
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      AUTH_COOKIE_ALLOWED_ORIGINS: ${AUTH_COOKIE_ALLOWED_ORIGINS:-}
+
+volumes:
+  db-data:

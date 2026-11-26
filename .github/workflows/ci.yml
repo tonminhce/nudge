@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    name: fmt, clippy and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test -p nudge-server -p nudge-core
+
+  e2e:
+    name: auth end to end
+    runs-on: ubuntu-latest
+    needs: gate
+    defaults:
+      run:
+        working-directory: rust
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: default
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo build -p nudge-server
+      - name: start the server and run the auth e2e
+        run: |
+          PG_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/default \
+          REDIS_URL=redis://127.0.0.1:6379 \
+          APP_SECRET=ci-secret-change-me \
+          SERVER_URL=http://localhost:3000 \
+          NODE_ENV=development \
+          ./target/debug/nudge-server &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3000/healthz > /dev/null && break
+            sleep 2
+          done
+          bash tools/auth-e2e.sh
+          pkill -f target/debug/nudge-server
+          PG_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/default \
+          REDIS_URL=redis://127.0.0.1:6379 \
+          APP_SECRET=ci-secret-change-me \
+          SERVER_URL=http://localhost:3000 \
+          NODE_ENV=development \
+          REFRESH_TOKEN_REUSE_GRACE_PERIOD=0s \
+          ./target/debug/nudge-server &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3000/healthz > /dev/null && break
+            sleep 2
+          done
+          EXPECT_ROTATED_REUSE=401 bash tools/auth-e2e.sh

@@ -1,0 +1,11 @@
+.git
+.github
+worktrees
+rust/target
+rust/trunk
+rust/dist
+rust/.local-storage
+rust/.env
+*.md
+LICENSE
+nudge.png
