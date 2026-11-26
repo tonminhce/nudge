@@ -1,7 +1,9 @@
 mod auth;
 mod db;
+mod metadata;
 mod routes;
 mod state;
+mod workspace_migrations;
 
 use anyhow::Context;
 use nudge_core::Config;
