@@ -42,6 +42,7 @@ def parse_baseline_column_orders(sql_path):
     with open(sql_path) as handle:
         text = handle.read()
     orders = {}
+    vectors = {}
     pattern = re.compile(
         r'CREATE TABLE [\w".]+\.(?:"([^"]+)"|(\w+)) \(\n(.*?)\n\);', re.S
     )
@@ -69,7 +70,8 @@ def parse_baseline_column_orders(sql_path):
             else:
                 columns.append(re.match(r"[A-Za-z_]\w*", stripped).group(0))
         orders[table_name] = {name: index for index, name in enumerate(columns)}
-    return orders
+        vectors[table_name] = columns
+    return orders, vectors
 
 
 def field_physical_columns(field):
@@ -127,7 +129,7 @@ def main():
     index_fields = load("index-field-metadata")
     search_fields = load("search-field-metadata")
 
-    column_orders = parse_baseline_column_orders(
+    column_orders, column_vectors = parse_baseline_column_orders(
         os.path.join(BASELINE, "workspace-schema-2.61.0.sql")
     )
 
@@ -196,6 +198,7 @@ def main():
         "    pub image_identifier_field_universal_identifier: Option<&'static str>,"
     )
     lines.append("    pub fields: &'static [StandardFieldDefinition],")
+    lines.append("    pub column_plan: &'static [&'static str],")
     lines.append("}")
     lines.append("")
     lines.append("pub struct StandardFieldOptionDefinition {")
@@ -303,6 +306,11 @@ def main():
             lines.append("    },")
         lines.append("];")
         lines.append("")
+        lines.append(f"pub const OBJECT_COLUMN_PLAN_{suffix}: &[&str] = &[")
+        for column in column_vectors.get(object_row["nameSingular"], []):
+            lines.append(f'    "{_escape(column)}",')
+        lines.append("];")
+        lines.append("")
 
     lines.append("pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[")
     for object_row in sorted(objects, key=lambda row: row["nameSingular"]):
@@ -353,6 +361,7 @@ def main():
             f"        image_identifier_field_universal_identifier: {rust_option(image_field)},"
         )
         lines.append(f"        fields: OBJECT_FIELDS_{suffix},")
+        lines.append(f"        column_plan: OBJECT_COLUMN_PLAN_{suffix},")
         lines.append("    },")
     lines.append("];")
     lines.append("")

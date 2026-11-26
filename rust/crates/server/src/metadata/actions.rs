@@ -364,6 +364,7 @@ pub struct UniversalCreateAction {
     pub field_id_by_universal_identifier: Option<HashMap<String, String>>,
     pub related_universal_flat_field_metadata: Option<UniversalFlatFieldMetadata>,
     pub related_field_id: Option<String>,
+    pub column_plan: Option<Vec<String>>,
 }
 
 impl UniversalCreateAction {

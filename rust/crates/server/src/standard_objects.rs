@@ -240,6 +240,13 @@ fn object_create_action(
         ))),
         universal_flat_field_metadatas: fields,
         field_id_by_universal_identifier: Some(field_id_map),
+        column_plan: Some(
+            object
+                .column_plan
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect(),
+        ),
         ..UniversalCreateAction::default()
     })
 }
@@ -587,6 +594,114 @@ mod tests {
     }
 
     #[test]
+    fn every_column_plan_matches_the_upstream_access_pair_layout() {
+        let historical = [
+            "agentChatThread",
+            "agentMessage",
+            "agentMessagePart",
+            "agentTurn",
+            "campaignDelivery",
+            "messageSuppression",
+        ];
+
+        let mut historical_seen = 0usize;
+
+        for object in definitions::STANDARD_OBJECTS {
+            let plan = object.column_plan;
+
+            assert_eq!(
+                plan.first().copied(),
+                Some("id"),
+                "{} plan must start with id",
+                object.name_singular
+            );
+
+            let access_at = plan.iter().position(|name| *name == "_accessGroupIds");
+            let private_at = plan.iter().position(|name| *name == "_isPrivate");
+
+            assert_eq!(
+                access_at.map(|index| index + 1),
+                private_at,
+                "{} access pair must be adjacent",
+                object.name_singular
+            );
+
+            let relation_columns: std::collections::HashSet<String> = object
+                .fields
+                .iter()
+                .filter_map(relation_join_column)
+                .collect();
+
+            let non_relation: Vec<&str> = plan
+                .iter()
+                .copied()
+                .filter(|name| !relation_columns.contains(*name))
+                .collect();
+
+            let tail = &non_relation[non_relation.len().saturating_sub(2)..];
+            assert_eq!(
+                tail,
+                &["_accessGroupIds", "_isPrivate"],
+                "{} access pair must close the CREATE TABLE portion",
+                object.name_singular
+            );
+
+            let created_at = plan
+                .iter()
+                .position(|name| *name == "createdAt")
+                .expect("createdAt in plan");
+
+            if historical.contains(&object.name_singular) {
+                historical_seen += 1;
+                assert!(
+                    created_at > 3,
+                    "{} carries the historical base-column layout",
+                    object.name_singular
+                );
+            } else {
+                assert_eq!(
+                    created_at, 1,
+                    "{} uses the modern head layout",
+                    object.name_singular
+                );
+            }
+        }
+
+        assert_eq!(historical_seen, historical.len());
+    }
+
+    fn relation_join_column(field: &definitions::StandardFieldDefinition) -> Option<String> {
+        match field.field_type {
+            "RELATION" => {
+                let settings = parse_json(field.settings_json).ok().flatten()?;
+                if settings.get("relationType").and_then(Value::as_str) != Some("MANY_TO_ONE") {
+                    return None;
+                }
+                Some(join_column_name(&settings, field.name))
+            }
+            "MORPH_RELATION" => {
+                if field.morph_id == Some(field.universal_identifier) {
+                    return None;
+                }
+                let settings = parse_json(field.settings_json).ok().flatten();
+                Some(match settings.as_ref() {
+                    Some(value) => join_column_name(value, field.name),
+                    None => format!("{}Id", field.name),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn join_column_name(settings: &Value, field_name: &str) -> String {
+        settings
+            .get("joinColumnName")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .unwrap_or_else(|| format!("{}Id", field_name))
+    }
+
+    #[test]
     fn the_seed_migration_orders_search_fields_first_and_indexes_last() {
         let migration = build_standard_seed_migration().expect("building the seed migration");
 
@@ -926,24 +1041,30 @@ mod tests {
             enum_lines.push(format!("enum {name} values={labels}"));
         }
 
-        index_lines.sort();
-        constraint_lines.sort();
-        enum_lines.sort();
-
-        let mut output: Vec<String> = Vec::new();
+        let mut column_part: Vec<String> = Vec::new();
 
         for (_table, lines) in columns_by_table {
-            output.extend(lines);
+            column_part.extend(lines);
         }
 
-        output.extend(index_lines);
-        output.extend(constraint_lines);
-        output.extend(enum_lines);
+        let mut tail_part: Vec<String> = Vec::new();
+        tail_part.extend(index_lines);
+        tail_part.extend(constraint_lines);
+        tail_part.extend(enum_lines);
 
-        output
-            .into_iter()
-            .map(|line| normalize_schema_line(&line, schema))
-            .collect()
+        let mut tail_lines: Vec<String> = tail_part
+            .iter()
+            .map(|line| normalize_schema_line(line, schema))
+            .collect();
+        tail_lines.sort();
+
+        let mut normalized_columns: Vec<String> = column_part
+            .iter()
+            .map(|line| normalize_schema_line(line, schema))
+            .collect();
+
+        normalized_columns.extend(tail_lines);
+        normalized_columns
     }
 
     fn group_column_lines(dump: &[String]) -> std::collections::BTreeMap<&str, Vec<&String>> {
