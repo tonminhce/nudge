@@ -1,9 +1,0 @@
-[request]
-method = "GET"
-path = "/healthz"
-
-[response]
-status = 200
-
-[response.headers]
-content-type = "application/json"
