@@ -807,6 +807,7 @@ mod integration_tests {
     use nudge_core::Config;
     use nudge_core::NodeEnv;
     use sqlx::Connection;
+    use std::time::Duration;
 
     static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -1760,6 +1761,111 @@ mod integration_tests {
             table_oid_before.0, table_oid_after.0,
             "a table without dropped column slots must not be rewritten"
         );
+    }
+
+    #[tokio::test]
+    async fn the_queue_pass_drains_every_workspace() {
+        let _guard = TEST_LOCK.lock().await;
+
+        let Some(state) = test_state().await else {
+            return;
+        };
+
+        let mut workspaces = Vec::new();
+
+        for table in ["_u8q1", "_u8q2"] {
+            let workspace = create_test_workspace(&state, table).await;
+            let object_id = insert_object_metadata(&state, &workspace, table).await;
+            let field_id = insert_text_field(&state, &workspace, object_id, "codeText").await;
+            let index_id = insert_deferrable_index(
+                &state,
+                &workspace,
+                object_id,
+                field_id,
+                &format!("IDX_u8_{}", table.trim_start_matches("_u8")),
+            )
+            .await;
+
+            persist_deferred(
+                &state,
+                workspace.workspace_id,
+                &workspace.application_universal_identifier,
+                BUILD_INDEX,
+                serde_json::json!({ "indexMetadataId": index_id.to_string() }),
+            )
+            .await;
+
+            workspaces.push(workspace);
+        }
+
+        let executed = crate::workspace_migrations::worker::run_queue_pass(&state)
+            .await
+            .expect("running the queue pass");
+
+        assert!(
+            executed >= 2,
+            "one pass must drain the pending rows of every workspace"
+        );
+
+        for workspace in &workspaces {
+            assert_eq!(
+                deferred_count(&state, workspace.workspace_id).await,
+                0,
+                "the pass must delete the rows it executed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_worker_loop_stops_on_the_shutdown_watch() {
+        let _guard = TEST_LOCK.lock().await;
+
+        let Some(state) = test_state().await else {
+            return;
+        };
+
+        let workspace = create_test_workspace(&state, "_u8worker").await;
+        let object_id = insert_object_metadata(&state, &workspace, "_u8worker").await;
+        let field_id = insert_text_field(&state, &workspace, object_id, "codeText").await;
+        let index_id =
+            insert_deferrable_index(&state, &workspace, object_id, field_id, "IDX_u8_worker").await;
+
+        persist_deferred(
+            &state,
+            workspace.workspace_id,
+            &workspace.application_universal_identifier,
+            BUILD_INDEX,
+            serde_json::json!({ "indexMetadataId": index_id.to_string() }),
+        )
+        .await;
+
+        let (shutdown, handle) =
+            crate::workspace_migrations::worker::spawn_deferred_worker_with_shutdown(
+                state.clone(),
+                Duration::from_millis(20),
+            );
+
+        let mut observed_deleted = false;
+
+        for _ in 0..400 {
+            if deferred_count(&state, workspace.workspace_id).await == 0 {
+                observed_deleted = true;
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        shutdown.shutdown();
+
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("the worker must exit on shutdown")
+            .expect("the worker task must not panic");
+
+        assert!(observed_deleted);
+        assert!(index_exists(&state, &workspace.schema_name, "IDX_u8_worker").await);
+        assert_eq!(deferred_count(&state, workspace.workspace_id).await, 0);
     }
 }
 
