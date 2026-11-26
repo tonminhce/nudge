@@ -976,7 +976,7 @@ async fn create_workspace(
         "INSERT INTO core.\"application\" \
          (id, \"universalIdentifier\", name, \"sourceType\", state, \"sourcePath\", version, \
           \"canBeUninstalled\", \"workspaceId\") \
-         VALUES ($1, $1, 'Custom', 'LOCAL', 'INSTALLED', 'workspace-custom', '1.0.1', false, $2)",
+         VALUES ($1, $1, 'Custom', 'local', 'INSTALLED', 'workspace-custom', '1.0.1', false, $2)",
     )
     .bind(application_id)
     .bind(workspace_id)

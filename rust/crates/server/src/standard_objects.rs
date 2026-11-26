@@ -27,7 +27,9 @@ use crate::workspace_migrations::runner::RunnerOutcome;
 
 pub use definitions::STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER;
 
-const STANDARD_APPLICATION_NAME: &str = "Twenty Standard Application";
+const STANDARD_APPLICATION_NAME: &str = "Standard";
+const STANDARD_APPLICATION_SOURCE_PATH: &str = "cli-sync";
+const STANDARD_APPLICATION_VERSION: &str = "1.0.1";
 const SEARCH_VECTOR_FIELD_NAME: &str = "searchVector";
 
 #[derive(Debug)]
@@ -117,8 +119,9 @@ async fn ensure_standard_application(
 
     sqlx::query(
         "INSERT INTO core.\"application\" \
-         (id, \"universalIdentifier\", name, \"sourceType\", state, \"sourcePath\", \"workspaceId\") \
-         VALUES ($1, $2, $3, 'LOCAL', 'INSTALLED', 'twenty-standard', $4)",
+         (id, \"universalIdentifier\", name, \"sourceType\", state, \"sourcePath\", version, \
+          \"canBeUninstalled\", \"workspaceId\") \
+         VALUES ($1, $2, $3, 'local', 'INSTALLED', $4, $5, false, $6)",
     )
     .bind(application_id)
     .bind(
@@ -126,6 +129,8 @@ async fn ensure_standard_application(
             .expect("standard application universal identifier is a uuid"),
     )
     .bind(STANDARD_APPLICATION_NAME)
+    .bind(STANDARD_APPLICATION_SOURCE_PATH)
+    .bind(STANDARD_APPLICATION_VERSION)
     .bind(workspace_id)
     .execute(&state.core_pool)
     .await?;

@@ -157,11 +157,11 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
 
     sqlx::query(
         "INSERT INTO core.\"application\" \
-         (id, \"universalIdentifier\", name, \"sourceType\", state, \"sourcePath\", \"workspaceId\") \
-         VALUES ($1, $2, 'Custom Workspace Application', 'LOCAL', 'INSTALLED', '', $3)",
+         (id, \"universalIdentifier\", name, \"sourceType\", state, \"sourcePath\", version, \
+          \"canBeUninstalled\", \"workspaceId\") \
+         VALUES ($1, $1, 'Custom', 'local', 'INSTALLED', 'workspace-custom', '1.0.1', false, $2)",
     )
     .bind(application_id)
-    .bind(Uuid::new_v4())
     .bind(workspace_id)
     .execute(&mut *transaction)
     .await?;
