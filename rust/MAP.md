@@ -101,3 +101,12 @@ and password reset tokens, impersonation, and the workspace-creation-without-sig
 
 ## Units
 Claims are recorded here: `open`, `claimed by <session> <date>`, or `done` with gate/replay results.
+
+- SSO (Google, Microsoft, OIDC PKCE S256, SAML) — done (wave2/sso, 2026-11-26). Routes
+  `/auth/google`, `/auth/google/redirect`, `/auth/microsoft`, `/auth/microsoft/redirect`,
+  `/auth/oidc/login/{id}`, `/auth/oidc/callback`, `/auth/saml/metadata/{id}`, `/auth/saml/login/{id}`,
+  `/auth/saml/callback/{id}`, plus the REST mirror `POST /auth/sso/exchange-token` of the upstream
+  `getAuthTokensFromSSOExchangeToken` mutation. Gate: cargo fmt --check, clippy -D warnings clean,
+  76 unit tests, e2e 99 checks (0 failures) without IdP credentials and 104 checks (0 failures)
+  with AUTH_GOOGLE_* set. SAML signature verification is a flagged gap (ADR-013); OIDC verifies
+  RS256 only (ADR-012); the SSO billing entitlement gate is not enforced (no billing module).

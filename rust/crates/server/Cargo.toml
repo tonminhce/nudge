@@ -21,9 +21,12 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 bcrypt = { workspace = true }
 hkdf = { workspace = true }
+flate2 = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }
+percent-encoding = { workspace = true }
 p256 = { workspace = true }
+quick-xml = { workspace = true }
 rand = { workspace = true }
 redis = { workspace = true }
 reqwest = { workspace = true }
