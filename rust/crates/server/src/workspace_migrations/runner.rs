@@ -4,6 +4,7 @@ use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use super::column_defs;
 use super::column_defs::composite_types;
 use super::column_defs::composite_types::CompositeProperty;
 use super::column_defs::generate_column_definitions;
@@ -154,6 +155,79 @@ pub struct RunnerInput<'a> {
 }
 
 #[derive(Debug, Default)]
+pub struct PreallocatedIds {
+    by_name: std::collections::HashMap<MetadataName, std::collections::HashMap<String, Uuid>>,
+}
+
+impl PreallocatedIds {
+    pub fn get(&self, metadata_name: MetadataName, universal_identifier: &str) -> Option<Uuid> {
+        self.by_name
+            .get(&metadata_name)
+            .and_then(|by_identifier| by_identifier.get(universal_identifier))
+            .copied()
+    }
+
+    fn register(
+        &mut self,
+        metadata_name: MetadataName,
+        universal_identifier: &str,
+        id: Option<Uuid>,
+    ) {
+        let Some(id) = id else { return };
+
+        self.by_name
+            .entry(metadata_name)
+            .or_default()
+            .insert(universal_identifier.to_string(), id);
+    }
+}
+
+pub fn build_preallocated_ids(actions: &[UniversalAction]) -> PreallocatedIds {
+    let mut ids = PreallocatedIds::default();
+
+    for action in actions {
+        let UniversalAction::Create(create) = action else {
+            continue;
+        };
+
+        if let Some(entity) = &create.flat_entity {
+            let id = create
+                .id
+                .as_deref()
+                .and_then(|raw| Uuid::parse_str(raw).ok());
+            ids.register(create.metadata_name, entity.universal_identifier(), id);
+
+            if create.metadata_name == MetadataName::ObjectMetadata {
+                if let Some(field_ids) = &create.field_id_by_universal_identifier {
+                    for field in &create.universal_flat_field_metadatas {
+                        let id = field_ids
+                            .get(&field.universal_identifier)
+                            .and_then(|raw| Uuid::parse_str(raw).ok());
+                        ids.register(MetadataName::FieldMetadata, &field.universal_identifier, id);
+                    }
+                }
+            }
+
+            if create.metadata_name == MetadataName::FieldMetadata {
+                if let Some(related) = &create.related_universal_flat_field_metadata {
+                    let id = create
+                        .related_field_id
+                        .as_deref()
+                        .and_then(|raw| Uuid::parse_str(raw).ok());
+                    ids.register(
+                        MetadataName::FieldMetadata,
+                        &related.universal_identifier,
+                        id,
+                    );
+                }
+            }
+        }
+    }
+
+    ids
+}
+
+#[derive(Debug, Default)]
 pub struct RunnerOutcome {
     pub deferred_operations: usize,
     pub metadata_version: Option<i32>,
@@ -196,16 +270,22 @@ pub async fn run_workspace_migration(
         .execute(&mut *transaction)
         .await?;
 
+    let preallocated = build_preallocated_ids(&input.migration.actions);
     let mut deferred_inputs: Vec<DeferredOperationInput> = Vec::new();
 
     {
         let connection: &mut PgConnection = &mut transaction;
 
         for (action_index, action) in input.migration.actions.iter().enumerate() {
-            let deferred_input =
-                apply_action(connection, &runtime, action, input.should_defer_actions)
-                    .await
-                    .map_err(|error| error.at(action_index))?;
+            let deferred_input = apply_action(
+                connection,
+                &runtime,
+                action,
+                input.should_defer_actions,
+                &preallocated,
+            )
+            .await
+            .map_err(|error| error.at(action_index))?;
 
             if let Some(deferred_input) = deferred_input {
                 deferred_inputs.push(deferred_input);
@@ -257,14 +337,21 @@ pub async fn resolve_workspace_runtime(
         RunnerError::execution_failed(format!("Workspace {workspace_id} has no database schema"))
     })?;
 
-    let application: Option<(Uuid, String)> = sqlx::query_as(
-        "SELECT id, \"universalIdentifier\" FROM core.\"application\" \
-         WHERE \"workspaceId\" = $1 AND \"universalIdentifier\" = $2",
-    )
-    .bind(workspace_id)
-    .bind(application_universal_identifier)
-    .fetch_optional(core_pool)
-    .await?;
+    let application = match Uuid::parse_str(application_universal_identifier) {
+        Ok(identifier_uuid) => {
+            let row: Option<(Uuid, Uuid)> = sqlx::query_as(
+                "SELECT id, \"universalIdentifier\" FROM core.\"application\" \
+                 WHERE \"workspaceId\" = $1 AND \"universalIdentifier\" = $2",
+            )
+            .bind(workspace_id)
+            .bind(identifier_uuid)
+            .fetch_optional(core_pool)
+            .await?;
+
+            row.map(|(id, identifier)| (id, identifier.to_string()))
+        }
+        Err(_) => None,
+    };
 
     let (application_id, application_universal_identifier) = match application {
         Some(row) => row,
@@ -273,16 +360,18 @@ pub async fn resolve_workspace_runtime(
                 RunnerError::application_not_found(application_universal_identifier)
             })?;
 
-            let fallback: Option<(Uuid, String)> = sqlx::query_as(
+            let fallback: Option<(Uuid, Uuid)> = sqlx::query_as(
                 "SELECT id, \"universalIdentifier\" FROM core.\"application\" WHERE id = $1",
             )
             .bind(custom_id)
             .fetch_optional(core_pool)
             .await?;
 
-            fallback.ok_or_else(|| {
-                RunnerError::application_not_found(application_universal_identifier)
-            })?
+            fallback
+                .map(|(id, identifier)| (id, identifier.to_string()))
+                .ok_or_else(|| {
+                    RunnerError::application_not_found(application_universal_identifier)
+                })?
         }
     };
 
@@ -314,10 +403,11 @@ async fn apply_action(
     runtime: &WorkspaceRuntime,
     action: &UniversalAction,
     should_defer_actions: bool,
+    preallocated: &PreallocatedIds,
 ) -> Result<Option<DeferredOperationInput>, RunnerError> {
     match (action.metadata_name(), action.action_type()) {
         (MetadataName::ObjectMetadata, WorkspaceMigrationActionType::Create) => {
-            apply_object_create(connection, runtime, expect_create(action)?).await?;
+            apply_object_create(connection, runtime, expect_create(action)?, preallocated).await?;
             Ok(None)
         }
         (MetadataName::ObjectMetadata, WorkspaceMigrationActionType::Update) => {
@@ -334,6 +424,7 @@ async fn apply_action(
                 runtime,
                 expect_create(action)?,
                 should_defer_actions,
+                preallocated,
             )
             .await
         }
@@ -351,6 +442,7 @@ async fn apply_action(
                 runtime,
                 expect_create(action)?,
                 should_defer_actions,
+                preallocated,
             )
             .await
         }
@@ -375,7 +467,8 @@ async fn apply_action(
             Ok(None)
         }
         (MetadataName::SearchFieldMetadata, WorkspaceMigrationActionType::Create) => {
-            apply_search_field_create(connection, runtime, expect_create(action)?).await?;
+            apply_search_field_create(connection, runtime, expect_create(action)?, preallocated)
+                .await?;
             Ok(None)
         }
         (MetadataName::SearchFieldMetadata, WorkspaceMigrationActionType::Update) => {
@@ -613,7 +706,29 @@ fn field_column_input(field: &UniversalFlatFieldMetadata) -> FlatFieldColumnInpu
         default_value: field.default_value.clone(),
         universal_identifier: field.universal_identifier.clone(),
         morph_id: field.morph_id.map(|id| id.to_string()),
-        relation_type: None,
+        relation_type: relation_type_from_settings(&field.universal_settings),
+    }
+}
+
+fn relation_type_from_settings(settings: &Option<Value>) -> Option<String> {
+    settings
+        .as_ref()
+        .and_then(|value| value.get("relationType"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn foreign_key_on_delete_from_settings(settings: &Option<Value>) -> Option<String> {
+    match settings
+        .as_ref()
+        .and_then(|value| value.get("onDelete"))
+        .and_then(Value::as_str)
+    {
+        Some("CASCADE") | None => Some("CASCADE".to_string()),
+        Some("SET_NULL") => Some("SET NULL".to_string()),
+        Some("RESTRICT") => Some("RESTRICT".to_string()),
+        Some("NO_ACTION") => Some("NO ACTION".to_string()),
+        Some(other) => Some(other.to_string()),
     }
 }
 
@@ -698,7 +813,8 @@ async fn insert_object_row(
           \"labelIdentifierFieldMetadataId\", \"imageIdentifierFieldMetadataId\", \
           overrides, \"openRecordIn\", \"disabledObjectPermissionActions\") \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
-                 $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)",
+                 $17, $18, $19, $20, $21, $22, $23, $24, $25, \
+                 $26::core.\"objectMetadata_openrecordin_enum\", $27)",
     )
     .bind(object_id)
     .bind(runtime.workspace_id)
@@ -739,6 +855,7 @@ async fn insert_field_row(
     field: &UniversalFlatFieldMetadata,
     field_id: Uuid,
     object_id: Uuid,
+    preallocated: &PreallocatedIds,
 ) -> Result<(), RunnerError> {
     let universal_identifier = if field.universal_identifier.is_empty() {
         field_id
@@ -749,9 +866,11 @@ async fn insert_field_row(
     let relation_target_field_id = match &field.relation_target_field_metadata_universal_identifier
     {
         Some(identifier) if !identifier.is_empty() => {
-            match lookup_field_row(connection, runtime, identifier).await? {
-                Some(row) => Some(row.id),
-                None => None,
+            match preallocated.get(MetadataName::FieldMetadata, identifier) {
+                Some(id) => Some(id),
+                None => lookup_field_row(connection, runtime, identifier)
+                    .await?
+                    .map(|row| row.id),
             }
         }
         _ => None,
@@ -760,7 +879,7 @@ async fn insert_field_row(
     let relation_target_object_id =
         match &field.relation_target_object_metadata_universal_identifier {
             Some(identifier) if !identifier.is_empty() => {
-                Some(lookup_object_id(connection, runtime, identifier).await?)
+                Some(resolve_object_id(connection, runtime, identifier, preallocated).await?)
             }
             _ => None,
         };
@@ -847,17 +966,142 @@ fn base_column_definitions() -> Vec<WorkspaceSchemaColumnDefinition> {
     ]
 }
 
+const ACCESS_GROUP_IDS_COLUMN_NAME: &str = "_accessGroupIds";
+const IS_PRIVATE_COLUMN_NAME: &str = "_isPrivate";
+
+const BASE_COLUMN_NAMES: [&str; 4] = ["id", "createdAt", "updatedAt", "deletedAt"];
+
+fn object_id_for_action(
+    create: &UniversalCreateAction,
+    metadata_name: MetadataName,
+    preallocated: &PreallocatedIds,
+    fallback: Uuid,
+) -> Result<Uuid, RunnerError> {
+    if let Some(raw) = &create.id {
+        return universal_uuid(raw);
+    }
+
+    if let Some(entity) = &create.flat_entity {
+        if let Some(id) = preallocated.get(metadata_name, entity.universal_identifier()) {
+            return Ok(id);
+        }
+    }
+
+    Ok(fallback)
+}
+
+fn field_id_for_action(
+    create: &UniversalCreateAction,
+    field: &UniversalFlatFieldMetadata,
+    preallocated: &PreallocatedIds,
+    fallback: Uuid,
+) -> Result<Uuid, RunnerError> {
+    if let Some(raw) = &create.id {
+        return universal_uuid(raw);
+    }
+
+    if let Some(id) = preallocated.get(MetadataName::FieldMetadata, &field.universal_identifier) {
+        return Ok(id);
+    }
+
+    Ok(fallback)
+}
+
+fn is_base_column_field(field: &UniversalFlatFieldMetadata) -> bool {
+    BASE_COLUMN_NAMES.contains(&field.name.as_str())
+        && matches!(
+            field.field_type,
+            FlatFieldMetadataType::Uuid | FlatFieldMetadataType::DateTime
+        )
+}
+
+async fn create_composite_enum_columns(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    table_name: &str,
+    field: &UniversalFlatFieldMetadata,
+) -> Result<(), RunnerError> {
+    if !composite_types::is_composite_field_metadata_type(ddl_field_type(field.field_type)) {
+        return Ok(());
+    }
+
+    for property in composite_types::composite_properties(ddl_field_type(field.field_type)) {
+        if !matches!(
+            property.field_type,
+            super::column_defs::FieldMetadataType::Select
+                | super::column_defs::FieldMetadataType::MultiSelect
+        ) {
+            continue;
+        }
+
+        if property.options.is_empty() {
+            continue;
+        }
+
+        let column_name = compute_composite_column_name(&field.name, property.name);
+        let enum_name = compute_postgres_enum_name(table_name, &column_name);
+        let values: Vec<&str> = property.options.to_vec();
+
+        enum_types::create_enum(connection, &runtime.schema_name, &enum_name, &values).await?;
+    }
+
+    Ok(())
+}
+
+async fn create_permission_enrichment(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    table_name: &str,
+    object_id: Uuid,
+) -> Result<(), RunnerError> {
+    let hex_id = object_id.simple().to_string();
+
+    let access_group_index = WorkspaceSchemaIndexDefinition {
+        name: format!("IDX_ACCESS_GROUP_IDS_{hex_id}"),
+        columns: vec![ACCESS_GROUP_IDS_COLUMN_NAME.to_string()],
+        is_unique: false,
+        index_type: Some("GIN".to_string()),
+        where_clause: None,
+    };
+
+    index::create_index(
+        connection,
+        &runtime.schema_name,
+        table_name,
+        &access_group_index,
+    )
+    .await?;
+
+    let private_record_index = WorkspaceSchemaIndexDefinition {
+        name: format!("IDX_PRIVATE_RECORD_{hex_id}"),
+        columns: vec!["id".to_string()],
+        is_unique: false,
+        index_type: None,
+        where_clause: Some("\"_isPrivate\"".to_string()),
+    };
+
+    index::create_index(
+        connection,
+        &runtime.schema_name,
+        table_name,
+        &private_record_index,
+    )
+    .await?;
+
+    Ok(())
+}
+
 async fn apply_object_create(
     connection: &mut PgConnection,
     runtime: &WorkspaceRuntime,
     create: &UniversalCreateAction,
+    preallocated: &PreallocatedIds,
 ) -> Result<(), RunnerError> {
     let object = object_entity(create)?.clone();
 
-    let object_id = match &create.id {
-        Some(raw) => universal_uuid(raw)?,
-        None => Uuid::new_v4(),
-    };
+    let object_id = object_id_for_action(create, MetadataName::ObjectMetadata, preallocated, {
+        Uuid::new_v4()
+    })?;
 
     let mut field_ids: std::collections::HashMap<String, Uuid> = create
         .field_id_by_universal_identifier
@@ -868,9 +1112,13 @@ async fn apply_object_create(
         .collect();
 
     for field in &create.universal_flat_field_metadatas {
-        field_ids
-            .entry(field.universal_identifier.clone())
-            .or_insert_with(Uuid::new_v4);
+        if !field_ids.contains_key(&field.universal_identifier) {
+            let id = preallocated
+                .get(MetadataName::FieldMetadata, &field.universal_identifier)
+                .unwrap_or_else(Uuid::new_v4);
+
+            field_ids.insert(field.universal_identifier.clone(), id);
+        }
     }
 
     let table_name = match &object.target_table_name {
@@ -904,7 +1152,15 @@ async fn apply_object_create(
     for field in &create.universal_flat_field_metadatas {
         let field_id = field_ids[&field.universal_identifier];
 
-        insert_field_row(connection, runtime, field, field_id, object_id).await?;
+        insert_field_row(
+            connection,
+            runtime,
+            field,
+            field_id,
+            object_id,
+            preallocated,
+        )
+        .await?;
 
         if matches!(
             field.field_type,
@@ -912,9 +1168,15 @@ async fn apply_object_create(
         ) {
             create_select_enum(connection, runtime, &table_name, field).await?;
         }
+
+        create_composite_enum_columns(connection, runtime, &table_name, field).await?;
     }
 
     let mut column_definitions = base_column_definitions();
+    let mut column_names: std::collections::HashSet<String> = column_definitions
+        .iter()
+        .map(|definition| definition.name.clone())
+        .collect();
 
     for field in &create.universal_flat_field_metadatas {
         let search_vector_expression = if field.field_type == FlatFieldMetadataType::TsVector {
@@ -931,8 +1193,36 @@ async fn apply_object_create(
         )
         .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
 
-        column_definitions.extend(definitions);
+        for definition in definitions {
+            if column_names.insert(definition.name.clone()) {
+                column_definitions.push(definition);
+            }
+        }
     }
+
+    column_definitions.push(WorkspaceSchemaColumnDefinition {
+        name: ACCESS_GROUP_IDS_COLUMN_NAME.to_string(),
+        column_type: "integer".to_string(),
+        is_nullable: Some(true),
+        default: None,
+        is_primary: false,
+        is_array: true,
+        as_expression: None,
+        generated_type: None,
+        is_generated_always_as_identity: false,
+    });
+
+    column_definitions.push(WorkspaceSchemaColumnDefinition {
+        name: IS_PRIVATE_COLUMN_NAME.to_string(),
+        column_type: "boolean".to_string(),
+        is_nullable: Some(false),
+        default: Some("false".to_string()),
+        is_primary: false,
+        is_array: false,
+        as_expression: None,
+        generated_type: None,
+        is_generated_always_as_identity: false,
+    });
 
     table::create_table(
         connection,
@@ -941,6 +1231,8 @@ async fn apply_object_create(
         &column_definitions,
     )
     .await?;
+
+    create_permission_enrichment(connection, runtime, &table_name, object_id).await?;
 
     Ok(())
 }
@@ -1042,6 +1334,7 @@ async fn apply_field_create(
     runtime: &WorkspaceRuntime,
     create: &UniversalCreateAction,
     should_defer_actions: bool,
+    preallocated: &PreallocatedIds,
 ) -> Result<Option<DeferredOperationInput>, RunnerError> {
     let field = field_entity(create.flat_entity.as_ref())?.clone();
 
@@ -1051,110 +1344,113 @@ async fn apply_field_create(
         ));
     }
 
-    let object_id = lookup_object_id(
+    let object_id = resolve_object_id(
         connection,
         runtime,
         &field.object_metadata_universal_identifier,
+        preallocated,
     )
     .await?;
 
-    let field_id = match &create.id {
-        Some(raw) => universal_uuid(raw)?,
-        None => Uuid::new_v4(),
-    };
+    let field_id = field_id_for_action(create, &field, preallocated, Uuid::new_v4())?;
 
-    insert_field_row(connection, runtime, &field, field_id, object_id).await?;
+    insert_field_row(
+        connection,
+        runtime,
+        &field,
+        field_id,
+        object_id,
+        preallocated,
+    )
+    .await?;
 
     let table_name = object_table_name(connection, object_id).await?;
 
+    let input = field_column_input(&field);
+
+    if column_defs::is_morph_relation_head(&input) {
+        return Ok(None);
+    }
+
+    if matches!(
+        field.field_type,
+        FlatFieldMetadataType::Select | FlatFieldMetadataType::MultiSelect
+    ) {
+        create_select_enum(connection, runtime, &table_name, &field).await?;
+    }
+
+    create_composite_enum_columns(connection, runtime, &table_name, &field).await?;
+
+    let search_vector_expression = if field.field_type == FlatFieldMetadataType::TsVector {
+        Some(search_vector_expression(connection, runtime, object_id).await?)
+    } else {
+        None
+    };
+
+    let definitions = generate_column_definitions(
+        &input,
+        &runtime.schema_name,
+        &table_name,
+        search_vector_expression.as_deref(),
+    )
+    .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+
+    let many_to_one_target = if matches!(
+        field.field_type,
+        FlatFieldMetadataType::Relation | FlatFieldMetadataType::MorphRelation
+    ) && relation_type_from_settings(&field.universal_settings)
+        .as_deref()
+        == Some("MANY_TO_ONE")
+    {
+        field
+            .relation_target_object_metadata_universal_identifier
+            .as_deref()
+            .filter(|identifier| !identifier.is_empty())
+    } else {
+        None
+    };
+
+    if !definitions.is_empty() && !is_base_column_field(&field) {
+        column::add_columns(
+            connection,
+            &runtime.schema_name,
+            &table_name,
+            &definitions,
+            true,
+        )
+        .await?;
+    }
+
     let mut deferred = None;
 
-    if field.field_type == FlatFieldMetadataType::Relation {
+    if let Some(target_identifier) = many_to_one_target {
         let join_column = compute_relation_join_column_name(&field.name);
+        let target_object_id =
+            resolve_object_id(connection, runtime, target_identifier, preallocated).await?;
+        let target_table = object_table_name(connection, target_object_id).await?;
 
-        let definitions = vec![WorkspaceSchemaColumnDefinition {
-            name: join_column.clone(),
-            column_type: "uuid".to_string(),
-            is_nullable: Some(true),
-            default: None,
-            is_primary: false,
-            is_array: false,
-            as_expression: None,
-            generated_type: None,
-            is_generated_always_as_identity: false,
-        }];
-
-        column::add_columns(
-            connection,
-            &runtime.schema_name,
-            &table_name,
-            &definitions,
-            true,
-        )
-        .await?;
-
-        if let Some(target_object_identifier) =
-            &field.relation_target_object_metadata_universal_identifier
-        {
-            let target_object_id =
-                lookup_object_id(connection, runtime, target_object_identifier).await?;
-            let target_table = object_table_name(connection, target_object_id).await?;
-
-            let foreign_key = WorkspaceSchemaForeignKeyDefinition {
-                table_name: table_name.clone(),
-                column_name: join_column,
-                referenced_table_name: target_table,
-                referenced_column_name: "id".to_string(),
-                on_delete: Some("CASCADE".to_string()),
-                on_update: None,
-            };
-
-            foreign_key::create_foreign_key(connection, &runtime.schema_name, &foreign_key, true)
-                .await?;
-
-            if should_defer_actions {
-                deferred = Some(DeferredOperationInput {
-                    name: deferred::VALIDATE_FOREIGN_KEY.to_string(),
-                    payload: serde_json::json!({ "fieldMetadataId": field_id }),
-                    application_universal_identifier: runtime
-                        .application_universal_identifier
-                        .clone(),
-                });
-            } else {
-                foreign_key::validate_foreign_key(connection, &runtime.schema_name, &foreign_key)
-                    .await?;
-            }
-        }
-    } else {
-        if matches!(
-            field.field_type,
-            FlatFieldMetadataType::Select | FlatFieldMetadataType::MultiSelect
-        ) {
-            create_select_enum(connection, runtime, &table_name, &field).await?;
-        }
-
-        let search_vector_expression = if field.field_type == FlatFieldMetadataType::TsVector {
-            Some(search_vector_expression(connection, runtime, object_id).await?)
-        } else {
-            None
+        let foreign_key = WorkspaceSchemaForeignKeyDefinition {
+            table_name: table_name.clone(),
+            column_name: join_column,
+            referenced_table_name: target_table,
+            referenced_column_name: "id".to_string(),
+            on_delete: foreign_key_on_delete_from_settings(&field.universal_settings),
+            on_update: None,
         };
 
-        let definitions = generate_column_definitions(
-            &field_column_input(&field),
-            &runtime.schema_name,
-            &table_name,
-            search_vector_expression.as_deref(),
-        )
-        .map_err(|error| RunnerError::execution_failed(error.to_string()))?;
+        foreign_key::create_foreign_key(connection, &runtime.schema_name, &foreign_key, true)
+            .await?;
 
-        column::add_columns(
-            connection,
-            &runtime.schema_name,
-            &table_name,
-            &definitions,
-            true,
-        )
-        .await?;
+        if should_defer_actions {
+            deferred = Some(DeferredOperationInput {
+                name: deferred::VALIDATE_FOREIGN_KEY.to_string(),
+                payload: serde_json::json!({ "fieldMetadataId": field_id }),
+                application_universal_identifier: runtime.application_universal_identifier.clone(),
+            });
+        } else {
+            foreign_key::validate_foreign_key(connection, &runtime.schema_name, &foreign_key)
+                .await?;
+        }
     }
 
     Ok(deferred)
@@ -1311,7 +1607,10 @@ pub async fn index_column_names(
             continue;
         };
 
-        if field.field_type == FlatFieldMetadataType::Relation {
+        if matches!(
+            field.field_type,
+            FlatFieldMetadataType::Relation | FlatFieldMetadataType::MorphRelation
+        ) {
             columns.push(compute_relation_join_column_name(&field.name));
         } else if let Some(sub_field_name) = &index_field.sub_field_name {
             columns.push(compute_composite_column_name(&field.name, sub_field_name));
@@ -1362,13 +1661,15 @@ async fn insert_index_row(
     connection: &mut PgConnection,
     runtime: &WorkspaceRuntime,
     index: &UniversalFlatIndexMetadata,
+    preallocated: &PreallocatedIds,
 ) -> Result<Uuid, RunnerError> {
     let index_id = Uuid::new_v4();
 
-    let object_id = lookup_object_id(
+    let object_id = resolve_object_id(
         connection,
         runtime,
         &index.object_metadata_universal_identifier,
+        preallocated,
     )
     .await?;
 
@@ -1377,7 +1678,7 @@ async fn insert_index_row(
          (id, name, \"workspaceId\", \"objectMetadataId\", \"isUnique\", \
           \"indexWhereClause\", \"indexType\", \"universalIdentifier\", \"applicationId\", \
           \"isSystemSideEffect\") \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7::core.\"indexMetadata_indextype_enum\", $8, $9, $10)",
     )
     .bind(index_id)
     .bind(&index.name)
@@ -1392,6 +1693,46 @@ async fn insert_index_row(
     .execute(&mut *connection)
     .await?;
 
+    for index_field in &index.universal_flat_index_field_metadatas {
+        let field_id = resolve_field_id(
+            connection,
+            runtime,
+            &index_field.field_metadata_universal_identifier,
+            preallocated,
+        )
+        .await?;
+
+        if let Some(sub_field_name) = &index_field.sub_field_name {
+            sqlx::query(
+                "INSERT INTO core.\"indexFieldMetadata\" \
+                 (id, \"indexMetadataId\", \"fieldMetadataId\", \"workspaceId\", \"order\", \
+                  \"subFieldName\") \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(index_id)
+            .bind(field_id)
+            .bind(runtime.workspace_id)
+            .bind(index_field.order)
+            .bind(sub_field_name)
+            .execute(&mut *connection)
+            .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO core.\"indexFieldMetadata\" \
+                 (id, \"indexMetadataId\", \"fieldMetadataId\", \"workspaceId\", \"order\") \
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(index_id)
+            .bind(field_id)
+            .bind(runtime.workspace_id)
+            .bind(index_field.order)
+            .execute(&mut *connection)
+            .await?;
+        }
+    }
+
     Ok(index_id)
 }
 
@@ -1400,10 +1741,11 @@ async fn apply_index_create(
     runtime: &WorkspaceRuntime,
     create: &UniversalCreateAction,
     should_defer_actions: bool,
+    preallocated: &PreallocatedIds,
 ) -> Result<Option<DeferredOperationInput>, RunnerError> {
     let index = index_entity(create.flat_entity.as_ref())?.clone();
 
-    let index_id = insert_index_row(connection, runtime, &index).await?;
+    let index_id = insert_index_row(connection, runtime, &index, preallocated).await?;
 
     let definition = index_definition(connection, runtime, &index).await?;
 
@@ -1605,33 +1947,33 @@ async fn apply_search_field_create(
     connection: &mut PgConnection,
     runtime: &WorkspaceRuntime,
     create: &UniversalCreateAction,
+    preallocated: &PreallocatedIds,
 ) -> Result<(), RunnerError> {
     let search_field = search_field_entity(create.flat_entity.as_ref())?.clone();
 
-    let object_id = lookup_object_id(
+    let object_id = resolve_object_id(
         connection,
         runtime,
         &search_field.object_metadata_universal_identifier,
+        preallocated,
     )
     .await?;
 
-    let field_id = lookup_field_row(
+    let field_id = resolve_field_id(
         connection,
         runtime,
         &search_field.field_metadata_universal_identifier,
+        preallocated,
     )
-    .await?
-    .ok_or_else(|| RunnerError::execution_failed("search field metadata field not found"))?
-    .id;
+    .await?;
 
-    let ts_vector_field_id = lookup_field_row(
+    let ts_vector_field_id = resolve_field_id(
         connection,
         runtime,
         &search_field.ts_vector_field_metadata_universal_identifier,
+        preallocated,
     )
-    .await?
-    .ok_or_else(|| RunnerError::execution_failed("search field ts vector metadata not found"))?
-    .id;
+    .await?;
 
     sqlx::query(
         "INSERT INTO core.\"searchFieldMetadata\" \
@@ -1640,7 +1982,12 @@ async fn apply_search_field_create(
           \"isSystemSideEffect\") \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
-    .bind(Uuid::new_v4())
+    .bind(object_id_for_action(
+        create,
+        MetadataName::SearchFieldMetadata,
+        preallocated,
+        Uuid::new_v4(),
+    )?)
     .bind(object_id)
     .bind(field_id)
     .bind(runtime.workspace_id)
@@ -1653,6 +2000,39 @@ async fn apply_search_field_create(
     .await?;
 
     Ok(())
+}
+
+pub async fn resolve_object_id(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    universal_identifier: &str,
+    preallocated: &PreallocatedIds,
+) -> Result<Uuid, RunnerError> {
+    if let Some(id) = preallocated.get(MetadataName::ObjectMetadata, universal_identifier) {
+        return Ok(id);
+    }
+
+    lookup_object_id(connection, runtime, universal_identifier).await
+}
+
+pub async fn resolve_field_id(
+    connection: &mut PgConnection,
+    runtime: &WorkspaceRuntime,
+    universal_identifier: &str,
+    preallocated: &PreallocatedIds,
+) -> Result<Uuid, RunnerError> {
+    if let Some(id) = preallocated.get(MetadataName::FieldMetadata, universal_identifier) {
+        return Ok(id);
+    }
+
+    lookup_field_row(connection, runtime, universal_identifier)
+        .await?
+        .map(|row| row.id)
+        .ok_or_else(|| {
+            RunnerError::execution_failed(format!(
+                "field metadata {universal_identifier} not found"
+            ))
+        })
 }
 
 async fn apply_search_field_update(
@@ -1848,12 +2228,13 @@ mod integration_tests {
 
     async fn test_state() -> Option<AppState> {
         let url = std::env::var("NUDGE_TEST_DATABASE_URL").ok()?;
-        let state = AppState::connect(&test_config(url)).await.ok()?;
-
-        sqlx::migrate!("./migrations/core")
-            .run(&state.core_pool)
+        let state = AppState::connect(&test_config(url.clone()))
             .await
-            .ok()?;
+            .expect("connecting the test state");
+
+        crate::workspace_migrations::ddl::test_support::migrate_core(&url)
+            .await
+            .expect("running core migrations");
 
         Some(state)
     }
@@ -1871,18 +2252,22 @@ mod integration_tests {
         let schema_name = nudge_core::ids::workspace_schema_name(&workspace_id);
         let subdomain = format!("runner-{}", &Uuid::new_v4().simple().to_string()[..10]);
 
+        let default_role_id = Uuid::new_v4();
+
+        let mut transaction = state.core_pool.begin().await.expect("tx");
+
         sqlx::query(
             "INSERT INTO core.\"workspace\" \
              (id, \"displayName\", \"inviteHash\", \"activationStatus\", subdomain, \
               \"workspaceCustomApplicationId\", \"isPasswordAuthEnabled\", \"databaseSchema\") \
-             VALUES ($1, 'Runner Test', $2, 'CREATED', $3, $4, true, $5)",
+             VALUES ($1, 'Runner Test', $2, 'PENDING_CREATION', $3, $4, true, $5)",
         )
         .bind(workspace_id)
         .bind(Uuid::new_v4())
         .bind(&subdomain)
         .bind(application_id)
         .bind(&schema_name)
-        .execute(&state.core_pool)
+        .execute(&mut *transaction)
         .await
         .expect("inserting the test workspace");
 
@@ -1892,16 +2277,44 @@ mod integration_tests {
              VALUES ($1, $2, 'Runner Test Application', 'LOCAL', 'INSTALLED', '', $3)",
         )
         .bind(application_id)
-        .bind(&application_universal_identifier)
+        .bind(
+            Uuid::parse_str(&application_universal_identifier)
+                .expect("application universal identifier is a uuid"),
+        )
         .bind(workspace_id)
-        .execute(&state.core_pool)
+        .execute(&mut *transaction)
         .await
         .expect("inserting the test application");
 
+        sqlx::query(
+            "INSERT INTO core.\"role\" \
+             (id, \"universalIdentifier\", label, \"applicationId\", \"workspaceId\") \
+             VALUES ($1, $2, 'Member', $3, $4)",
+        )
+        .bind(default_role_id)
+        .bind(Uuid::new_v4())
+        .bind(application_id)
+        .bind(workspace_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("inserting the default role");
+
+        sqlx::query(
+            "UPDATE core.\"workspace\" SET \"activationStatus\" = 'CREATED', \
+                \"defaultRoleId\" = $2 WHERE id = $1",
+        )
+        .bind(workspace_id)
+        .bind(default_role_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("activating the test workspace");
+
         sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS \"{}\"", schema_name))
-            .execute(&state.core_pool)
+            .execute(&mut *transaction)
             .await
             .expect("creating the workspace schema");
+
+        transaction.commit().await.expect("committing the fixture");
 
         TestWorkspace {
             workspace_id,
@@ -2221,11 +2634,13 @@ mod integration_tests {
 
         let workspace = create_test_workspace(&state).await;
 
+        let field_universal_identifier = Uuid::new_v4().to_string();
+
         let object = object_action(
             "indexwidget",
             &workspace.application_universal_identifier,
             UniversalFlatFieldMetadata {
-                universal_identifier: Uuid::new_v4().to_string(),
+                universal_identifier: field_universal_identifier.clone(),
                 field_type: FlatFieldMetadataType::Text,
                 name: "codeText".to_string(),
                 label: "Code".to_string(),
@@ -2237,10 +2652,8 @@ mod integration_tests {
 
         let object_universal_identifier = object_identifier(&object);
 
-        let field = text_field_action("codeText", &object_universal_identifier);
-
         let migration = WorkspaceMigration {
-            actions: vec![object, field],
+            actions: vec![object],
             application_universal_identifier: workspace.application_universal_identifier.clone(),
         };
 
@@ -2266,17 +2679,7 @@ mod integration_tests {
                     universal_flat_index_field_metadatas: vec![
                         crate::metadata::flat::UniversalFlatIndexFieldMetadata {
                             order: 0,
-                            field_metadata_universal_identifier: match &migration.actions[1] {
-                                UniversalAction::Create(create) => {
-                                    match create.flat_entity.as_ref() {
-                                        Some(UniversalFlatEntity::FieldMetadata(field)) => {
-                                            field.universal_identifier.clone()
-                                        }
-                                        _ => String::new(),
-                                    }
-                                }
-                                _ => String::new(),
-                            },
+                            field_metadata_universal_identifier: field_universal_identifier.clone(),
                             ..Default::default()
                         },
                     ],
@@ -2332,16 +2735,16 @@ mod integration_tests {
 
         assert!(index_exists.0, "the deferred index must be built");
 
-        let done: (i64,) = sqlx::query_as(
+        let remaining: (i64,) = sqlx::query_as(
             "SELECT count(*) FROM core.\"deferredWorkspaceOperation\" \
-             WHERE \"workspaceId\" = $1 AND name = 'build_index' AND status = 'DONE'",
+             WHERE \"workspaceId\" = $1 AND name = 'build_index'",
         )
         .bind(workspace.workspace_id)
         .fetch_one(&state.core_pool)
         .await
-        .expect("counting done operations");
+        .expect("counting remaining operations");
 
-        assert_eq!(done.0, 1);
+        assert_eq!(remaining.0, 0, "successful operations must be removed");
 
         let _ = TEST_SCHEMA_PREFIX;
     }

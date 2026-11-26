@@ -161,9 +161,11 @@ fn aggregate_relation_field_pairs(actions_report: &mut OrchestratorActionsReport
     let mut aggregated_create_field_actions: Vec<UniversalCreateAction> = Vec::new();
 
     for action in &create_field_actions {
-        let Some(universal_identifier) = action.flat_entity.as_ref().map(|entity| entity.universal_identifier().to_string()) else {
-            aggregated_create_field_actions.push(action.clone());
-
+        let Some(universal_identifier) = action
+            .flat_entity
+            .as_ref()
+            .map(|entity| entity.universal_identifier().to_string())
+        else {
             continue;
         };
 
@@ -171,7 +173,7 @@ fn aggregate_relation_field_pairs(actions_report: &mut OrchestratorActionsReport
             continue;
         }
 
-        processed_field_universal_identifiers.insert(universal_identifier);
+        processed_field_universal_identifiers.insert(universal_identifier.clone());
 
         let target_universal_identifier = flat_field_of(action).and_then(|field| {
             field

@@ -94,7 +94,7 @@ SSO_EXCHANGE_HASH="$(printf '%s' "$SSO_EXCHANGE_TOKEN" | shasum -a 256 | cut -d'
 SSO_USER_ID="$(uuidgen)"
 SSO_EXCHANGE_EMAIL="$SSO_SUFFIX-exchange@nudge.test"
 
-docker exec infra-db-1 psql -U postgres -d default -q \
+docker exec infra-db-1 psql -U postgres -d "${E2E_DATABASE_NAME:-default}" -q \
   -c "INSERT INTO core.\"user\" (id, email, \"isEmailVerified\") VALUES ('$SSO_USER_ID', '$SSO_EXCHANGE_EMAIL', true)" \
   -c "INSERT INTO core.\"appToken\" (\"userId\", type, value, \"expiresAt\", context) VALUES ('$SSO_USER_ID', 'SSO_EXCHANGE_TOKEN', '$SSO_EXCHANGE_HASH', now() + interval '5 minutes', '{\"authProvider\":\"google\"}')"
 

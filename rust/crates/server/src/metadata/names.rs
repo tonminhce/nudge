@@ -506,10 +506,6 @@ pub fn compute_composite_column_name(field_name: &str, property_name: &str) -> S
     format!("{field_name}{}", pascal_case(property_name))
 }
 
-pub fn compute_server_only_composite_column_name(field_name: &str, column_name: &str) -> String {
-    format!("{field_name}_{column_name}")
-}
-
 pub fn remove_sql_ddl_injection(value: &str) -> String {
     value
         .chars()
@@ -796,14 +792,6 @@ mod tests {
         assert_eq!(
             compute_relation_join_column_name("accountOwner"),
             "accountOwnerId"
-        );
-    }
-
-    #[test]
-    fn server_only_composite_column_names_use_an_underscore() {
-        assert_eq!(
-            compute_server_only_composite_column_name("bodyV2", "fileIds"),
-            "bodyV2_fileIds"
         );
     }
 
