@@ -43,6 +43,7 @@ pub struct StandardObjectDefinition {
     pub label_identifier_field_universal_identifier: Option<&'static str>,
     pub image_identifier_field_universal_identifier: Option<&'static str>,
     pub fields: &'static [StandardFieldDefinition],
+    pub column_plan: &'static [&'static str],
 }
 
 pub struct StandardFieldOptionDefinition {
@@ -831,6 +832,40 @@ pub const OBJECT_FIELDS_AGENTCHATTHREAD: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_AGENTCHATTHREAD: &[&str] = &[
+    "id",
+    "title",
+    "conversationType",
+    "directMessageFirstWorkspaceMemberId",
+    "directMessageSecondWorkspaceMemberId",
+    "isAssistantParticipant",
+    "totalInputTokens",
+    "totalOutputTokens",
+    "contextWindowTokens",
+    "conversationSize",
+    "totalInputCredits",
+    "totalOutputCredits",
+    "totalCacheReadTokens",
+    "totalCacheCreationTokens",
+    "activeStreamId",
+    "pendingQuestionMessageId",
+    "deletedAt",
+    "archivedAt",
+    "lastActivityAt",
+    "lastMessageText",
+    "lastMessageSenderWorkspaceMemberId",
+    "writerWorkspaceMemberIds",
+    "createdAt",
+    "updatedAt",
+    "channelId",
+    "channelArchivedAt",
+    "channelSnoozedUntil",
+    "_accessGroupIds",
+    "_isPrivate",
+    "workspaceMemberId",
+    "assigneeId",
+];
+
 pub const OBJECT_FIELDS_AGENTCHATTHREADPARTICIPANT: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "13ba446f-db00-5635-888e-c2b11299e34b",
@@ -1098,6 +1133,23 @@ pub const OBJECT_FIELDS_AGENTCHATTHREADPARTICIPANT: &[StandardFieldDefinition] =
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_AGENTCHATTHREADPARTICIPANT: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "lastReadAt",
+    "archivedAt",
+    "snoozedUntil",
+    "isSubscribed",
+    "lastMentionedAt",
+    "mentionsResolvedAt",
+    "_accessGroupIds",
+    "_isPrivate",
+    "threadId",
+    "workspaceMemberId",
+];
+
 pub const OBJECT_FIELDS_AGENTCHATTHREADTARGET: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "3fa2b4a3-bd88-50cb-954b-db72480f7290",
@@ -1297,6 +1349,19 @@ pub const OBJECT_FIELDS_AGENTCHATTHREADTARGET: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: None,
         relation_target_object_universal_identifier: None,
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_AGENTCHATTHREADTARGET: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "_accessGroupIds",
+    "_isPrivate",
+    "threadId",
+    "targetPersonId",
+    "targetCompanyId",
+    "targetOpportunityId",
 ];
 
 pub const OBJECT_FIELDS_AGENTMESSAGE: &[StandardFieldDefinition] = &[
@@ -1608,6 +1673,23 @@ pub const OBJECT_FIELDS_AGENTMESSAGE: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("18fec29f-89bd-4f33-8b80-f7a83a9a2e31"),
         relation_target_object_universal_identifier: Some("7d34e524-cbaf-4a53-b021-eb0313397f22"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_AGENTMESSAGE: &[&str] = &[
+    "id",
+    "agentId",
+    "senderApplicationId",
+    "role",
+    "status",
+    "processedAt",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "_accessGroupIds",
+    "_isPrivate",
+    "senderWorkspaceMemberId",
+    "threadId",
+    "turnId",
 ];
 
 pub const OBJECT_FIELDS_AGENTMESSAGEPART: &[StandardFieldDefinition] = &[
@@ -2207,6 +2289,38 @@ pub const OBJECT_FIELDS_AGENTMESSAGEPART: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_AGENTMESSAGEPART: &[&str] = &[
+    "id",
+    "orderIndex",
+    "type",
+    "textContent",
+    "reasoningContent",
+    "toolName",
+    "toolCallId",
+    "toolInput",
+    "toolOutput",
+    "state",
+    "providerExecuted",
+    "errorMessage",
+    "errorDetails",
+    "sourceUrlSourceId",
+    "sourceUrlUrl",
+    "sourceUrlTitle",
+    "sourceDocumentSourceId",
+    "sourceDocumentMediaType",
+    "sourceDocumentTitle",
+    "sourceDocumentFilename",
+    "fileFilename",
+    "fileId",
+    "providerMetadata",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "_accessGroupIds",
+    "_isPrivate",
+    "messageId",
+];
+
 pub const OBJECT_FIELDS_AGENTMESSAGEREACTION: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "a147d91d-7109-526a-bebe-3a0eb81f251f",
@@ -2384,6 +2498,19 @@ pub const OBJECT_FIELDS_AGENTMESSAGEREACTION: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("9242d7b0-bb3a-4bb6-a830-5e84e722c684"),
         relation_target_object_universal_identifier: Some("20202020-3319-4234-a34c-82d5c0e881a6"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_AGENTMESSAGEREACTION: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "agentId",
+    "emoji",
+    "_accessGroupIds",
+    "_isPrivate",
+    "messageId",
+    "workspaceMemberId",
 ];
 
 pub const OBJECT_FIELDS_AGENTTURN: &[StandardFieldDefinition] = &[
@@ -2805,6 +2932,32 @@ pub const OBJECT_FIELDS_AGENTTURN: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("b36513fc-ffaf-4e99-8686-b1aefca70b76"),
         relation_target_object_universal_identifier: Some("62d0354c-3b99-4769-b0f5-4e2651c2ca7d"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_AGENTTURN: &[&str] = &[
+    "id",
+    "agentId",
+    "status",
+    "error",
+    "startedAt",
+    "endedAt",
+    "modelId",
+    "inputTokens",
+    "outputTokens",
+    "cacheReadTokens",
+    "cacheCreationTokens",
+    "inputCredits",
+    "outputCredits",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "_accessGroupIds",
+    "_isPrivate",
+    "threadId",
 ];
 
 pub const OBJECT_FIELDS_ATTACHMENT: &[StandardFieldDefinition] = &[
@@ -3272,6 +3425,37 @@ pub const OBJECT_FIELDS_ATTACHMENT: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_ATTACHMENT: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "file",
+    "fullPath",
+    "fileCategory",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "targetAgentChatThreadId",
+    "targetTaskId",
+    "targetNoteId",
+    "targetPersonId",
+    "targetCompanyId",
+    "targetOpportunityId",
+    "targetDashboardId",
+    "targetMessageId",
+];
+
 pub const OBJECT_FIELDS_BLOCKLIST: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "eeee2008-081d-5437-9c4d-f67d5195d93e",
@@ -3515,6 +3699,28 @@ pub const OBJECT_FIELDS_BLOCKLIST: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("20202020-6cb2-4161-9f29-a4b7f1283859"),
         relation_target_object_universal_identifier: Some("20202020-3319-4234-a34c-82d5c0e881a6"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_BLOCKLIST: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "handle",
+    "scope",
+    "_accessGroupIds",
+    "_isPrivate",
+    "workspaceMemberId",
 ];
 
 pub const OBJECT_FIELDS_CALENDARCHANNELEVENTASSOCIATION: &[StandardFieldDefinition] = &[
@@ -3782,6 +3988,29 @@ pub const OBJECT_FIELDS_CALENDARCHANNELEVENTASSOCIATION: &[StandardFieldDefiniti
         relation_target_field_universal_identifier: Some("20202020-bdf8-4572-a2cc-ecbb6bcc3a02"),
         relation_target_object_universal_identifier: Some("20202020-8f1d-4eef-9f85-0d1965e27221"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_CALENDARCHANNELEVENTASSOCIATION: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "eventExternalId",
+    "recurringEventExternalId",
+    "calendarChannelId",
+    "_accessGroupIds",
+    "_isPrivate",
+    "calendarEventId",
 ];
 
 pub const OBJECT_FIELDS_CALENDAREVENT: &[StandardFieldDefinition] = &[
@@ -4315,6 +4544,39 @@ pub const OBJECT_FIELDS_CALENDAREVENT: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_CALENDAREVENT: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "title",
+    "isCanceled",
+    "isFullDay",
+    "startsAt",
+    "endsAt",
+    "externalCreatedAt",
+    "externalUpdatedAt",
+    "description",
+    "location",
+    "iCalUid",
+    "conferenceSolution",
+    "conferenceLinkPrimaryLinkLabel",
+    "conferenceLinkPrimaryLinkUrl",
+    "conferenceLinkSecondaryLinks",
+    "_accessGroupIds",
+    "_isPrivate",
+];
+
 pub const OBJECT_FIELDS_CALENDAREVENTPARTICIPANT: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "ddbc46f8-f8d1-53ec-a716-da7758fd3e41",
@@ -4648,6 +4910,32 @@ pub const OBJECT_FIELDS_CALENDAREVENTPARTICIPANT: &[StandardFieldDefinition] = &
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_CALENDAREVENTPARTICIPANT: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "handle",
+    "displayName",
+    "isOrganizer",
+    "responseStatus",
+    "_accessGroupIds",
+    "_isPrivate",
+    "calendarEventId",
+    "personId",
+    "workspaceMemberId",
+];
+
 pub const OBJECT_FIELDS_CALENDAREVENTTARGET: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "512cf243-f9eb-51e2-a422-3e62e19916cc",
@@ -4979,6 +5267,31 @@ pub const OBJECT_FIELDS_CALENDAREVENTTARGET: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: None,
         relation_target_object_universal_identifier: None,
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_CALENDAREVENTTARGET: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "isAutomaticallyAssigned",
+    "isManuallyAssigned",
+    "_accessGroupIds",
+    "_isPrivate",
+    "calendarEventId",
+    "targetPersonId",
+    "targetCompanyId",
+    "targetOpportunityId",
 ];
 
 pub const OBJECT_FIELDS_CALLRECORDING: &[StandardFieldDefinition] = &[
@@ -5446,6 +5759,40 @@ pub const OBJECT_FIELDS_CALLRECORDING: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_CALLRECORDING: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "title",
+    "status",
+    "recordingRequestStatus",
+    "applicationId",
+    "externalBotId",
+    "externalRecordingId",
+    "startedAt",
+    "endedAt",
+    "video",
+    "audio",
+    "transcript",
+    "summaryBlocknote",
+    "summaryMarkdown",
+    "summaryTiptap",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "calendarEventId",
+];
+
 pub const OBJECT_FIELDS_CAMPAIGNDELIVERY: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "1eccf29f-4463-54e4-8aec-5cba33ea074d",
@@ -5865,6 +6212,30 @@ pub const OBJECT_FIELDS_CAMPAIGNDELIVERY: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: None,
         relation_target_object_universal_identifier: None,
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_CAMPAIGNDELIVERY: &[&str] = &[
+    "id",
+    "campaignId",
+    "personId",
+    "recipientEmail",
+    "state",
+    "skipReason",
+    "failureReason",
+    "claimToken",
+    "claimExpiresAt",
+    "providerMessageId",
+    "sentAt",
+    "deliveredAt",
+    "bouncedAt",
+    "complainedAt",
+    "rejectedAt",
+    "renderingFailedAt",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "_accessGroupIds",
+    "_isPrivate",
 ];
 
 pub const OBJECT_FIELDS_COMPANY: &[StandardFieldDefinition] = &[
@@ -6376,6 +6747,43 @@ pub const OBJECT_FIELDS_COMPANY: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_COMPANY: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "domainNamePrimaryLinkLabel",
+    "domainNamePrimaryLinkUrl",
+    "domainNameSecondaryLinks",
+    "addressAddressStreet1",
+    "addressAddressStreet2",
+    "addressAddressCity",
+    "addressAddressPostcode",
+    "addressAddressState",
+    "addressAddressCountry",
+    "addressAddressLat",
+    "addressAddressLng",
+    "linkedinLinkPrimaryLinkLabel",
+    "linkedinLinkPrimaryLinkUrl",
+    "linkedinLinkSecondaryLinks",
+    "annualRevenueAmountMicros",
+    "annualRevenueCurrencyCode",
+    "position",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "accountOwnerId",
+];
+
 pub const OBJECT_FIELDS_DASHBOARD: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "b7d8932b-d7a6-51e3-a120-416446c5dad7",
@@ -6645,6 +7053,27 @@ pub const OBJECT_FIELDS_DASHBOARD: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("0a1c0f53-5cbe-5ae8-8dde-e0dd7a7d136f"),
         relation_target_object_universal_identifier: Some("20202020-6736-4337-b5c4-8b39fae325a5"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_DASHBOARD: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "title",
+    "position",
+    "pageLayoutId",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
 ];
 
 pub const OBJECT_FIELDS_MESSAGE: &[StandardFieldDefinition] = &[
@@ -7044,6 +7473,32 @@ pub const OBJECT_FIELDS_MESSAGE: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("20202020-985b-429a-9db9-9e55f4898a2a"),
         relation_target_object_universal_identifier: Some("20202020-a433-4456-aa2d-fd9cb26b774a"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_MESSAGE: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "headerMessageId",
+    "subject",
+    "text",
+    "receivedAt",
+    "isDraft",
+    "_accessGroupIds",
+    "_isPrivate",
+    "messageCampaignId",
+    "messageThreadId",
 ];
 
 pub const OBJECT_FIELDS_MESSAGECAMPAIGN: &[StandardFieldDefinition] = &[
@@ -7709,6 +8164,45 @@ pub const OBJECT_FIELDS_MESSAGECAMPAIGN: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_MESSAGECAMPAIGN: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "name",
+    "subject",
+    "bodyTemplate",
+    "fromAddressPrimaryEmail",
+    "fromAddressAdditionalEmails",
+    "status",
+    "scheduledAt",
+    "sentAt",
+    "sentCount",
+    "deliveredCount",
+    "failedCount",
+    "bouncedCount",
+    "complainedCount",
+    "skippedCount",
+    "uniqueClickCount",
+    "clickRate",
+    "uniqueOpenCount",
+    "openRate",
+    "unsubscribeTopicId",
+    "_accessGroupIds",
+    "_isPrivate",
+    "listId",
+];
+
 pub const OBJECT_FIELDS_MESSAGECHANNELMESSAGEASSOCIATION: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "a433efbf-d423-5a5a-9615-143b0abd53ed",
@@ -8042,6 +8536,31 @@ pub const OBJECT_FIELDS_MESSAGECHANNELMESSAGEASSOCIATION: &[StandardFieldDefinit
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_MESSAGECHANNELMESSAGEASSOCIATION: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "messageExternalId",
+    "messageThreadExternalId",
+    "direction",
+    "messageChannelId",
+    "_accessGroupIds",
+    "_isPrivate",
+    "messageId",
+    "messageThreadId",
+];
+
 pub const OBJECT_FIELDS_MESSAGECHANNELMESSAGEASSOCIATIONMESSAGEFOLDER: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "10a4ce67-0b20-5303-a55d-37550e172ac6",
@@ -8263,6 +8782,27 @@ pub const OBJECT_FIELDS_MESSAGECHANNELMESSAGEASSOCIATIONMESSAGEFOLDER: &[Standar
         relation_target_field_universal_identifier: Some("9bfc9da7-ae2d-44fd-9563-ede90c5d6222"),
         relation_target_object_universal_identifier: Some("20202020-ad1e-4127-bccb-d83ae04d2ccb"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_MESSAGECHANNELMESSAGEASSOCIATIONMESSAGEFOLDER: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "messageFolderId",
+    "_accessGroupIds",
+    "_isPrivate",
+    "messageChannelMessageAssociationId",
 ];
 
 pub const OBJECT_FIELDS_MESSAGELIST: &[StandardFieldDefinition] = &[
@@ -8554,6 +9094,27 @@ pub const OBJECT_FIELDS_MESSAGELIST: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_MESSAGELIST: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "name",
+    "description",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+];
+
 pub const OBJECT_FIELDS_MESSAGELISTMEMBER: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "3cbf8893-6445-52bc-94ac-b90ac21920d4",
@@ -8775,6 +9336,27 @@ pub const OBJECT_FIELDS_MESSAGELISTMEMBER: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("8b8d1be0-4c94-4413-a2c9-c7ede205a81d"),
         relation_target_object_universal_identifier: Some("20202020-e674-48e5-a542-72570eee7213"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_MESSAGELISTMEMBER: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "listId",
+    "personId",
 ];
 
 pub const OBJECT_FIELDS_MESSAGEPARTICIPANT: &[StandardFieldDefinition] = &[
@@ -9110,6 +9692,32 @@ pub const OBJECT_FIELDS_MESSAGEPARTICIPANT: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_MESSAGEPARTICIPANT: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "role",
+    "handle",
+    "displayName",
+    "_accessGroupIds",
+    "_isPrivate",
+    "messageCampaignId",
+    "messageId",
+    "personId",
+    "workspaceMemberId",
+];
+
 pub const OBJECT_FIELDS_MESSAGESUPPRESSION: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "d515248e-7879-5b29-a852-7822b3ea8620",
@@ -9309,6 +9917,20 @@ pub const OBJECT_FIELDS_MESSAGESUPPRESSION: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: None,
         relation_target_object_universal_identifier: None,
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_MESSAGESUPPRESSION: &[&str] = &[
+    "id",
+    "emailAddress",
+    "reason",
+    "source",
+    "providerEventId",
+    "unsubscribeTopicId",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "_accessGroupIds",
+    "_isPrivate",
 ];
 
 pub const OBJECT_FIELDS_MESSAGETHREAD: &[StandardFieldDefinition] = &[
@@ -9576,6 +10198,26 @@ pub const OBJECT_FIELDS_MESSAGETHREAD: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("20202020-30f2-4ccd-9f5c-e41bb9d26214"),
         relation_target_object_universal_identifier: Some("20202020-3f6b-4425-80ab-e468899ab4b2"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_MESSAGETHREAD: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "subject",
+    "_accessGroupIds",
+    "_isPrivate",
 ];
 
 pub const OBJECT_FIELDS_MESSAGETHREADTARGET: &[StandardFieldDefinition] = &[
@@ -9911,6 +10553,31 @@ pub const OBJECT_FIELDS_MESSAGETHREADTARGET: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_MESSAGETHREADTARGET: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "isAutomaticallyAssigned",
+    "isManuallyAssigned",
+    "_accessGroupIds",
+    "_isPrivate",
+    "targetCompanyId",
+    "messageThreadId",
+    "targetPersonId",
+    "targetOpportunityId",
+];
+
 pub const OBJECT_FIELDS_NOTE: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "2959c27e-c98a-5dba-8670-832a61f81435",
@@ -10200,6 +10867,29 @@ pub const OBJECT_FIELDS_NOTE: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_NOTE: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "position",
+    "title",
+    "bodyV2Blocknote",
+    "bodyV2Markdown",
+    "bodyV2Tiptap",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+];
+
 pub const OBJECT_FIELDS_NOTETARGET: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "a0efa858-c525-5926-9fca-99dd86d951b7",
@@ -10487,6 +11177,29 @@ pub const OBJECT_FIELDS_NOTETARGET: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: None,
         relation_target_object_universal_identifier: None,
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_NOTETARGET: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "targetCompanyId",
+    "noteId",
+    "targetPersonId",
+    "targetOpportunityId",
 ];
 
 pub const OBJECT_FIELDS_OPPORTUNITY: &[StandardFieldDefinition] = &[
@@ -10974,6 +11687,33 @@ pub const OBJECT_FIELDS_OPPORTUNITY: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("1598c13c-d539-52c8-a56c-974a6b724393"),
         relation_target_object_universal_identifier: Some("20202020-6736-4337-b5c4-8b39fae325a5"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_OPPORTUNITY: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "amountAmountMicros",
+    "amountCurrencyCode",
+    "closeDate",
+    "stage",
+    "position",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "companyId",
+    "pointOfContactId",
+    "ownerId",
 ];
 
 pub const OBJECT_FIELDS_PERSON: &[StandardFieldDefinition] = &[
@@ -11573,6 +12313,40 @@ pub const OBJECT_FIELDS_PERSON: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_PERSON: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "nameFirstName",
+    "nameLastName",
+    "emailsPrimaryEmail",
+    "emailsAdditionalEmails",
+    "linkedinLinkPrimaryLinkLabel",
+    "linkedinLinkPrimaryLinkUrl",
+    "linkedinLinkSecondaryLinks",
+    "jobTitle",
+    "phonesPrimaryPhoneNumber",
+    "phonesPrimaryPhoneCountryCode",
+    "phonesPrimaryPhoneCallingCode",
+    "phonesAdditionalPhones",
+    "avatarUrl",
+    "avatarFile",
+    "position",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "companyId",
+];
+
 pub const OBJECT_FIELDS_SHORTLINK: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "5c0ecd7c-f0b5-54e3-a023-bdf42729ebd8",
@@ -11820,6 +12594,28 @@ pub const OBJECT_FIELDS_SHORTLINK: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: None,
         relation_target_object_universal_identifier: None,
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_SHORTLINK: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "authoredTemplateUrl",
+    "resolvedDestinationUrl",
+    "templateAndResolvedUrlHash",
+    "_accessGroupIds",
+    "_isPrivate",
 ];
 
 pub const OBJECT_FIELDS_TASK: &[StandardFieldDefinition] = &[
@@ -12177,6 +12973,32 @@ pub const OBJECT_FIELDS_TASK: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_TASK: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "position",
+    "title",
+    "bodyV2Blocknote",
+    "bodyV2Markdown",
+    "bodyV2Tiptap",
+    "dueAt",
+    "status",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "assigneeId",
+];
+
 pub const OBJECT_FIELDS_TASKTARGET: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "0ec1c4c4-304d-5ec7-a980-f69cd8930869",
@@ -12464,6 +13286,29 @@ pub const OBJECT_FIELDS_TASKTARGET: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: None,
         relation_target_object_universal_identifier: None,
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_TASKTARGET: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "targetCompanyId",
+    "targetOpportunityId",
+    "targetPersonId",
+    "taskId",
 ];
 
 pub const OBJECT_FIELDS_TIMELINEACTIVITY: &[StandardFieldDefinition] = &[
@@ -13041,6 +13886,42 @@ pub const OBJECT_FIELDS_TIMELINEACTIVITY: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_TIMELINEACTIVITY: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "position",
+    "happensAt",
+    "timelineActivityTypeId",
+    "timelineActivityTypeSnapshot",
+    "properties",
+    "linkedRecordCachedName",
+    "linkedRecordId",
+    "linkedObjectMetadataId",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
+    "targetCompanyId",
+    "targetDashboardId",
+    "targetMessageCampaignId",
+    "targetMessageListId",
+    "targetNoteId",
+    "targetOpportunityId",
+    "targetPersonId",
+    "targetTaskId",
+    "workspaceMemberId",
+    "targetWorkflowRunId",
+];
+
 pub const OBJECT_FIELDS_WORKFLOWRUN: &[StandardFieldDefinition] = &[
     StandardFieldDefinition {
         universal_identifier: "e8f6e894-4003-5cb1-a1c1-7ed5b3e4200c",
@@ -13438,6 +14319,34 @@ pub const OBJECT_FIELDS_WORKFLOWRUN: &[StandardFieldDefinition] = &[
         relation_target_field_universal_identifier: Some("b1df837a-e304-5cde-97e6-ab8348739774"),
         relation_target_object_universal_identifier: Some("20202020-6736-4337-b5c4-8b39fae325a5"),
     },
+];
+
+pub const OBJECT_COLUMN_PLAN_WORKFLOWRUN: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "enqueuedAt",
+    "startedAt",
+    "endedAt",
+    "status",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "state",
+    "stepLogs",
+    "coreWorkflowId",
+    "coreWorkflowVersionId",
+    "position",
+    "searchVector",
+    "_accessGroupIds",
+    "_isPrivate",
 ];
 
 pub const OBJECT_FIELDS_WORKSPACEMEMBER: &[StandardFieldDefinition] = &[
@@ -14191,6 +15100,40 @@ pub const OBJECT_FIELDS_WORKSPACEMEMBER: &[StandardFieldDefinition] = &[
     },
 ];
 
+pub const OBJECT_COLUMN_PLAN_WORKSPACEMEMBER: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "position",
+    "nameFirstName",
+    "nameLastName",
+    "colorScheme",
+    "uiScale",
+    "openRecordIn",
+    "locale",
+    "avatarUrl",
+    "userEmail",
+    "jobTitle",
+    "calendarStartDay",
+    "userId",
+    "timeZone",
+    "dateFormat",
+    "timeFormat",
+    "numberFormat",
+    "searchVector",
+    "createdBySource",
+    "createdByWorkspaceMemberId",
+    "createdByName",
+    "createdByContext",
+    "updatedBySource",
+    "updatedByWorkspaceMemberId",
+    "updatedByName",
+    "updatedByContext",
+    "_accessGroupIds",
+    "_isPrivate",
+];
+
 pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
     StandardObjectDefinition {
         universal_identifier: "fab0fff8-0c90-4116-9bb0-7dbc07392633",
@@ -14214,6 +15157,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("9283c05e-127c-46ec-82e9-6424a7c0a2f1"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_AGENTCHATTHREAD,
+        column_plan: OBJECT_COLUMN_PLAN_AGENTCHATTHREAD,
     },
     StandardObjectDefinition {
         universal_identifier: "a043622a-48ef-426f-b55d-3fdcf4ae52f2",
@@ -14237,6 +15181,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("13ba446f-db00-5635-888e-c2b11299e34b"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_AGENTCHATTHREADPARTICIPANT,
+        column_plan: OBJECT_COLUMN_PLAN_AGENTCHATTHREADPARTICIPANT,
     },
     StandardObjectDefinition {
         universal_identifier: "9f2a5bf4-3a57-4e61-b561-eaf5a5b86973",
@@ -14260,6 +15205,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("3fa2b4a3-bd88-50cb-954b-db72480f7290"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_AGENTCHATTHREADTARGET,
+        column_plan: OBJECT_COLUMN_PLAN_AGENTCHATTHREADTARGET,
     },
     StandardObjectDefinition {
         universal_identifier: "62d0354c-3b99-4769-b0f5-4e2651c2ca7d",
@@ -14283,6 +15229,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("ca1c5b84-2d21-50c8-87d9-11dad536c9bd"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_AGENTMESSAGE,
+        column_plan: OBJECT_COLUMN_PLAN_AGENTMESSAGE,
     },
     StandardObjectDefinition {
         universal_identifier: "214bacb0-df89-494e-be42-e5b11c99cff6",
@@ -14306,6 +15253,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("f798b712-90cb-5ab1-9126-6585fe1ea2b5"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_AGENTMESSAGEPART,
+        column_plan: OBJECT_COLUMN_PLAN_AGENTMESSAGEPART,
     },
     StandardObjectDefinition {
         universal_identifier: "7d34e524-cbaf-4a53-b021-eb0313397f22",
@@ -14329,6 +15277,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("a147d91d-7109-526a-bebe-3a0eb81f251f"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_AGENTMESSAGEREACTION,
+        column_plan: OBJECT_COLUMN_PLAN_AGENTMESSAGEREACTION,
     },
     StandardObjectDefinition {
         universal_identifier: "63697477-8606-415e-86cb-be078d7fcf7e",
@@ -14352,6 +15301,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("6dd07216-fc15-54d1-ba30-2748dcf55720"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_AGENTTURN,
+        column_plan: OBJECT_COLUMN_PLAN_AGENTTURN,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-bd3d-4c60-8dca-571c71d4447a",
@@ -14375,6 +15325,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-87a5-48f8-bbf7-ade388825a57"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_ATTACHMENT,
+        column_plan: OBJECT_COLUMN_PLAN_ATTACHMENT,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-0408-4f38-b8a8-4d5e3e26e24d",
@@ -14398,6 +15349,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-eef3-44ed-aa32-4641d7fd4a3e"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_BLOCKLIST,
+        column_plan: OBJECT_COLUMN_PLAN_BLOCKLIST,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-491b-4aaa-9825-afd1bae6ae00",
@@ -14421,6 +15373,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("091cefe6-349d-57a5-8a88-1e1d8bf99937"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_CALENDARCHANNELEVENTASSOCIATION,
+        column_plan: OBJECT_COLUMN_PLAN_CALENDARCHANNELEVENTASSOCIATION,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-8f1d-4eef-9f85-0d1965e27221",
@@ -14444,6 +15397,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-080e-49d1-b21d-9702a7e2525c"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_CALENDAREVENT,
+        column_plan: OBJECT_COLUMN_PLAN_CALENDAREVENT,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-a1c3-47a6-9732-27e5b1e8436d",
@@ -14467,6 +15421,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-8692-4580-8210-9e09cbd031a7"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_CALENDAREVENTPARTICIPANT,
+        column_plan: OBJECT_COLUMN_PLAN_CALENDAREVENTPARTICIPANT,
     },
     StandardObjectDefinition {
         universal_identifier: "6a9b9656-3e23-4234-94a4-b913c5dde668",
@@ -14490,6 +15445,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("512cf243-f9eb-51e2-a422-3e62e19916cc"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_CALENDAREVENTTARGET,
+        column_plan: OBJECT_COLUMN_PLAN_CALENDAREVENTTARGET,
     },
     StandardObjectDefinition {
         universal_identifier: "ce19efb9-710f-45b2-b141-473abbeea60b",
@@ -14513,6 +15469,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("4cff8863-a1d1-45fd-a370-4eb6aa1f2a5b"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_CALLRECORDING,
+        column_plan: OBJECT_COLUMN_PLAN_CALLRECORDING,
     },
     StandardObjectDefinition {
         universal_identifier: "0c76066d-26f7-4f57-b0bd-0eb61465fb1a",
@@ -14536,6 +15493,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("1eccf29f-4463-54e4-8aec-5cba33ea074d"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_CAMPAIGNDELIVERY,
+        column_plan: OBJECT_COLUMN_PLAN_CAMPAIGNDELIVERY,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-b374-4779-a561-80086cb2e17f",
@@ -14559,6 +15517,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-4d99-4e2e-a84c-4a27837b1ece"),
         image_identifier_field_universal_identifier: Some("20202020-0c28-43d8-8ba5-3659924d3489"),
         fields: OBJECT_FIELDS_COMPANY,
+        column_plan: OBJECT_COLUMN_PLAN_COMPANY,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-3840-4b6d-9425-0c5188b05ca8",
@@ -14582,6 +15541,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-20ee-4091-95dc-44b57eda3a89"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_DASHBOARD,
+        column_plan: OBJECT_COLUMN_PLAN_DASHBOARD,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-3f6b-4425-80ab-e468899ab4b2",
@@ -14605,6 +15565,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-52d1-4036-b9ae-84bd722bb37a"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGE,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGE,
     },
     StandardObjectDefinition {
         universal_identifier: "238acb94-dd4c-4036-bc55-19b99d821efd",
@@ -14628,6 +15589,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("dc8bca0e-37c4-4b78-814d-2e91124274e3"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGECAMPAIGN,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGECAMPAIGN,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-ad1e-4127-bccb-d83ae04d2ccb",
@@ -14651,6 +15613,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("a433efbf-d423-5a5a-9615-143b0abd53ed"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGECHANNELMESSAGEASSOCIATION,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGECHANNELMESSAGEASSOCIATION,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-a1b0-40b0-8ab0-5b6c7d8e9f0a",
@@ -14674,6 +15637,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("10a4ce67-0b20-5303-a55d-37550e172ac6"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGECHANNELMESSAGEASSOCIATIONMESSAGEFOLDER,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGECHANNELMESSAGEASSOCIATIONMESSAGEFOLDER,
     },
     StandardObjectDefinition {
         universal_identifier: "826561ea-4816-411c-baa0-eec5e6ca8866",
@@ -14697,6 +15661,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("69b9ed8b-7b26-4108-894f-05700ef7e8ee"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGELIST,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGELIST,
     },
     StandardObjectDefinition {
         universal_identifier: "27773d24-8ce3-40f8-aa6c-1f590f2c08d2",
@@ -14720,6 +15685,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("3cbf8893-6445-52bc-94ac-b90ac21920d4"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGELISTMEMBER,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGELISTMEMBER,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-a433-4456-aa2d-fd9cb26b774a",
@@ -14743,6 +15709,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-2456-464e-b422-b965a4db4a0b"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGEPARTICIPANT,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGEPARTICIPANT,
     },
     StandardObjectDefinition {
         universal_identifier: "41410724-723c-48ab-8312-9b85131b4d84",
@@ -14766,6 +15733,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("d515248e-7879-5b29-a852-7822b3ea8620"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGESUPPRESSION,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGESUPPRESSION,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-849a-4c3e-84f5-a25a7d802271",
@@ -14789,6 +15757,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("a8ddbf8c-1137-45d1-b89e-5ffbd83f67c8"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGETHREAD,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGETHREAD,
     },
     StandardObjectDefinition {
         universal_identifier: "378ad1b0-592d-4084-80ee-86fef44725b9",
@@ -14812,6 +15781,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("4a9772e6-c0e5-5989-87dd-a786a1bf500b"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_MESSAGETHREADTARGET,
+        column_plan: OBJECT_COLUMN_PLAN_MESSAGETHREADTARGET,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-0b00-45cd-b6f6-6cd806fc6804",
@@ -14835,6 +15805,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-faeb-4c76-8ba6-ccbb0b4a965f"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_NOTE,
+        column_plan: OBJECT_COLUMN_PLAN_NOTE,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-fff0-4b44-be82-bda313884400",
@@ -14858,6 +15829,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("a0efa858-c525-5926-9fca-99dd86d951b7"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_NOTETARGET,
+        column_plan: OBJECT_COLUMN_PLAN_NOTETARGET,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-9549-49dd-b2b2-883999db8938",
@@ -14881,6 +15853,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-8609-4f65-a2d9-44009eb422b5"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_OPPORTUNITY,
+        column_plan: OBJECT_COLUMN_PLAN_OPPORTUNITY,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-e674-48e5-a542-72570eee7213",
@@ -14904,6 +15877,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-3875-44d5-8c33-a6239011cab8"),
         image_identifier_field_universal_identifier: Some("20202020-a7c9-4e3d-8f1b-2d5a6b7c8e9f"),
         fields: OBJECT_FIELDS_PERSON,
+        column_plan: OBJECT_COLUMN_PLAN_PERSON,
     },
     StandardObjectDefinition {
         universal_identifier: "22c96608-d1b1-49a2-b328-3e738d61d82d",
@@ -14927,6 +15901,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("5ba068eb-0594-4945-9183-7174a37a9406"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_SHORTLINK,
+        column_plan: OBJECT_COLUMN_PLAN_SHORTLINK,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-1ba1-48ba-bc83-ef7e5990ed10",
@@ -14950,6 +15925,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-b386-4cb7-aa5a-08d4a4d92680"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_TASK,
+        column_plan: OBJECT_COLUMN_PLAN_TASK,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-5a9a-44e8-95df-771cd06d0fb1",
@@ -14973,6 +15949,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("0ec1c4c4-304d-5ec7-a980-f69cd8930869"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_TASKTARGET,
+        column_plan: OBJECT_COLUMN_PLAN_TASKTARGET,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-6736-4337-b5c4-8b39fae325a5",
@@ -14996,6 +15973,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-cfdb-4bef-bbce-a29f41230934"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_TIMELINEACTIVITY,
+        column_plan: OBJECT_COLUMN_PLAN_TIMELINEACTIVITY,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-4e28-4e95-a9d7-6c00874f843c",
@@ -15019,6 +15997,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-b840-4253-aef9-4e5013694587"),
         image_identifier_field_universal_identifier: None,
         fields: OBJECT_FIELDS_WORKFLOWRUN,
+        column_plan: OBJECT_COLUMN_PLAN_WORKFLOWRUN,
     },
     StandardObjectDefinition {
         universal_identifier: "20202020-3319-4234-a34c-82d5c0e881a6",
@@ -15042,6 +16021,7 @@ pub const STANDARD_OBJECTS: &[StandardObjectDefinition] = &[
         label_identifier_field_universal_identifier: Some("20202020-e914-43a6-9c26-3603c59065f4"),
         image_identifier_field_universal_identifier: Some("20202020-0ced-4c4f-a376-c98a966af3f6"),
         fields: OBJECT_FIELDS_WORKSPACEMEMBER,
+        column_plan: OBJECT_COLUMN_PLAN_WORKSPACEMEMBER,
     },
 ];
 
