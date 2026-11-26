@@ -134,13 +134,13 @@ curl http://127.0.0.1:3000/healthz
 ┌───────────────┐    HTTP/GraphQL/REST    ┌──────────────────────┐
 │  Leptos UI    │ ◄─────────────────────► │  Nudge server (Rust) │
 │  (wasm, CSR)  │                         │  axum · tokio · sqlx │
-└───────────────┘                         └──────────┬───────────┘
+└───────────────┘                         └──────────────────────┘
         │                                           │
         ▼ Tauri 2 shell (desktop)                   ▼
-┌───────────────────────┐                ┌────────────────────┐
-│ Windows · macOS ·     │                │ Postgres 16        │
-│ Linux                 │                │ Redis 7            │
-└───────────────────────┘                └────────────────────┘
+┌───────────────────────┐                  ┌────────────────────┐
+│ Windows · macOS ·     │                  │ Postgres 16        │
+│ Linux                 │                  │ Redis 7            │
+└───────────────────────┘                  └────────────────────┘
 ```
 
 - **`crates/core`** — shared primitives: configuration (environment-driven, sensible
