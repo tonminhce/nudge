@@ -35,3 +35,5 @@ rust-anything rules <repo> --add "<the rule, in one sentence>"
 - **How to apply:** When a flow disagrees with `research/auth-permissions.md`, the research wins.
   When the research is silent, read the upstream source before writing code, and add a test.
 
+- DB-gated tests must run core migrations through workspace_migrations::ddl::test_support::migrate_core (pins search_path to public, advisory-locked, fails loudly); never sqlx::migrate! on the AppState pool and never swallow the result with .ok()? — the pool search_path makes sqlx re-apply migrations against a split _sqlx_migrations ledger and .ok()? turns every DB-gated test into a silent skip.
+- core.objectMetadata.targetTableName stores the literal 'DEPRECATED' upstream at 2.61.0; the physical workspace table name must be derived from nameSingular + application universal identifier (compute_object_target_table), never read from that column.
