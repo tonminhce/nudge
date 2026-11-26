@@ -3,6 +3,7 @@
 Reference (read-only): `C:\Users\tonminh123\Documents\crm-research\twenty`
 Decisions: [DECISIONS.md](DECISIONS.md) (ADR-001..009). Research: [research/](research/).
 Handoff: [HANDOFF.md](HANDOFF.md). Glossary: [GLOSSARY.md](GLOSSARY.md). Rules: [RULES.md](RULES.md).
+Feature status: [FEATURE-PARITY.md](FEATURE-PARITY.md).
 
 Goal: maximum parity, Postgres + GraphQL + DB compatible with Twenty, Leptos UI in a Tauri 2 shell.
 

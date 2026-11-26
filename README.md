@@ -165,11 +165,18 @@ end-to-end before the next begins.
 - [x] **Wave 1** — server foundation: config, Postgres/Redis, database migrations,
       health endpoint *(done, schema verified)*
 - [ ] **Wave 2** — authentication, workspaces, roles and permissions
+      *(password auth, ES256 signing, sign-up, the two-step sign-in and refresh
+      rotation are done and verified; SSO, 2FA, API keys and permissions remain)*
 - [ ] **Wave 3** — metadata engine: standard objects, live schema management
 - [ ] **Wave 4** — GraphQL and REST record APIs
 - [ ] **Wave 5** — the web UI and the Tauri desktop app
 - [ ] **Wave 6** — files, webhooks, search, import/export, activities
 - [ ] **Wave 7** — workflows, email/calendar sync, AI agents
+
+The honest picture of what exists and what does not is tracked feature by
+feature in [`rust/FEATURE-PARITY.md`](rust/FEATURE-PARITY.md): every area of the
+upstream product, its size, its status here and the wave that closes it. Read
+that before planning anything, and update it as waves land.
 
 ## Contributing
 
