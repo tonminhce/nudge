@@ -9,12 +9,18 @@ Goal: maximum parity, Postgres + GraphQL + DB compatible with Twenty, Leptos UI 
 
 Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twenty-current-version.constant.ts:13`).
 
-## Toolchain state (2026-11-26)
-- rustc/cargo 1.98.1 (msvc), wasm32-unknown-unknown added. Docker 29.8.2 present.
+## Toolchain state (2026-11-27)
+- rustc/cargo 1.98.1, wasm32-unknown-unknown added. Docker present. `rust-anything` CLI installed.
 - Not installed yet: `trunk`, `cargo-tauri`.
 - Postgres 16 + Redis 7 in Docker (`infra/docker-compose.yml`, network `infra_default`).
-- Reference database `nudge_ref` holds the migrated 2.61.0 schema; its container (`twenty-ref`,
-  image `twentycrm/twenty:v2.61.0`) is stopped now that the baseline dump is committed.
+- Reference database `nudge_ref` holds the migrated 2.61.0 core schema.
+- Reference SERVER `twenty-ref` (`twentycrm/twenty:v2.61.0`, port 3001, database `twenty_ref`)
+  is RUNNING with a seeded, activated workspace `00162a10` (schema `workspace_6n57znb4w89f8r7xudebmf0`,
+  39 tables). Recreate procedure: drop/create `twenty_ref`, run the container with the env from
+  HANDOFF.md, wait for healthz, then `python3 -I /tmp/seed-ref.py` (sign-up →
+  signUpInNewWorkspace → login-token exchange with the subdomain origin `http://refhq.localhost:3001`
+  → activateWorkspace). Sign-up is gated once a workspace exists in single-workspace mode; the
+  first user is the server admin.
 
 ## Waves (each wave must build, pass tests, run end to end)
 | Wave | Content | State |
