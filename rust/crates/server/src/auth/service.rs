@@ -333,37 +333,14 @@ pub async fn get_auth_tokens_from_login_token(
     let jwt_id = payload
         .get("jti")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| AuthError::unauthenticated("Token invalid."))?;
+        .ok_or_else(|| AuthError::unauthenticated("Token invalid."))?
+        .to_string();
 
     let email = payload
         .get("sub")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| AuthError::unauthenticated("Token invalid."))?
         .to_string();
-
-    let consumed_key = format!("login-token:consumed:{jwt_id}");
-
-    let mut connection = state
-        .redis
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|error| AuthError::internal(error.to_string()))?;
-
-    let acquired: Option<String> = redis::cmd("SET")
-        .arg(&consumed_key)
-        .arg("1")
-        .arg("NX")
-        .arg("EX")
-        .arg(state.config.login_token_expires_in_secs)
-        .query_async(&mut connection)
-        .await
-        .map_err(|error| AuthError::internal(error.to_string()))?;
-
-    if acquired.is_none() {
-        return Err(AuthError::unauthenticated(
-            "Login token has already been used",
-        ));
-    }
 
     let row: Option<(Uuid,)> =
         sqlx::query_as("SELECT id FROM core.\"user\" WHERE email = $1 AND \"deletedAt\" IS NULL")
@@ -396,7 +373,7 @@ pub async fn get_auth_tokens_from_login_token(
         return Err(AuthError::new(
             401,
             "TWO_FACTOR_AUTHENTICATION_VERIFICATION_REQUIRED",
-            "Two factor authentication verification is required",
+            "Two factor authentication verification required",
         ));
     }
 
@@ -411,7 +388,31 @@ pub async fn get_auth_tokens_from_login_token(
         return Err(AuthError::new(
             401,
             "TWO_FACTOR_AUTHENTICATION_PROVISION_REQUIRED",
-            "Two factor authentication provision is required",
+            "Two factor authentication setup required",
+        ));
+    }
+
+    let consumed_key = format!("login-token:consumed:{jwt_id}");
+
+    let mut connection = state
+        .redis
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| AuthError::internal(error.to_string()))?;
+
+    let acquired: Option<String> = redis::cmd("SET")
+        .arg(&consumed_key)
+        .arg("1")
+        .arg("NX")
+        .arg("EX")
+        .arg(state.config.login_token_expires_in_secs)
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| AuthError::internal(error.to_string()))?;
+
+    if acquired.is_none() {
+        return Err(AuthError::unauthenticated(
+            "Login token has already been used",
         ));
     }
 
