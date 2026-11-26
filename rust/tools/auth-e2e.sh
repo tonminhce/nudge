@@ -7,6 +7,7 @@ EMAIL="${EMAIL:-founder-$SUFFIX@nudge.test}"
 PASSWORD="${PASSWORD:-SuperSecret123}"
 SUBDOMAIN="${SUBDOMAIN:-nudge-hq-$SUFFIX}"
 EXPECT_ROTATED_REUSE="${EXPECT_ROTATED_REUSE:-200}"
+E2E_DATABASE_NAME="${E2E_DATABASE_NAME:-default}"
 
 results=0
 failures=0
