@@ -45,7 +45,7 @@ pub use report::OrchestratorFailureReport;
 pub const IDENTIFIER_MIN_CHAR_LENGTH: usize = 1;
 pub const IDENTIFIER_MAX_CHAR_LENGTH: usize = 63;
 pub const TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER: &str =
-    "6c5847b1-0ff4-4bd9-9b4c-6b1f2a264264";
+    "20202020-64aa-4b6f-b003-9c74b97cee20";
 
 pub const RESERVED_METADATA_NAME_KEYWORDS: &[&str] = &[
     "approvedAccessDomain",
