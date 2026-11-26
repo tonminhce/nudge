@@ -40,6 +40,7 @@ pub enum CreationOrigin {
 pub enum RevocationReason {
     UserSignOut,
     Superseded,
+    PasswordChanged,
 }
 
 impl RevocationReason {
@@ -47,6 +48,7 @@ impl RevocationReason {
         match self {
             RevocationReason::UserSignOut => "USER_SIGN_OUT",
             RevocationReason::Superseded => "SUPERSEDED",
+            RevocationReason::PasswordChanged => "PASSWORD_CHANGED",
         }
     }
 }
@@ -869,10 +871,6 @@ pub async fn revoke_session_by_token(
     Ok(affected == 1)
 }
 
-#[expect(
-    dead_code,
-    reason = "used by the password change surface in a later auth unit"
-)]
 pub async fn revoke_all_sessions_for_user(
     state: &AppState,
     user_id: Uuid,
@@ -1794,12 +1792,20 @@ mod tests {
     fn revocation_reasons_use_the_upstream_strings() {
         let mut mapping = HashMap::new();
 
-        for reason in [RevocationReason::UserSignOut, RevocationReason::Superseded] {
+        for reason in [
+            RevocationReason::UserSignOut,
+            RevocationReason::Superseded,
+            RevocationReason::PasswordChanged,
+        ] {
             mapping.insert(reason.as_str().to_string(), reason);
         }
 
-        assert_eq!(mapping.len(), 2);
+        assert_eq!(mapping.len(), 3);
         assert_eq!(mapping["USER_SIGN_OUT"], RevocationReason::UserSignOut);
         assert_eq!(mapping["SUPERSEDED"], RevocationReason::Superseded);
+        assert_eq!(
+            mapping["PASSWORD_CHANGED"],
+            RevocationReason::PasswordChanged
+        );
     }
 }
