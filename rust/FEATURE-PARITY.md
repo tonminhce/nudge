@@ -23,10 +23,10 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 - Auth + metadata + record E2E: `tools/auth-e2e.sh` — **372/372 checks pass**.
 - Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
-- Quality gates: fmt clean, clippy `-D warnings` clean, **5 core + 526 server tests** pass; `tools/test-workspace.sh` runs the full workspace serially against an isolated Postgres database and drops it on exit.
+- Quality gates: fmt clean, clippy `-D warnings` clean, **5 core + 534 server tests** pass; `tools/test-workspace.sh` runs the full workspace serially against an isolated Postgres database and drops it on exit.
 - Frontend gates: `tools/build-frontend.sh`, native clippy/tests and `wasm32-unknown-unknown` check pass; 32 front-core tests, 138 front-ui tests and 17 front-app tests pass. The app is served at `http://127.0.0.1:3000`. The release wasm is 2.4MB; the missing `target_features` section warning remains open until `wasm-opt` is available.
 - Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Real pointer interactions pass for reset, sorting, selection, row activation, popover, collapsible and toast. The welcome heading/font metrics now match the reference; authenticated product-surface parity remains open.
-- Auth browser checkpoint: email branching, validation, password visibility and reset notice are implemented. A strict live recapture of `/welcome` is stored in `parity/ui/welcome-diff.json`; it currently records 56 open differences at tolerance 0, including DOM wrappers, computed box styles and focus attributes. Password, sign-in and toast ledgers are legacy evidence and require recapture.
+- Auth browser checkpoint: email branching, validation, password visibility and reset notice are implemented. A strict live recapture of `/welcome` is stored in `parity/ui/welcome-diff.json`; it currently records 12 open differences at tolerance 0, including subpixel geometry, browser-resolved minimum sizes and the footer wrapper margin. Password, sign-in and toast ledgers are legacy evidence and require recapture.
 - Auth surface checkpoint: the exact upstream Inter 400/500/600 font files are bundled. `parity/ui/welcome-reference.json`, `welcome-nudge.json` and `welcome-diff.json` are regenerated with the strict harness; full auth-surface parity remains open.
 - UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. The reusable DOM/style/icon/animation harness is `tools/ui-parity-harness.mjs`; it records all attributes plus selector/tolerance/ignore metadata, and `tools/ui-parity-harness.test.mjs` covers strict diff behavior. Evidence under `parity/ui/` is not a full-parity certificate.
 
@@ -61,7 +61,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
 | `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
 | Full text search | todo | 4→6 | tsvector columns and GIN indexes exist; the cross-object Search resolver remains |
-| Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope and upstream relation-hop feature gating. Access-group synchronization and sharing remain. |
+| Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope, upstream relative-date ranges and relation-hop feature gating. Access-group synchronization and sharing remain. |
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
 | Dynamic GraphQL schema generated from metadata | **done** | 4 | direct workspace execution with resolver classification, introspection and connection shaping |
@@ -89,7 +89,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Invitations | **done** | 2 | verbatim tokens, resend rotation, upstream throttle set |
 | Email verification and password reset | **done** | 2 | hashed tokens, upstream error matrix, 3/15 min reset throttle, `PASSWORD_CHANGED` revocations |
 | Browser email/password auth flow | **part** | 5 | Existing/new email branching, reference-matched second step, validation, password visibility and reset notice are implemented; SSO/2FA screens and full account-recovery UI remain |
-| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 plus transactional update RLS and feature-gated relation-hop RLS landed; access-group synchronization and sharing remain |
+| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 plus transactional update RLS, upstream relative-date ranges and feature-gated relation-hop RLS landed; access-group synchronization and sharing remain |
 
 ## D. Web interface (Leptos)
 

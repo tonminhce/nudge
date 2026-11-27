@@ -24,6 +24,8 @@ use crate::query::repository::quote_identifier;
 use super::base::RunnerSchema;
 use super::RunnerError;
 
+mod relative_date;
+
 pub async fn row_access_filter(
     pool: &PgPool,
     schema: &RunnerSchema,
@@ -82,6 +84,7 @@ struct RelationPredicate<'a> {
     operand: &'a str,
     value: Value,
     raw_filter: Option<Value>,
+    top_level_filter: Option<Value>,
     sub_field_name: Option<&'a str>,
 }
 
@@ -283,7 +286,18 @@ impl AccessCompiler<'_> {
             return Ok(unsatisfiable_filter());
         }
         let full_name = field.field_type == FieldMetadataType::FullName && sub_field_name.is_none();
-        let raw_filter = (!full_name)
+        let top_level_filter = (operand == "IS_RELATIVE")
+            .then(|| {
+                relative_date::resolve_filter(
+                    &value,
+                    field.field_type == FieldMetadataType::DateTime,
+                    chrono::Utc::now(),
+                )
+                .map(|filter| with_relative_field(filter, &field.name))
+            })
+            .transpose()
+            .map_err(invalid)?;
+        let raw_filter = (top_level_filter.is_none() && !full_name)
             .then(|| {
                 operand_filter(
                     field.field_type,
@@ -305,10 +319,14 @@ impl AccessCompiler<'_> {
                         operand,
                         value,
                         raw_filter,
+                        top_level_filter,
                         sub_field_name: sub_field_name.as_deref(),
                     },
                 )
                 .await;
+        }
+        if let Some(filter) = top_level_filter {
+            return self.compile_value_filter(object_name, alias, filter);
         }
         let filter = if matches!(
             field.field_type,
@@ -346,6 +364,7 @@ impl AccessCompiler<'_> {
             operand,
             value,
             raw_filter,
+            top_level_filter,
             sub_field_name,
         } = predicate;
         let model = self.schema.object(object_name)?;
@@ -364,7 +383,9 @@ impl AccessCompiler<'_> {
                 "Row-level relation predicate field does not belong to the target object",
             ));
         }
-        let filter = if full_name {
+        let filter = if let Some(filter) = top_level_filter {
+            filter
+        } else if full_name {
             full_name_filter(&field.name, operand, value)?
         } else {
             with_sub_field(
@@ -921,6 +942,17 @@ fn with_sub_field(field_name: &str, sub_field_name: Option<&str>, filter: Value)
     }
 }
 
+fn with_relative_field(mut filter: Value, field_name: &str) -> Value {
+    if let Some(branches) = filter.get_mut("and").and_then(Value::as_array_mut) {
+        for branch in branches {
+            if let Some(operator) = branch.as_object().cloned() {
+                *branch = json!({ (field_name): operator });
+            }
+        }
+    }
+    filter
+}
+
 fn as_array(value: Value) -> Value {
     if value.is_array() {
         value
@@ -1252,14 +1284,73 @@ mod tests {
         );
     }
 
-    #[test]
-    fn unsupported_relative_operand_fails_closed() {
-        assert_eq!(
-            operand_filter(FieldMetadataType::Date, "IS_RELATIVE", None, json!("TODAY"))
-                .unwrap_err()
-                .code(),
-            "RECORD_PERMISSION_QUERY_INVALID"
-        );
+    #[tokio::test]
+    async fn relative_date_predicate_compiles_to_a_top_level_range() {
+        let workspace_id = Uuid::new_v4();
+        let object_id = Uuid::new_v4();
+        let mut due_at = field(object_id, "dueAt");
+        due_at.field_type = FieldMetadataType::Date;
+        let fields = vec![field(object_id, "id"), due_at.clone()];
+        let mut field_maps = crate::metadata::flat::FlatEntityMaps::default();
+
+        for item in &fields {
+            field_maps.add(
+                item.id.to_string(),
+                item.clone(),
+                item.id.to_string(),
+                workspace_id.to_string(),
+            );
+        }
+
+        let object = object(workspace_id, object_id, "event", &fields);
+        let mut permissions = crate::permissions::RoleRecordsPermissions {
+            objects: [(object_id.to_string(), Default::default())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let object_permission = permissions
+            .objects
+            .get_mut(&object_id.to_string())
+            .expect("object permission");
+        object_permission.object_metadata_id = object_id.to_string();
+        object_permission.row_level_records_permissions = Some(vec![rule(vec![json!({
+            "id": Uuid::new_v4().to_string(),
+            "fieldMetadataId": due_at.id.to_string(),
+            "objectMetadataId": object_id.to_string(),
+            "operand": "IS_RELATIVE",
+            "value": "THIS_1_DAY;;UTC;;"
+        })])]);
+        object_permission.can_read_some_records = true;
+        let schema = RunnerSchema::build_with_permissions(
+            &workspace_id,
+            &[object],
+            &field_maps,
+            &crate::metadata::flat::FlatEntityMaps::default(),
+            permissions,
+            None,
+        )
+        .expect("relative date schema");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/nudge")
+            .expect("lazy relative date pool");
+        let access = row_access_filter(
+            &pool,
+            &schema,
+            "event",
+            ObjectRecordsOperationType::Read,
+            &mut Suffixes::new(),
+        )
+        .await
+        .expect("relative date access")
+        .expect("relative date filter");
+        let sql = access.render();
+
+        assert!(sql.contains("\"event\".\"dueAt\" >="), "{sql}");
+        assert!(sql.contains("\"event\".\"dueAt\" <"), "{sql}");
+        assert!(!sql.contains("\"dueAt\".\"and\""), "{sql}");
+        assert_eq!(access.params.len(), 2);
+        assert!(access.params.iter().all(|(_, value)| value.is_string()));
     }
 
     #[tokio::test]

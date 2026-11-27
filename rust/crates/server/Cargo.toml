@@ -19,6 +19,7 @@ axum = { workspace = true }
 base32 = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = { workspace = true }
 bcrypt = { workspace = true }
 hkdf = { workspace = true }
 flate2 = { workspace = true }
@@ -29,6 +30,7 @@ p256 = { workspace = true }
 quick-xml = { workspace = true }
 rand = { workspace = true }
 redis = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 rsa = { workspace = true }
 serde = { workspace = true }

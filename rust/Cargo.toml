@@ -20,6 +20,8 @@ bcrypt = "0.17"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 percent-encoding = "2"
 quick-xml = "0.37"
+regex = "1"
+chrono-tz = "0.10"
 hkdf = "0.12"
 hex = "0.4"
 hmac = "0.12"
