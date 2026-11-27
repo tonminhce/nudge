@@ -258,12 +258,18 @@ impl GraphQLClient for BrowserGraphQLClient {
         }
 
         let mut builder = gloo_net::http::Request::post(&url);
+        let uses_bearer = options.bearer_token.is_some();
         if let Some(token) = options.bearer_token {
             builder = builder.header("authorization", &format!("Bearer {token}"));
         }
         let _ = options.session_cookie;
+        let credentials = if uses_bearer {
+            web_sys::RequestCredentials::SameOrigin
+        } else {
+            web_sys::RequestCredentials::Include
+        };
         let request = builder
-            .credentials(web_sys::RequestCredentials::Include)
+            .credentials(credentials)
             .json(&body)
             .map_err(|error| ClientError::Transport(error.to_string()))?;
         let response = request
