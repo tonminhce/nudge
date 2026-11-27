@@ -1,3 +1,6 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+
 use leptos::prelude::*;
 
 mod app;
@@ -9,7 +12,12 @@ mod records;
 
 use app::App;
 
+static STARTED: AtomicBool = AtomicBool::new(false);
+
 fn start() {
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
     mount_to_body(App);
 }
 

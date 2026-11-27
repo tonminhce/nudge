@@ -96,12 +96,12 @@ The design-system crate is landed; the front logic layer is in progress. The ups
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
 | Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **done** | 5 | U2 `crates/front-core`; native tests, wasm check and a live Twenty round trip pass |
-| Design system: tokens, primitives, icons | **part** | 5 | tokens, layout metrics and standard object icons landed (94 tests); remaining primitives and gallery are `wave5/u1b` follow-up |
+| Design system: tokens, primitives, icons | **part** | 5 | tokens and layout metrics landed; icon catalog ports 4187 Tabler icons plus 46 custom brand/illustration icons, the animated orbit loader and upstream motion keyframes (100 tests); remaining primitive inventory and gallery are `wave5/u1b` follow-up |
 | Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; command menu and side panel remain |
-| Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records and renders the People table; U4b owns virtualization, filters, sorting and inline editing |
+| Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records; U4b adds server filters, sorting, 240-slot virtualization, Person/Company create dialogs and relation selection; view dispatch, drag/drop, groups and aggregates remain |
 | Record kanban board | todo | 5 | |
 | Record calendar and list views | todo | 5 | |
-| Record show page and per type field display and input | **part** | 5 | U4a record route and live show page landed; per-type editors and relation fields remain |
+| Record show page and per type field display and input | **part** | 5 | U4a record route and live show page landed; U4b adds job-title editing and preserves relation data after mutation; per-type editors and relation fields remain |
 | Views, filters, sorts, group by | todo | 5 | 27 view operations |
 | Side panel (57 kinds) | todo | 5 | |
 | Settings pages | todo | 5 | 86k LOC upstream |

@@ -181,7 +181,7 @@ fn variable_type(name: &str, value: &Value, type_name: &str) -> String {
     }
 }
 
-fn pascal_case(name: &str) -> String {
+pub fn pascal_case(name: &str) -> String {
     let mut output = String::new();
     let mut uppercase = true;
     for character in name.chars() {

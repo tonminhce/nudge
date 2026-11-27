@@ -12,6 +12,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
 use crate::app::AuthState;
+use crate::records::create_record;
 use crate::records::end_cursor;
 use crate::records::load_object_metadata;
 use crate::records::load_records;
@@ -62,6 +63,18 @@ pub fn RecordIndexPage() -> impl IntoView {
     let applied_search = RwSignal::new(String::new());
     let sort = RwSignal::new(RecordSort::NameAsc);
     let show_filters = RwSignal::new(false);
+    let show_create = RwSignal::new(false);
+    let revision = RwSignal::new(0_usize);
+    let first_name = RwSignal::new(String::new());
+    let last_name = RwSignal::new(String::new());
+    let record_name = RwSignal::new(String::new());
+    let record_email = RwSignal::new(String::new());
+    let record_job_title = RwSignal::new(String::new());
+    let record_domain = RwSignal::new(String::new());
+    let company_id = RwSignal::new(String::new());
+    let companies = RwSignal::new(Vec::<Value>::new());
+    let create_error = RwSignal::new(None::<String>);
+    let creating = RwSignal::new(false);
     let scroll_top = RwSignal::new(0_usize);
     let viewport_height = RwSignal::new(600_usize);
 
@@ -83,6 +96,7 @@ pub fn RecordIndexPage() -> impl IntoView {
         let Some(token) = auth.token.get() else {
             return;
         };
+        let _ = revision.get();
         let query = applied_search.get();
         let sort = sort.get();
         loading.set(true);
@@ -180,6 +194,97 @@ pub fn RecordIndexPage() -> impl IntoView {
     };
     let load_more_scroll = load_more;
 
+    let open_create = move || {
+        show_create.set(true);
+        create_error.set(None);
+        let Some(token) = auth.token.get() else {
+            return;
+        };
+        if !companies.get().is_empty() {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            if let Ok(objects) = load_object_metadata(&token).await {
+                if let Some(company) = objects
+                    .into_iter()
+                    .find(|object| object.name_singular == "company")
+                {
+                    if let Ok(response) = load_records(&token, &company, None, None, None, 0).await
+                    {
+                        companies.set(records_from_response(&response, &company.name_plural));
+                    }
+                }
+            }
+        });
+    };
+
+    let submit_create = move || {
+        let Some(token) = auth.token.get() else {
+            return;
+        };
+        let Some(object) = metadata.get() else {
+            return;
+        };
+        let mut data = serde_json::Map::new();
+        match object.name_singular.as_str() {
+            "person" => {
+                data.insert(
+                    String::from("name"),
+                    serde_json::json!({"firstName": first_name.get(), "lastName": last_name.get()}),
+                );
+                if !record_email.get().trim().is_empty() {
+                    data.insert(
+                        String::from("emails"),
+                        serde_json::json!({"primaryEmail": record_email.get()}),
+                    );
+                }
+                if !record_job_title.get().trim().is_empty() {
+                    data.insert(
+                        String::from("jobTitle"),
+                        Value::String(record_job_title.get()),
+                    );
+                }
+                if !company_id.get().is_empty() {
+                    data.insert(String::from("companyId"), Value::String(company_id.get()));
+                }
+            }
+            "company" => {
+                data.insert(String::from("name"), Value::String(record_name.get()));
+                if !record_domain.get().trim().is_empty() {
+                    data.insert(
+                        String::from("domainName"),
+                        serde_json::json!({"primaryLinkUrl": record_domain.get()}),
+                    );
+                }
+            }
+            _ => {
+                data.insert(String::from("name"), Value::String(record_name.get()));
+            }
+        }
+        creating.set(true);
+        create_error.set(None);
+        leptos::task::spawn_local(async move {
+            match create_record(&token, &object, Value::Object(data)).await {
+                Ok(_) => {
+                    creating.set(false);
+                    show_create.set(false);
+                    first_name.set(String::new());
+                    last_name.set(String::new());
+                    record_name.set(String::new());
+                    record_email.set(String::new());
+                    record_job_title.set(String::new());
+                    record_domain.set(String::new());
+                    company_id.set(String::new());
+                    revision.update(|revision| *revision += 1);
+                }
+                Err(message) => {
+                    creating.set(false);
+                    create_error.set(Some(message));
+                }
+            }
+        });
+    };
+
     let plural = move || params.get().get("plural").unwrap_or_default();
     let singular = move || {
         metadata
@@ -215,7 +320,7 @@ pub fn RecordIndexPage() -> impl IntoView {
     view! {
         <div class="record-index">
             <header class="record-index-header">
-                <div class="record-title">{icon()}<h1>{title}</h1><span class="record-count">{move || total_count.get()}</span></div>
+                <div class="record-title">{move || icon()}<h1>{title}</h1><span class="record-count">{move || total_count.get()}</span></div>
                 <div class="record-actions">
                     <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
                         on:click=move |_| show_filters.set(!show_filters.get())>
@@ -225,7 +330,8 @@ pub fn RecordIndexPage() -> impl IntoView {
                         on:click=move |_| show_filters.set(!show_filters.get())>
                         <IconFilter size=16 />"Filter"
                     </button>
-                    <button class="t-button" data-variant="solid" data-color="accent" data-size="md" disabled=true>
+                    <button class="t-button" data-variant="solid" data-color="accent" data-size="md"
+                        on:click=move |_| open_create()>
                         <IconPlus size=16 />"Add " {title}
                     </button>
                 </div>
@@ -285,16 +391,21 @@ pub fn RecordIndexPage() -> impl IntoView {
                             }
                         }>
                         <For each=rows key=|(index, _)| *index let((index, record))>
-                            <A href=format!("/object/{}/{}", singular(), record["id"].as_str().unwrap_or_default())
-                                attr:class="record-table-row record-row-link" attr:role="row"
-                                attr:style=format!("top: {}px", index * ROW_HEIGHT)>
-                                <span class="cell-checkbox"></span>
-                                <span class="record-name">{display_name(&record)}</span>
-                                <span>{company_name(&record)}</span>
-                                <span>{primary_email(&record)}</span>
-                                <span>{created_at(&record)}</span>
-                                <span>"→"</span>
-                            </A>
+                            {
+                                let record_id = record["id"].as_str().unwrap_or_default().to_string();
+                                view! {
+                                    <A href=move || format!("/object/{}/{}", singular(), record_id)
+                                        attr:class="record-table-row record-row-link" attr:role="row"
+                                        attr:style=format!("top: {}px", index * ROW_HEIGHT)>
+                                        <span class="cell-checkbox"></span>
+                                        <span class="record-name">{display_name(&record)}</span>
+                                        <span>{company_name(&record)}</span>
+                                        <span>{primary_email(&record)}</span>
+                                        <span>{created_at(&record)}</span>
+                                        <span>"→"</span>
+                                    </A>
+                                }
+                            }
                         </For>
                     </div>
                 </div>
@@ -304,6 +415,63 @@ pub fn RecordIndexPage() -> impl IntoView {
                         disabled=move || loading.get() || cursor.get().is_none() on:click=move |_| load_more()>
                         {move || if loading.get() { "Loading..." } else { "Load more" }}
                     </button>
+                </div>
+            </Show>
+            <Show when=move || show_create.get() fallback=|| view! { <span /> }>
+                <div class="modal-backdrop">
+                    <section class="create-dialog" role="dialog" aria-modal="true" aria-label="Create record">
+                        <header class="create-dialog-header">
+                            <h2>"Add " {title}</h2>
+                            <button class="app-icon-button" aria-label="Close" on:click=move |_| show_create.set(false)>"×"</button>
+                        </header>
+                        <form class="create-form" on:submit=move |event| {
+                            event.prevent_default();
+                            submit_create();
+                        }>
+                            {move || match singular().as_str() {
+                                "person" => view! {
+                                    <label>"First name"<input class="t-input" required bind:value=first_name /></label>
+                                    <label>"Last name"<input class="t-input" required bind:value=last_name /></label>
+                                    <label>"Email"<input class="t-input" type="email" bind:value=record_email /></label>
+                                    <label>"Job title"<input class="t-input" bind:value=record_job_title /></label>
+                                    <label>"Company"
+                                        <select class="record-sort" on:change=move |event| {
+                                            let value = event.target()
+                                                .and_then(|target| target.dyn_into::<web_sys::HtmlSelectElement>().ok())
+                                                .map(|select| select.value())
+                                                .unwrap_or_default();
+                                            company_id.set(value);
+                                        }>
+                                            <option value="">"No company"</option>
+                                            <For each=move || companies.get() key=|company| company["id"].as_str().unwrap_or_default().to_string() let(company)>
+                                                {
+                                                    let id = company["id"].as_str().unwrap_or_default().to_string();
+                                                    let name = company["name"].as_str().unwrap_or_default().to_string();
+                                                    view! { <option value=id>{name}</option> }
+                                                }
+                                            </For>
+                                        </select>
+                                    </label>
+                                }.into_any(),
+                                "company" => view! {
+                                    <label>"Name"<input class="t-input" required bind:value=record_name /></label>
+                                    <label>"Domain"<input class="t-input" bind:value=record_domain placeholder="example.com" /></label>
+                                }.into_any(),
+                                _ => view! {
+                                    <label>"Name"<input class="t-input" required bind:value=record_name /></label>
+                                }.into_any(),
+                            }}
+                            {move || create_error.get().map(|message| view! { <div class="record-error" role="alert">{message}</div> })}
+                            <footer class="create-dialog-footer">
+                                <button type="button" class="t-button" data-variant="outline" data-color="neutral" data-size="md"
+                                    on:click=move |_| show_create.set(false)>"Cancel"</button>
+                                <button type="submit" class="t-button" data-variant="solid" data-color="accent" data-size="md"
+                                    disabled=move || creating.get()>
+                                    {move || if creating.get() { "Creating..." } else { "Create" }}
+                                </button>
+                            </footer>
+                        </form>
+                    </section>
                 </div>
             </Show>
         </div>

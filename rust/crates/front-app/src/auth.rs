@@ -155,9 +155,13 @@ async fn sign_in(email: &str, password: &str) -> Result<Session, String> {
         .as_str()
         .unwrap_or_default()
         .to_string();
+    let origin = web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .unwrap_or_else(|| base_url.clone());
     let exchange = format!(
-        "mutation ex {{ getAuthTokensFromLoginToken(loginToken: {}, origin: \"http://refhq.localhost:3001\") {{ tokens {{ accessOrWorkspaceAgnosticToken {{ token }} }} }} }}",
-        serde_json::to_string(&login_token).map_err(|error| error.to_string())?
+        "mutation ex {{ getAuthTokensFromLoginToken(loginToken: {}, origin: {}) {{ tokens {{ accessOrWorkspaceAgnosticToken {{ token }} }} }} }}",
+        serde_json::to_string(&login_token).map_err(|error| error.to_string())?,
+        serde_json::to_string(&origin).map_err(|error| error.to_string())?
     );
     let exchanged = client
         .execute_data(
@@ -187,9 +191,7 @@ async fn fetch_current_user(token: &str) -> Result<serde_json::Value, String> {
         .execute_data(
             &server_url(),
             "query { currentUser { id email } }",
-            RequestOptions::new(Endpoint::Metadata)
-                .operation_name("currentUser")
-                .bearer_token(token),
+            RequestOptions::new(Endpoint::Metadata).bearer_token(token),
         )
         .await
         .map_err(|error| error.to_string())

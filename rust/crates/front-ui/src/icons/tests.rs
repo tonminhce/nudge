@@ -1,28 +1,61 @@
-use crate::icons::{
-    icon_class, icon_def, object_icon, render_icon, IconStroke, ICON_COUNT, ICON_DEFS, OBJECT_ICONS,
-};
+use leptos::prelude::view;
+use leptos::prelude::RenderHtml;
+use leptos::IntoView;
+
+use crate::icons::custom_icon_def;
+use crate::icons::icon_class;
+use crate::icons::icon_def;
+use crate::icons::object_icon;
+use crate::icons::render_custom_icon;
+use crate::icons::render_icon;
+use crate::icons::IconAnimatedLoader;
+use crate::icons::IconChartBarHorizontal;
+use crate::icons::IconLock;
+use crate::icons::IconStroke;
+use crate::icons::ThinkingOrbitLoaderIcon;
+use crate::icons::CUSTOM_ICON_COUNT;
+use crate::icons::CUSTOM_ICON_DEFS;
+use crate::icons::ICON_CATALOG_TAG;
+use crate::icons::ICON_COUNT;
+use crate::icons::ICON_DEFS;
+use crate::icons::OBJECT_ICONS;
 use crate::UPSTREAM_TAG;
 
-fn fixture(name: &str) -> String {
-    let path = format!("{}/fixtures/icons/{name}.svg", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
-}
-
-fn path_lines(svg: &str) -> Vec<String> {
-    svg.lines()
-        .filter_map(|line| {
-            let trimmed = line
-                .strip_prefix("  ")
-                .and_then(|l| l.strip_suffix(" />"))
-                .and_then(|l| l.strip_prefix("<path "));
-            trimmed.map(|attrs| format!("<path {attrs} />"))
-        })
-        .collect()
+fn d_values(svg: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut remaining = svg;
+    while let Some(index) = remaining.find("d=\"") {
+        let rest = &remaining[index + 3..];
+        let Some(end) = rest.find('"') else {
+            break;
+        };
+        let value = rest[..end].to_string();
+        if value != "M0 0h24v24H0z" {
+            values.push(value);
+        }
+        remaining = &rest[end + 1..];
+    }
+    values
 }
 
 #[test]
-fn icon_count_matches_expected_set() {
-    assert_eq!(ICON_COUNT, 56);
+fn icon_count_matches_the_complete_upstream_catalog() {
+    assert_eq!(ICON_COUNT, 4187);
+    assert_eq!(ICON_CATALOG_TAG, "twenty-v2.61.0-tabler-3.41.1");
+}
+
+#[test]
+fn catalog_is_sorted_for_binary_search_without_duplicate_names() {
+    for pair in ICON_DEFS.windows(2) {
+        assert!(pair[0].tabler_name < pair[1].tabler_name);
+    }
+    for def in ICON_DEFS {
+        assert!(
+            std::ptr::eq(icon_def(def.tabler_name).unwrap(), def),
+            "{}",
+            def.tabler_name
+        );
+    }
 }
 
 #[test]
@@ -57,59 +90,36 @@ fn every_object_icon_entry_resolves_to_a_real_icon_def() {
 }
 
 #[test]
-fn every_icon_path_data_equals_the_upstream_svg_fixture() {
-    for def in ICON_DEFS {
-        let svg = fixture(def.tabler_name);
-        let fixture_lines = path_lines(&svg);
-        assert!(
-            !fixture_lines.is_empty(),
-            "{}: no path lines parsed from fixture",
-            def.tabler_name
-        );
-        assert_eq!(
-            fixture_lines.len(),
-            def.raw_paths.len(),
-            "{}: path count differs from fixture",
-            def.tabler_name
-        );
-        for (want, got) in fixture_lines.iter().zip(def.raw_paths.iter()) {
-            assert_eq!(want, got, "{}: path element bytes differ", def.tabler_name);
+fn every_fixture_resolves_to_an_upstream_icon() {
+    let directory = format!("{}/fixtures/icons", env!("CARGO_MANIFEST_DIR"));
+    for entry in std::fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("svg") {
+            continue;
         }
+        let name = path.file_stem().unwrap().to_str().unwrap();
+        let def = icon_def(name).unwrap_or_else(|| panic!("missing port of {name}"));
+        let svg = std::fs::read_to_string(&path).unwrap();
+        assert!(!def.inner_svg.is_empty(), "{name}");
         assert!(
             svg.contains(&format!("viewBox=\"{}\"", def.view_box)),
-            "{}: view box not in fixture",
-            def.tabler_name
+            "{name}: view box not in fixture"
         );
     }
 }
 
 #[test]
-fn d_values_are_the_exact_path_d_attributes_from_the_fixture() {
-    for def in ICON_DEFS {
-        let svg = fixture(def.tabler_name);
-        let fixture_ds = svg
-            .lines()
-            .filter_map(|line| {
-                let idx = line.find("d=\"")?;
-                let rest = &line[idx + 3..];
-                let end = rest.find('"')?;
-                Some(rest[..end].to_string())
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            fixture_ds,
-            def.d_values
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
-            "{}: d attribute list differs",
-            def.tabler_name
-        );
-    }
+fn standard_icons_do_not_render_the_invisible_fixture_background_as_a_border() {
+    let def = icon_def("user").expect("user icon present");
+    assert_eq!(def.class_name, "tabler-icon tabler-icon-user ");
+    assert!(!def.inner_svg.contains("M0 0h24v24H0z"));
+    assert_eq!(d_values(def.inner_svg).len(), 2);
+    let html = render_icon(def, 16, IconStroke::Sm, "currentColor");
+    assert!(!html.contains("M0 0h24v24H0z"), "{html}");
 }
 
 #[test]
-fn rendered_svg_uses_the_upstream_root_attributes_and_class() {
+fn rendered_svg_uses_the_upstream_root_attributes_and_inner_markup() {
     let def = icon_def("user").expect("user icon present");
     let html = render_icon(def, 16, IconStroke::Sm, "currentColor");
     assert!(
@@ -125,24 +135,86 @@ fn rendered_svg_uses_the_upstream_root_attributes_and_class() {
         html.contains(&format!("class=\"{}\"", icon_class(def))),
         "{html}"
     );
-    assert!(
-        html.contains("tabler-icon-user"),
-        "{html}: icon class must carry the tabler kebab name"
-    );
+    assert!(html.contains(def.inner_svg), "{html}");
 }
 
 #[test]
-fn rendered_svg_carries_every_d_value_as_a_path() {
-    let def = icon_def("calendar").expect("calendar present");
-    let html = render_icon(def, 24, IconStroke::Md, "currentColor");
-    for d in def.d_values {
-        assert!(
-            html.contains(&format!("<path d=\"{d}\"/>")),
-            "{}: missing path d in render",
-            def.tabler_name
-        );
+fn animated_loader_keeps_the_upstream_smil_animation() {
+    let html = view! { <IconAnimatedLoader size=14 /> }
+        .into_view()
+        .to_html();
+    assert!(html.contains("stroke-dashoffset"), "{html}");
+    assert!(html.contains("values=\"0;-100\""), "{html}");
+    assert!(html.contains("dur=\"1.05s\""), "{html}");
+    assert_eq!(html.matches("repeatCount=\"indefinite\"").count(), 2);
+}
+
+#[test]
+fn custom_catalog_contains_brand_and_illustration_icons() {
+    assert_eq!(CUSTOM_ICON_COUNT, 46);
+    for pair in CUSTOM_ICON_DEFS.windows(2) {
+        assert!(pair[0].name < pair[1].name);
     }
-    assert_eq!(html.matches("<path").count(), def.d_values.len());
+    for def in CUSTOM_ICON_DEFS {
+        assert!(std::ptr::eq(custom_icon_def(def.name).unwrap(), def));
+    }
+    for name in [
+        "address-book",
+        "gmail",
+        "google",
+        "microsoft-outlook",
+        "anthropic",
+        "openai",
+        "illustration-user",
+        "many-to-one",
+        "twenty-star-filled",
+    ] {
+        assert!(custom_icon_def(name).is_some(), "{name}");
+    }
+}
+
+#[test]
+fn custom_icon_render_preserves_svg_and_applies_size_stroke_and_color() {
+    let def = custom_icon_def("address-book").unwrap();
+    let svg = render_custom_icon(def, 18, IconStroke::Sm, "#123456");
+    assert!(svg.contains("width=\"18\""), "{svg}");
+    assert!(svg.contains("height=\"18\""), "{svg}");
+    assert!(svg.contains("stroke-width=\"1.6\""), "{svg}");
+    assert!(svg.contains("#123456"), "{svg}");
+    assert!(svg.contains("<path"), "{svg}");
+}
+
+#[test]
+fn custom_lock_replaces_the_tabler_lock_wrapper() {
+    let html = view! { <IconLock size=16 /> }.into_view().to_html();
+    let def = custom_icon_def("lock").unwrap();
+    let first_path = def
+        .svg
+        .split_once("<path")
+        .unwrap()
+        .1
+        .split_once('>')
+        .unwrap()
+        .0;
+    assert!(html.contains(&format!("<path{first_path}>")), "{html}");
+}
+
+#[test]
+fn horizontal_chart_keeps_the_upstream_quarter_turn() {
+    let html = view! { <IconChartBarHorizontal size=16 /> }
+        .into_view()
+        .to_html();
+    assert!(html.contains("rotate(90deg)"), "{html}");
+    assert!(html.contains("tabler-icon-chart-bar"), "{html}");
+}
+
+#[test]
+fn thinking_orbit_loader_keeps_the_upstream_name_and_animation() {
+    let html = view! { <ThinkingOrbitLoaderIcon size=14 /> }
+        .into_view()
+        .to_html();
+    assert!(html.contains("values=\"0;-100\""), "{html}");
+    assert!(html.contains("dur=\"1.05s\""), "{html}");
 }
 
 #[test]
