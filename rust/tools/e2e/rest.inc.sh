@@ -26,9 +26,13 @@ rest_patch() {
 
 rest_delete() {
   local response
+  local body="${REST_BODY:-}"
+  if [ -z "$body" ]; then
+    body='{}'
+  fi
   response="$(curl -s -w $'\n%{http_code}' -X DELETE "$BASE$REST_PATH" \
     -H 'content-type: application/json' -H "authorization: Bearer $ACCESS_TOKEN" \
-    -d "${REST_BODY:-{}}")"
+    -d "$body")"
   STATUS="${response##*$'\n'}"
   BODY="${response%$'\n'*}"
 }
@@ -82,15 +86,15 @@ REST_PATH="/rest/people/$REST_DESTROY_ID?soft_delete=false"
 REST_BODY=''
 rest_delete
 check "rest: destroyOne person" 200 "$STATUS"
-check_value "  destroyPerson envelope" "$(printf '%s' "$BODY" | grep -c '"destroyPerson"')"
+check_value "  destroyPerson envelope" "$(printf '%s' "$BODY" | grep -c '"deletePerson"')"
 
 REST_BODY='{"data":{"name":{"firstName":"Restore","lastName":"Me"},"jobTitle":"Restore Me"}}'
 REST_PATH='/rest/people'
 rest_post
 check "rest: create restore target" 201 "$STATUS"
 REST_RESTORE_ID="$(printf '%s' "$BODY" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)"
-REST_BODY="{\"id\":\"$REST_RESTORE_ID\"}"
-REST_PATH='/rest/people/restore'
+REST_BODY=''
+REST_PATH="/rest/people/$REST_RESTORE_ID/restore"
 rest_patch
 check "rest: restore person" 200 "$STATUS"
 check_value "  restorePerson envelope" "$(printf '%s' "$BODY" | grep -c '"restorePerson"')"
@@ -114,15 +118,15 @@ check_value "  unknown object message" "$(printf '%s' "$BODY" | grep -c "not fou
 REST_PATH='/rest/people?limit=bad'
 rest_get
 check "rest: invalid limit rejected" 400 "$STATUS"
-check_value "  limit error code" "$(printf '%s' "$BODY" | grep -c '"INVALID_LIMIT_QUERY_PARAM"')"
+check_value "  limit error message" "$(printf '%s' "$BODY" | grep -c "limit 'bad' is invalid. Should be an integer")"
 
 REST_PATH='/rest/people?filter=broken'
 rest_get
 check "rest: invalid filter rejected" 400 "$STATUS"
-check_value "  filter error code" "$(printf '%s' "$BODY" | grep -c '"INVALID_FILTER_QUERY_PARAM"')"
+check_value "  filter error message" "$(printf '%s' "$BODY" | grep -c "'filter' invalid for 'broken'. eg: price\[gte\]:10")"
 
 REST_BODY='{}'
 REST_PATH='/rest/people'
 rest_delete
 check "rest: bulk delete empty filter rejected" 400 "$STATUS"
-check_value "  mandatory filter code" "$(printf '%s' "$BODY" | grep -c '"BAD_REQUEST"')"
+check_value "  mandatory filter message" "$(printf '%s' "$BODY" | grep -c "Filters are mandatory for bulk destroy operations")"

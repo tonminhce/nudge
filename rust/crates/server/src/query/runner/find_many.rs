@@ -115,6 +115,8 @@ pub async fn find_many(
     } else {
         clauses = Vec::new();
     }
+    let total_filter_expression =
+        resolve_where_clauses(schema, object_name_singular, alias, &clauses)?;
     let cursor = get_cursor(&crate::query::PaginationArgs {
         after: args.after.clone(),
         before: args.before.clone(),
@@ -152,14 +154,29 @@ pub async fn find_many(
         predicates.push(where_expression);
     }
 
-    if let Some(predicate) = deleted_predicate {
-        predicates.push(predicate);
+    if let Some(predicate) = &deleted_predicate {
+        predicates.push(predicate.clone());
     }
 
     let where_sql = if predicates.is_empty() {
         String::new()
     } else {
         format!(" WHERE {}", predicates.join(" AND "))
+    };
+    let mut total_predicates = Vec::new();
+
+    if !total_filter_expression.is_empty() {
+        total_predicates.push(total_filter_expression);
+    }
+
+    if let Some(predicate) = &deleted_predicate {
+        total_predicates.push(predicate.clone());
+    }
+
+    let total_where_sql = if total_predicates.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", total_predicates.join(" AND "))
     };
     let from_sql = from_with_joins(model, alias, &joins)?;
     let selection = Selection::from_fields(args.selected_field_names.clone());
@@ -222,10 +239,15 @@ pub async fn find_many(
         args.after.is_some(),
         args.before.is_some(),
     );
+    let id_alias = super::base::column_result_alias(alias, "id");
     let mut cursor_values_by_id = std::collections::HashMap::new();
 
     for row in &page.items {
-        let Some(id) = row.get("id").and_then(Value::as_str).map(str::to_string) else {
+        let Some(id) = row
+            .get(&id_alias)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
             continue;
         };
         let mut values = Vec::with_capacity(orders.len());
@@ -245,7 +267,7 @@ pub async fn find_many(
         .items
         .iter()
         .filter_map(|row| {
-            let id = row.get("id").and_then(Value::as_str)?.to_string();
+            let id = row.get(&id_alias).and_then(Value::as_str)?.to_string();
             cursor_values_by_id.get(&id).cloned()
         })
         .collect::<Vec<_>>();
@@ -257,7 +279,7 @@ pub async fn find_many(
     let records = format_result_rows(model, &mapped_columns, &page.items)?;
 
     let total_count = if include_total_count {
-        Some(count_matching_records(pool, &from_sql, &where_sql, &parameter_map).await?)
+        Some(count_matching_records(pool, &from_sql, &total_where_sql, &parameter_map).await?)
     } else {
         None
     };

@@ -26,6 +26,31 @@ pub fn parse_filter(raw: Option<&str>) -> Result<Option<Value>, RestError> {
         return Ok(None);
     };
 
+    let opens = raw.matches('(').count();
+    let closes = raw.matches(')').count();
+
+    if opens > closes {
+        let hint = if opens - closes == 1 {
+            String::from("1 close bracket is")
+        } else {
+            format!("{} close brackets are", opens - closes)
+        };
+        return Err(RestError::invalid_filter(format!(
+            "'filter' invalid. {hint} missing in the query"
+        )));
+    }
+
+    if closes > opens {
+        let hint = if closes - opens == 1 {
+            String::from("1 open bracket is")
+        } else {
+            format!("{} open brackets are", closes - opens)
+        };
+        return Err(RestError::invalid_filter(format!(
+            "'filter' invalid. {hint} missing in the query"
+        )));
+    }
+
     let mut parser = FilterParser {
         input: raw.trim(),
         position: 0,
@@ -34,9 +59,10 @@ pub fn parse_filter(raw: Option<&str>) -> Result<Option<Value>, RestError> {
     parser.skip_whitespace();
 
     if parser.position != parser.input.len() {
-        return Err(RestError::invalid_filter(
-            "The filter query param is invalid",
-        ));
+        return Err(RestError::invalid_filter(format!(
+            "'filter' invalid for '{}'. eg: price[gte]:10",
+            parser.input[parser.position..].trim()
+        )));
     }
 
     Ok(Some(value))
@@ -106,7 +132,7 @@ pub fn parse_fields(raw: Option<&str>) -> Result<Option<Vec<String>>, RestError>
 
     if fields.is_empty() {
         return Err(RestError::invalid_fields(
-            "'fields' parameter invalid. Expected a non-empty comma-separated list.",
+            "'fields' parameter is empty. Expected a comma-separated list of field names, e.g. fields=id,name",
         ));
     }
 
@@ -127,10 +153,9 @@ pub fn parse_bool(raw: Option<&str>) -> Result<Option<bool>, RestError> {
 pub fn parse_limit(raw: Option<&str>) -> Result<Option<usize>, RestError> {
     match raw {
         None => Ok(None),
-        Some(raw) => raw
-            .parse::<usize>()
-            .map(Some)
-            .map_err(|_| RestError::invalid_limit("INVALID_LIMIT_QUERY_PARAM")),
+        Some(raw) => raw.parse::<usize>().map(Some).map_err(|_| {
+            RestError::invalid_limit(format!("limit '{raw}' is invalid. Should be an integer"))
+        }),
     }
 }
 
@@ -138,9 +163,9 @@ pub fn parse_depth(raw: Option<&str>) -> Result<usize, RestError> {
     match raw {
         None | Some("0") => Ok(0),
         Some("1") => Ok(1),
-        Some(_) => Err(RestError::invalid_depth(
-            "The depth query param must be 0 or 1",
-        )),
+        Some(raw) => Err(RestError::invalid_depth(format!(
+            "'depth={raw}' parameter invalid. Allowed values are 0, 1"
+        ))),
     }
 }
 
@@ -209,9 +234,10 @@ pub fn pick_fields(record: &mut Map<String, Value>, fields: Option<&[String]>) {
     };
 
     let id = record.get("id").cloned();
-    let selected = fields
+    let kept = record
         .iter()
-        .filter_map(|field| record.remove(field))
+        .filter(|(key, _)| key.as_str() != "id" && fields.contains(*key))
+        .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<Vec<_>>();
 
     record.clear();
@@ -220,10 +246,8 @@ pub fn pick_fields(record: &mut Map<String, Value>, fields: Option<&[String]>) {
         record.insert(String::from("id"), id);
     }
 
-    for (index, field) in fields.iter().enumerate() {
-        if let Some(value) = selected.get(index) {
-            record.insert(field.clone(), value.clone());
-        }
+    for (key, value) in kept {
+        record.insert(key, value);
     }
 }
 
@@ -277,8 +301,8 @@ impl<'a> FilterParser<'a> {
                 }
                 Some(b',') => self.position += 1,
                 _ => {
-                    return Err(RestError::invalid_filter(
-                        "The filter query param is invalid",
+                    return Err(RestError::bad_request(
+                        "Error while matching filter query. Conjunction not found",
                     ))
                 }
             }
@@ -286,7 +310,7 @@ impl<'a> FilterParser<'a> {
 
         if keyword == "not" && conditions.len() != 1 {
             return Err(RestError::invalid_filter(
-                "not(...) must contain exactly one condition",
+                "'filter' invalid. 'not' conjunction should contain only 1 condition. eg: not(field[eq]:1)",
             ));
         }
 
@@ -298,36 +322,43 @@ impl<'a> FilterParser<'a> {
 
     fn parse_leaf(&mut self) -> Result<Value, RestError> {
         let start = self.position;
+        let base = self.input[start..]
+            .split(['(', ')', ','])
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         let Some(bracket) = self.input[start..].find('[') else {
-            return Err(RestError::invalid_filter(
-                "The filter query param is invalid",
-            ));
+            return Err(RestError::invalid_filter(format!(
+                "'filter' invalid for '{base}'. eg: price[gte]:10"
+            )));
         };
 
         let path = self.input[start..start + bracket].trim().to_string();
         self.position = start + bracket + 1;
         let Some(close) = self.input[self.position..].find(']') else {
-            return Err(RestError::invalid_filter(
-                "The filter query param is invalid",
-            ));
+            return Err(RestError::invalid_filter(format!(
+                "'filter' invalid for '{path}'. eg: price[gte]:10"
+            )));
         };
 
         let operator = self.input[self.position..self.position + close].to_string();
         self.position += close + 1;
 
         if self.input.as_bytes().get(self.position) != Some(&b':') {
-            return Err(RestError::invalid_filter(
-                "The filter query param is invalid",
-            ));
+            return Err(RestError::invalid_filter(format!(
+                "'filter' invalid for '{path}'. eg: price[gte]:10"
+            )));
         }
 
         self.position += 1;
         let value = self.parse_value()?;
 
         if !FILTER_COMPARATORS.contains(&operator.as_str()) {
-            return Err(RestError::invalid_filter(
-                "The filter query param is invalid",
-            ));
+            return Err(RestError::invalid_filter(format!(
+                "'filter' invalid for '{path}', comparator {operator} not in {}",
+                FILTER_COMPARATORS.join(", ")
+            )));
         }
 
         let mut object = Map::new();

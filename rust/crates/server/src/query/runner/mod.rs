@@ -219,13 +219,23 @@ pub fn format_result_rows(
                     .column_name
                     .strip_prefix(parent)
                     .unwrap_or(&column.column_name);
+                let value = if value.is_null() && column.is_array {
+                    Value::Array(Vec::new())
+                } else {
+                    value
+                };
                 let entry = composites
                     .entry(parent.to_string())
                     .or_insert_with(|| Value::Object(serde_json::Map::new()));
                 let object = entry.as_object_mut().expect("composite container");
                 object.insert(base::lowercase_first(suffix), value);
             } else {
-                record.insert(column.field_name.clone(), value);
+                let key = if column.column_name != column.field_name {
+                    column.column_name.clone()
+                } else {
+                    column.field_name.clone()
+                };
+                record.insert(key, value);
             }
         }
 
@@ -240,12 +250,14 @@ pub fn format_result_rows(
 }
 
 fn normalize_null_equivalent(column: &ColumnShape, shape: &TableShape, value: Value) -> Value {
-    if value != Value::String(String::new()) {
+    if value != Value::String(String::new()) && !value.is_null() {
         return value;
     }
 
     match column.field_metadata_type {
-        crate::metadata::flat::FieldMetadataType::Text => Value::Null,
+        crate::metadata::flat::FieldMetadataType::Text if column.empty_string_default => {
+            Value::String(String::new())
+        }
         crate::metadata::flat::FieldMetadataType::MultiSelect => {
             let field_name = column
                 .composite_parent_field_name

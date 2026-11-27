@@ -137,6 +137,7 @@ pub enum FilterError {
     },
     UnknownSubField {
         field: String,
+        composite_type: String,
         sub_field: String,
         available: Vec<String>,
     },
@@ -194,12 +195,13 @@ impl FilterError {
                 format!("Field metadata not found for field: {key}")
             }
             FilterError::UnknownSubField {
-                field,
+                field: _,
+                composite_type,
                 sub_field,
                 available,
             } => {
                 format!(
-                    "Sub field \"{sub_field}\" not found for composite field \"{field}\". Available sub fields: {}.",
+                    "Sub field \"{sub_field}\" not found for composite type: {composite_type}. Available sub fields: {}.",
                     available.join(", ")
                 )
             }
@@ -808,6 +810,26 @@ pub fn compute_field_reference_condition(
     ))
 }
 
+fn composite_type_name(field_type: FieldMetadataType) -> String {
+    let debug = format!("{field_type:?}");
+
+    if debug == "RawJson" {
+        return String::from("RAW_JSON");
+    }
+
+    let mut output = String::new();
+
+    for (index, character) in debug.chars().enumerate() {
+        if index > 0 && character.is_ascii_uppercase() {
+            output.push('_');
+        }
+
+        output.push(character.to_ascii_uppercase());
+    }
+
+    output
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_composite_filter(
     field_name: &str,
@@ -835,6 +857,7 @@ fn compile_composite_filter(
         {
             return Err(FilterError::UnknownSubField {
                 field: field_name.to_string(),
+                composite_type: composite_type_name(field_type),
                 sub_field: sub_field_key.clone(),
                 available: sub_fields
                     .iter()

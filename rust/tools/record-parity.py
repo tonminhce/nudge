@@ -337,7 +337,7 @@ def run(args):
             return 2
     node = Client(pc.NODE_BASE, None, "node")
     try:
-        node.token = pc.fetch_reference_token()
+        node.token = os.environ.get("NODE_TOKEN") or pc.fetch_reference_token()
     except Exception as error:
         print("node auth failed: %s" % error)
         return 2
