@@ -1553,3 +1553,36 @@ pub fn builder_failure_message_for(
 ) -> GraphQlError {
     GraphQlError::builder_failure(fallback, report)
 }
+
+pub fn normalize_create_action_entities(actions: &mut [crate::metadata::actions::UniversalAction]) {
+    for action in actions {
+        let crate::metadata::actions::UniversalAction::Create(create) = action else {
+            continue;
+        };
+
+        let Some(UniversalFlatEntity::Other {
+            metadata_name,
+            entity,
+        }) = &create.flat_entity
+        else {
+            continue;
+        };
+
+        if !matches!(
+            metadata_name,
+            MetadataName::ObjectMetadata
+                | MetadataName::FieldMetadata
+                | MetadataName::Index
+                | MetadataName::FieldMetadataOption
+                | MetadataName::SearchFieldMetadata
+        ) {
+            continue;
+        }
+
+        if let Ok(typed) =
+            UniversalFlatEntity::from_value(*metadata_name, entity.clone())
+        {
+            create.flat_entity = Some(typed);
+        }
+    }
+}
