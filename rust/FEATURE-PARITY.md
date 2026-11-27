@@ -11,9 +11,9 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Area | Upstream size | Nudge today |
 |---|---|---|
 | A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (seeding, DDL runner, metadata CRUD API and deferred queue merged; validation rules and UI editors remain) |
-| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL and REST verified live; search, duplicates/merge, permissions, SSE and hooks remain) |
-| C. Auth and access control | ~12k LOC server | **part** (wave 2 complete; P1+P2 permission model/context/kernel and currentUserWorkspace payload landed, with 27 flags and 37 objects matching the live reference; enforcement P3–P5 next) |
-| D. Web interface (Leptos) | ~330k LOC React | **part** (design system landed; front-core in progress; app shell and product screens remain) |
+| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL and REST verified live; search, duplicates/merge, advanced permissions, SSE and hooks remain) |
+| C. Auth and access control | ~12k LOC server | **part** (wave 2 and P1–P3 landed; object/field enforcement and core row-level predicates are implemented; advanced update/relation RLS, sharing and the remaining permission surfaces are open) |
+| D. Web interface (Leptos) | ~330k LOC React | **part** (front-core, design system, app shell and core record surfaces landed; exact full-feature UI parity and the remaining product screens are open) |
 | E. Automations and integrations | ~60k LOC server | todo |
 | F. Platform and operations | ~10k LOC | **part** |
 
@@ -24,7 +24,8 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 - Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
 - Quality gates: fmt clean, clippy `-D warnings` clean, **92 core + 468 server tests** pass.
-- Frontend gates: Trunk build, native clippy/tests and `wasm32-unknown-unknown` check pass; the app is served at `http://127.0.0.1:8080`.
+- Frontend gates: Trunk release build, native clippy/tests and `wasm32-unknown-unknown` check pass; 137 front-ui tests and 15 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
+- Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Pointer/screenshot interaction remains open because Qoder reports the selected viewport as hidden.
 - UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. These are evidence snapshots, not a full-parity certificate.
 
 ## A. Data model and metadata engine
@@ -58,7 +59,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
 | `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
 | Full text search | todo | 4→6 | tsvector columns and GIN indexes exist; the cross-object Search resolver remains |
-| Record permissions, sharing, private records | todo | 4 | P1–P5 permission wave next; access storage tables exist |
+| Record permissions, sharing, private records | **part** | 4 | P1–P3 and core RLS landed: role/object/field gates, predicate groups, current-member substitution, create rollback and read/count/mutation/nested injection. Advanced update/relation-hop parity and sharing remain. |
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
 | Dynamic GraphQL schema generated from metadata | **done** | 4 | direct workspace execution with resolver classification, introspection and connection shaping |
@@ -96,11 +97,11 @@ The design-system crate is landed; the front logic layer is in progress. The ups
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
 | Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **done** | 5 | U2 `crates/front-core`; native tests, wasm check and a live Twenty round trip pass |
-| Design system: tokens, primitives, icons | **part** | 5 | tokens and layout metrics landed; icon catalog ports 4187 Tabler icons plus 46 custom brand/illustration icons; the motion layer carries 89 upstream keyframes, 320 animation/transition rules, SMIL loaders and reduced-motion fallbacks (100 front-ui tests); remaining primitive inventory and gallery are `wave5/u1b` follow-up |
+| Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 137 front-ui tests; the gallery now exercises sorting, selection, row activation and custom cells. Exact component and page parity remains open. |
 | Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; U4b adds a Cmd/Ctrl+K command menu with navigation, create actions and debounced record search, plus a record-details side panel with Escape/focus behavior; broader side-panel pages remain |
 | Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records; U4b adds server filters, sorting, 240-slot virtualization, Person/Company create dialogs, relation selection and functional List/Kanban/Calendar view dispatch; drag/drop, groups and aggregates remain |
-| Record kanban board | todo | 5 | |
-| Record calendar and list views | todo | 5 | |
+| Record kanban board | **part** | 5 | U4b grouping and view dispatch landed; upstream drag/drop and live visual parity remain |
+| Record calendar and list views | **part** | 5 | U4b month/week/calendar layouts and list dispatch landed; live behavior and exact UI parity remain |
 | Record show page and per type field display and input | **part** | 5 | U4a record route and live show page landed; U4b adds Person name/email/job-title editing and company relation selection while preserving identity and timestamps; per-type editors for other objects remain |
 | Views, filters, sorts, group by | todo | 5 | 27 view operations |
 | Side panel (57 kinds) | todo | 5 | |
