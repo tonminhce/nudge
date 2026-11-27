@@ -1644,17 +1644,17 @@ mod tests {
     use crate::metadata::actions::MetadataName;
     use crate::metadata::actions::UniversalAction;
     use crate::metadata::actions::UniversalFlatEntity;
-    use crate::metadata::builders::build_workspace_migration;
-    use crate::metadata::builders::expand_matrix_with_side_effects;
-    use crate::metadata::builders::FlatEntityOperationsMatrix;
-    use crate::metadata::builders::WorkspaceMigrationBuildResult;
-    use crate::metadata::flat::UniversalWorkspaceMaps;
     use crate::metadata::api::service::build_options;
     use crate::metadata::api::service::compute_api_from_to_maps;
     use crate::metadata::api::service::infer_deletion_for_deletes;
     use crate::metadata::api::service::normalize_create_action_entities;
     use crate::metadata::api::service::transpile_create_object;
     use crate::metadata::api::service::ResolvedApplications;
+    use crate::metadata::builders::build_workspace_migration;
+    use crate::metadata::builders::expand_matrix_with_side_effects;
+    use crate::metadata::builders::FlatEntityOperationsMatrix;
+    use crate::metadata::builders::WorkspaceMigrationBuildResult;
+    use crate::metadata::flat::UniversalWorkspaceMaps;
 
     fn applications() -> ResolvedApplications {
         let custom_universal_identifier = uuid::Uuid::new_v4().to_string();
@@ -1777,40 +1777,52 @@ mod tests {
         assert_eq!(object.name_plural, "rockets");
         assert_eq!(object.label_singular, "Rocket");
         assert_eq!(object.label_plural, "Rockets");
-        assert_eq!(object.universal_identifier, case.object_universal_identifier);
+        assert_eq!(
+            object.universal_identifier,
+            case.object_universal_identifier
+        );
 
         assert_eq!(
-            object.label_identifier_field_metadata_universal_identifier.as_deref(),
+            object
+                .label_identifier_field_metadata_universal_identifier
+                .as_deref(),
             Some(case.name_field_universal_identifier.as_str())
         );
 
-        let field_creates: Vec<&crate::metadata::actions::UniversalCreateAction> = migration
-            .actions
+        let name_field = create
+            .universal_flat_field_metadatas
             .iter()
-            .filter_map(|action| match action {
-                UniversalAction::Create(create)
-                    if create.metadata_name == MetadataName::FieldMetadata =>
-                {
-                    Some(create)
-                }
-                _ => None,
-            })
-            .collect();
+            .find(|field| field.name == "name")
+            .expect("the name field rides the object create");
 
-        let name_field_create = field_creates
-            .iter()
-            .find(|create| {
-                matches!(
-                    create.flat_entity.as_ref(),
-                    Some(UniversalFlatEntity::FieldMetadata(field)) if field.name == "name"
-                )
-            })
-            .expect("a typed fieldMetadata create carries the name field");
+        assert_eq!(
+            name_field.universal_identifier,
+            case.name_field_universal_identifier
+        );
 
-        assert!(matches!(
-            name_field_create.flat_entity,
-            Some(UniversalFlatEntity::FieldMetadata(_))
-        ));
+        assert!(create
+            .field_id_by_universal_identifier
+            .as_ref()
+            .map(|ids| ids.contains_key(&name_field.universal_identifier))
+            .unwrap_or(false));
+
+        assert!(create.id.is_some());
+
+        let standalone_name = migration.actions.iter().any(|action| match action {
+            UniversalAction::Create(create) => {
+                create.metadata_name == MetadataName::FieldMetadata
+                    && matches!(
+                        create.flat_entity.as_ref(),
+                        Some(UniversalFlatEntity::FieldMetadata(field)) if field.name == "name"
+                    )
+            }
+            _ => false,
+        });
+
+        assert!(
+            !standalone_name,
+            "the name field is not also emitted as a standalone field create"
+        );
     }
 
     #[test]
@@ -1833,7 +1845,10 @@ mod tests {
         let create = object_create(&migration);
 
         assert!(
-            matches!(create.flat_entity, Some(UniversalFlatEntity::ObjectMetadata(_))),
+            matches!(
+                create.flat_entity,
+                Some(UniversalFlatEntity::ObjectMetadata(_))
+            ),
             "normalization re-types the create entity for the runner"
         );
     }
@@ -1858,4 +1873,3 @@ mod tests {
         assert!(object.view_universal_identifiers.is_empty());
     }
 }
-

@@ -1554,35 +1554,140 @@ pub fn builder_failure_message_for(
     GraphQlError::builder_failure(fallback, report)
 }
 
-pub fn normalize_create_action_entities(actions: &mut [crate::metadata::actions::UniversalAction]) {
-    for action in actions {
-        let crate::metadata::actions::UniversalAction::Create(create) = action else {
+fn retyped_create_entity(
+    action: &mut crate::metadata::actions::UniversalCreateAction,
+) -> Option<crate::metadata::actions::MetadataName> {
+    let metadata_name = action.metadata_name;
+
+    let Some(UniversalFlatEntity::Other { entity, .. }) = &action.flat_entity else {
+        return Some(metadata_name);
+    };
+
+    if !matches!(
+        metadata_name,
+        MetadataName::ObjectMetadata
+            | MetadataName::FieldMetadata
+            | MetadataName::Index
+            | MetadataName::FieldMetadataOption
+            | MetadataName::SearchFieldMetadata
+    ) {
+        return Some(metadata_name);
+    }
+
+    match UniversalFlatEntity::from_value(metadata_name, entity.clone()) {
+        Ok(typed) => {
+            action.flat_entity = Some(typed);
+            Some(metadata_name)
+        }
+        Err(_) => None,
+    }
+}
+
+pub fn normalize_create_action_entities(
+    actions: &mut Vec<crate::metadata::actions::UniversalAction>,
+) {
+    use crate::metadata::actions::UniversalAction;
+
+    for action in actions.iter_mut() {
+        let UniversalAction::Create(create) = action else {
             continue;
         };
 
-        let Some(UniversalFlatEntity::Other {
-            metadata_name,
-            entity,
-        }) = &create.flat_entity
+        if retyped_create_entity(create).is_none() {
+            continue;
+        }
+
+        if create.id.is_none() {
+            create.id = Some(Uuid::new_v4().to_string());
+        }
+    }
+
+    fold_fields_into_object_creates(actions);
+}
+
+fn fold_fields_into_object_creates(actions: &mut Vec<crate::metadata::actions::UniversalAction>) {
+    use crate::metadata::actions::UniversalAction;
+
+    let mut object_positions: Vec<(usize, String)> = Vec::new();
+
+    for (position, action) in actions.iter().enumerate() {
+        let UniversalAction::Create(create) = action else {
+            continue;
+        };
+
+        if create.metadata_name != MetadataName::ObjectMetadata {
+            continue;
+        }
+
+        let Some(UniversalFlatEntity::ObjectMetadata(object)) = &create.flat_entity else {
+            continue;
+        };
+
+        object_positions.push((position, object.universal_identifier.clone()));
+    }
+
+    if object_positions.is_empty() {
+        return;
+    }
+
+    let mut folds: Vec<(usize, usize, UniversalFlatFieldMetadata, Option<String>)> = Vec::new();
+
+    for (position, action) in actions.iter().enumerate() {
+        let UniversalAction::Create(create) = action else {
+            continue;
+        };
+
+        if create.metadata_name != MetadataName::FieldMetadata {
+            continue;
+        }
+
+        let Some(UniversalFlatEntity::FieldMetadata(field)) = &create.flat_entity else {
+            continue;
+        };
+
+        if field.field_type.is_relation_or_morph() {
+            continue;
+        }
+
+        let Some((object_position, _)) = object_positions
+            .iter()
+            .find(|(_, identifier)| identifier == &field.object_metadata_universal_identifier)
         else {
             continue;
         };
 
-        if !matches!(
-            metadata_name,
-            MetadataName::ObjectMetadata
-                | MetadataName::FieldMetadata
-                | MetadataName::Index
-                | MetadataName::FieldMetadataOption
-                | MetadataName::SearchFieldMetadata
-        ) {
+        folds.push((
+            *object_position,
+            position,
+            (**field).clone(),
+            create.id.clone(),
+        ));
+    }
+
+    let removals: std::collections::HashSet<usize> =
+        folds.iter().map(|(_, position, _, _)| *position).collect();
+
+    for (object_position, _, field, field_id) in folds {
+        let UniversalAction::Create(object_create) = &mut actions[object_position] else {
             continue;
+        };
+
+        if let Some(id) = field_id {
+            object_create
+                .field_id_by_universal_identifier
+                .get_or_insert_with(Default::default)
+                .insert(field.universal_identifier.clone(), id);
         }
 
-        if let Ok(typed) =
-            UniversalFlatEntity::from_value(*metadata_name, entity.clone())
-        {
-            create.flat_entity = Some(typed);
-        }
+        object_create.universal_flat_field_metadatas.push(field);
     }
+
+    let kept: Vec<crate::metadata::actions::UniversalAction> = actions
+        .iter()
+        .enumerate()
+        .filter(|(position, _)| !removals.contains(position))
+        .map(|(_, action)| action.clone())
+        .collect();
+
+    actions.clone_from(&kept);
 }
