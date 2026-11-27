@@ -1812,6 +1812,7 @@ dependencies = [
 name = "nudge-front-app"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "leptos",
  "leptos_meta",
  "leptos_router",

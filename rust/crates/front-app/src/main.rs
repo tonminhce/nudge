@@ -8,6 +8,7 @@ mod auth;
 mod layout;
 mod pages;
 mod record_index;
+mod record_views;
 mod records;
 
 use app::App;

@@ -1,5 +1,7 @@
 use front_core::projection::ObjectMetadata;
 use front_ui::icons::IconBuildingSkyscraper;
+use front_ui::icons::IconCheck;
+use front_ui::icons::IconChevronDown;
 use front_ui::icons::IconFilter;
 use front_ui::icons::IconPlus;
 use front_ui::icons::IconSearch;
@@ -11,7 +13,12 @@ use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
+use crate::app::read_storage;
+use crate::app::write_storage;
 use crate::app::AuthState;
+use crate::record_views::alternate_view;
+use crate::record_views::view_type_icon;
+use crate::record_views::RecordViewType;
 use crate::records::create_record;
 use crate::records::end_cursor;
 use crate::records::load_object_metadata;
@@ -63,6 +70,8 @@ pub fn RecordIndexPage() -> impl IntoView {
     let applied_search = RwSignal::new(String::new());
     let sort = RwSignal::new(RecordSort::NameAsc);
     let show_filters = RwSignal::new(false);
+    let show_views = RwSignal::new(false);
+    let view_type = RwSignal::new(RecordViewType::Table);
     let show_create = RwSignal::new(false);
     let revision = RwSignal::new(0_usize);
     let first_name = RwSignal::new(String::new());
@@ -93,6 +102,9 @@ pub fn RecordIndexPage() -> impl IntoView {
 
     Effect::new(move |_| {
         let plural = params.get().get("plural").unwrap_or_default();
+        if let Some(stored) = read_storage(&format!("nudge.view.{plural}")) {
+            view_type.set(RecordViewType::parse(&stored));
+        }
         let Some(token) = auth.token.get() else {
             return;
         };
@@ -300,6 +312,14 @@ pub fn RecordIndexPage() -> impl IntoView {
         "notes" => "Notes".to_string(),
         other => other.to_string(),
     };
+    let create_label = move || match plural().as_str() {
+        "people" => "Add person",
+        "companies" => "Add company",
+        "opportunities" => "Add opportunity",
+        "tasks" => "Add task",
+        "notes" => "Add note",
+        _ => "Add record",
+    };
     let icon = move || -> AnyView {
         match plural().as_str() {
             "companies" => view! { <IconBuildingSkyscraper size=20 /> }.into_any(),
@@ -332,7 +352,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                     </button>
                     <button class="t-button" data-variant="solid" data-color="accent" data-size="md"
                         on:click=move |_| open_create()>
-                        <IconPlus size=16 />"Add " {title}
+                        <IconPlus size=16 />{create_label}
                     </button>
                 </div>
             </header>
@@ -359,11 +379,32 @@ pub fn RecordIndexPage() -> impl IntoView {
                     <button class="t-button" type="submit" data-variant="solid" data-color="accent" data-size="md">"Apply"</button>
                 </form>
             </Show>
-            <div class="view-bar">
-                <button class="view-tab active">"Table"</button>
-                <button class="view-tab" disabled=true>"Kanban"</button>
-                <button class="view-tab" disabled=true>"Calendar"</button>
-                <button class="view-tab" disabled=true>"List"</button>
+            <div class="view-picker">
+                <button class="view-picker-trigger" aria-expanded=move || if show_views.get() { "true" } else { "false" } on:click=move |_| show_views.set(!show_views.get())>
+                    {move || view_type_icon(view_type.get())}
+                    <span>"All"</span>
+                    <span class="view-picker-count">{"· "}{move || total_count.get()}</span>
+                    <IconChevronDown size=14 />
+                </button>
+                <Show when=move || show_views.get() fallback=|| view! { <span /> }>
+                    <div class="view-picker-menu" role="menu" aria-label="View type">
+                        <div class="view-picker-section">"View type"</div>
+                        <For each=move || [RecordViewType::Table, RecordViewType::Kanban, RecordViewType::Calendar, RecordViewType::List] key=|kind| kind.as_str() let(kind)>
+                            <button class="view-picker-option" role="menuitemradio" aria-checked=move || if view_type.get() == kind { "true" } else { "false" }
+                                on:click=move |_| {
+                                    view_type.set(kind);
+                                    write_storage(&format!("nudge.view.{}", plural()), kind.as_str());
+                                    show_views.set(false);
+                                }>
+                                {view_type_icon(kind)}
+                                <span>{kind.label()}</span>
+                                <Show when=move || view_type.get() == kind fallback=|| view! { <span /> }>
+                                    <IconCheck size=14 />
+                                </Show>
+                            </button>
+                        </For>
+                    </div>
+                </Show>
             </div>
             {move || error.get().map(|message| view! { <div class="record-error" role="alert">{message}</div> })}
             <Show
@@ -374,6 +415,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                     </div>
                 }
             >
+                <Show when=move || view_type.get() == RecordViewType::Table fallback=move || alternate_view(view_type.get(), records.get(), singular())>
                 <div class="record-table" role="table" aria-label="Records">
                     <div class="record-table-head" role="row">
                         <span class="cell-checkbox"></span><span>"Name"</span><span>"Company"</span><span>"Emails"</span><span>"Created at"</span><span></span>
@@ -416,12 +458,13 @@ pub fn RecordIndexPage() -> impl IntoView {
                         {move || if loading.get() { "Loading..." } else { "Load more" }}
                     </button>
                 </div>
+                </Show>
             </Show>
             <Show when=move || show_create.get() fallback=|| view! { <span /> }>
                 <div class="modal-backdrop">
                     <section class="create-dialog" role="dialog" aria-modal="true" aria-label="Create record">
                         <header class="create-dialog-header">
-                            <h2>"Add " {title}</h2>
+                            <h2>{create_label}</h2>
                             <button class="app-icon-button" aria-label="Close" on:click=move |_| show_create.set(false)>"×"</button>
                         </header>
                         <form class="create-form" on:submit=move |event| {
@@ -515,7 +558,7 @@ fn order_by(object: &str, sort: RecordSort) -> Option<Value> {
     Some(value)
 }
 
-fn display_name(record: &Value) -> String {
+pub(crate) fn display_name(record: &Value) -> String {
     let first = record["name"]["firstName"].as_str().unwrap_or_default();
     let last = record["name"]["lastName"].as_str().unwrap_or_default();
     match (first.is_empty(), last.is_empty()) {
@@ -526,7 +569,7 @@ fn display_name(record: &Value) -> String {
     }
 }
 
-fn company_name(record: &Value) -> String {
+pub(crate) fn company_name(record: &Value) -> String {
     record["company"]["name"]
         .as_str()
         .map(str::to_string)
@@ -534,14 +577,14 @@ fn company_name(record: &Value) -> String {
         .unwrap_or_default()
 }
 
-fn primary_email(record: &Value) -> String {
+pub(crate) fn primary_email(record: &Value) -> String {
     record["emails"]["primaryEmail"]
         .as_str()
         .unwrap_or_default()
         .to_string()
 }
 
-fn created_at(record: &Value) -> String {
+pub(crate) fn created_at(record: &Value) -> String {
     record["createdAt"].as_str().unwrap_or_default().to_string()
 }
 
