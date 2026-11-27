@@ -47,3 +47,8 @@ rust-anything rules <repo> --add "<the rule, in one sentence>"
 - **Statement:** Backend must reimplement every Twenty CRM feature, not only the daily-driver surface; keep the full wave-6 and wave-7 scope and prove behavior with live reference parity.
 - **Why:** The user explicitly rejected a reduced scope.
 - **How to apply:** Track every feature in `FEATURE-PARITY.md`; do not mark the migration complete while any applicable row remains todo or part.
+
+### R-005: Workspace tests use an isolated serial database
+- **Statement:** Run the full Rust workspace suite through `bash tools/test-workspace.sh`; never point DB-gated tests at the shared Twenty parity database.
+- **Why:** Core migrations mutate shared schema and parallel tests race on the migration ledger, producing false failures and contaminating live parity state.
+- **How to apply:** The harness creates a uniquely named Postgres database, sets `NUDGE_TEST_DATABASE_URL` without printing credentials, runs `cargo test --workspace -- --test-threads=1`, and drops the database on exit.
