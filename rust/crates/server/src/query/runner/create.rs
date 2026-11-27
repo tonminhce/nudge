@@ -142,6 +142,9 @@ async fn insert_records(
                 crate::query::repository::quote_identifier(&enum_name)?
             );
             compiled_text = compiled_text.replace(&parameter, &cast);
+        } else if column_name.ends_with("WorkspaceMemberId") {
+            let parameter = format!("${}", parameter_index + 1);
+            compiled_text = compiled_text.replace(&parameter, &format!("{parameter}::uuid"));
         }
     }
 
@@ -176,7 +179,8 @@ fn bind_insert_value<'q>(
     if matches!(
         field_type,
         FieldMetadataType::Uuid | FieldMetadataType::Relation | FieldMetadataType::MorphRelation
-    ) {
+    ) || column_name.ends_with("WorkspaceMemberId")
+    {
         if let Some(text) = value.as_str() {
             let parsed = Uuid::parse_str(text).map_err(|_| RunnerError::invalid_parameter())?;
             return Ok(query.bind(parsed));
