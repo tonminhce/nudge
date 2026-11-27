@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use serde::Serialize;
-#[cfg(not(target_arch = "wasm32"))]
 use serde_json::Map;
 use serde_json::Value;
 #[cfg(not(target_arch = "wasm32"))]
@@ -75,8 +74,8 @@ pub enum ClientError {
     GraphQl(Vec<GraphQlError>),
     #[error("graphql response did not contain data")]
     MissingData,
-    #[error("wasm fetch transport is not configured")]
-    UnsupportedOnWasm,
+    #[error("transport failed: {0}")]
+    Transport(String),
     #[error("server URL must be an absolute http(s) URL")]
     InvalidBaseUrl,
 }
@@ -221,19 +220,65 @@ impl GraphQLClient for ReqwestGraphQLClient {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub type BrowserGraphQLClient = ReqwestGraphQLClient;
+
 #[cfg(target_arch = "wasm32")]
-pub struct WasmGraphQLClient;
+#[derive(Debug, Clone, Default)]
+pub struct BrowserGraphQLClient;
 
 #[cfg(target_arch = "wasm32")]
 #[async_trait::async_trait(?Send)]
-impl GraphQLClient for WasmGraphQLClient {
+impl GraphQLClient for BrowserGraphQLClient {
     async fn execute(
         &self,
-        _base_url: &str,
-        _query: &str,
-        _options: RequestOptions,
+        base_url: &str,
+        query: &str,
+        options: RequestOptions,
     ) -> Result<GraphQlResponse, ClientError> {
-        Err(ClientError::UnsupportedOnWasm)
+        if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+            return Err(ClientError::InvalidBaseUrl);
+        }
+
+        let url = format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            options.endpoint.path()
+        );
+        let mut body = serde_json::Map::new();
+        body.insert(String::from("query"), Value::String(query.to_string()));
+        body.insert(
+            String::from("variables"),
+            options
+                .variables
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        );
+        if let Some(operation_name) = options.operation_name {
+            body.insert(String::from("operationName"), Value::String(operation_name));
+        }
+
+        let mut builder = gloo_net::http::Request::post(&url);
+        if let Some(token) = options.bearer_token {
+            builder = builder.header("authorization", &format!("Bearer {token}"));
+        }
+        let _ = options.session_cookie;
+        let request = builder
+            .credentials(web_sys::RequestCredentials::Include)
+            .json(&body)
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        let status = response.status();
+        if !(200..300).contains(&status) {
+            return Err(ClientError::Transport(format!("HTTP {status}")));
+        }
+        let text = response
+            .text()
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        GraphQlResponse::from_bytes(text.as_bytes())
     }
 }
 
