@@ -300,6 +300,15 @@ fn has_workspace_field(request: &ExecutionRequest, schema: &WorkspaceSchema) -> 
 }
 
 fn auth_error(error: &AuthError) -> GraphQlError {
+    if error.code == "UNAUTHENTICATED" {
+        return GraphQlError::unauthenticated("Authentication required").with_extensions(json!({
+            "subCode": "UNAUTHENTICATED",
+            "userFriendlyMessage": {
+                "id": "z+7x/s",
+                "message": "You must be authenticated to perform this action."
+            }
+        }));
+    }
     let message = error
         .messages
         .first()
@@ -329,13 +338,18 @@ fn error_response_for_key(
     root_key: Option<&str>,
     errors: &[GraphQlError],
 ) -> Response {
+    let errors = errors.iter().map(GraphQlError::to_json).collect::<Vec<_>>();
+    let payload = match root_key {
+        Some(key) => json!({
+            "data": { key: Value::Null },
+            "errors": errors,
+        }),
+        None => json!({ "errors": errors }),
+    };
     (
         StatusCode::OK,
         [(CONTENT_TYPE, "application/json")],
-        Json(json!({
-            "data": root_key.map(|key| json!({ key: Value::Null })).unwrap_or(Value::Null),
-            "errors": errors.iter().map(GraphQlError::to_json).collect::<Vec<_>>(),
-        })),
+        Json(payload),
     )
         .into_response()
 }
