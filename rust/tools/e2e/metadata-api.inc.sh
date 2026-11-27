@@ -6,7 +6,7 @@ md_post() {
   BODY="${response%$'\n'*}"
 }
 
-MD_BODY='{"query":"{ __typename }"}'
+MD_BODY='{"query":"query { objects(paging: { first: 1 }) { totalCount } }"}'
 md_post
 check "metadata: unauthenticated query" 200 "$STATUS"
 check_value "  UNAUTHENTICATED code" "$(printf '%s' "$BODY" | grep -c '"code":"UNAUTHENTICATED"')"

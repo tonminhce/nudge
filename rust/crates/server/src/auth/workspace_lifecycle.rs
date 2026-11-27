@@ -1225,6 +1225,9 @@ async fn impersonate(
     }
 
     let impersonator = load_impersonator_party(&state, user_workspace_id).await?;
+    if impersonator.workspace_id != input.workspace_id && !impersonator.can_impersonate {
+        return Err(server_level_not_allowed_error());
+    }
     let target = load_target_party(&state, input.user_id, input.workspace_id).await?;
 
     if target.user_id == impersonator.user_id {

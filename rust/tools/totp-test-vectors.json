@@ -57,8 +57,8 @@
   "secret": "EMYUEU3EOUDBOKBZ",
   "codeAt59": "637357"
  },
- "uri": "otpauth://totp/Twenty%20-%20Nudge%20HQ:totp-vectors%40nudge.test?secret=GEZDGNBVGY3TQOJQ&period=30&digits=6&algorithm=SHA1&issuer=Twenty%20-%20Nudge%20HQ",
- "uriPlainIssuer": "otpauth://totp/Twenty:totp-vectors%40nudge.test?secret=GEZDGNBVGY3TQOJQ&period=30&digits=6&algorithm=SHA1&issuer=Twenty",
+ "uri": "otpauth://totp/Nudge%20-%20Nudge%20HQ:totp-vectors%40nudge.test?secret=GEZDGNBVGY3TQOJQ&period=30&digits=6&algorithm=SHA1&issuer=Nudge%20-%20Nudge%20HQ",
+ "uriPlainIssuer": "otpauth://totp/Nudge:totp-vectors%40nudge.test?secret=GEZDGNBVGY3TQOJQ&period=30&digits=6&algorithm=SHA1&issuer=Nudge",
  "recoveryCodes": {
   "plain": "ABCDE-FGHIJ-KLMNP-QRSTV",
   "hash": "5bf753af87ca65362ba84c2121d2f12861afc220f4d0b9bcbd88b8d407ce5b66",

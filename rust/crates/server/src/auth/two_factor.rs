@@ -46,7 +46,7 @@ const RECOVERY_CODE_LENGTH: usize = 20;
 const RECOVERY_CODE_GROUP_SIZE: usize = 5;
 const RECOVERY_CODE_EXPIRES_IN_SECS: i64 = 60 * 60;
 const SESSION_REVOKED_REASON_2FA_RESET: &str = "TWO_FACTOR_AUTHENTICATION_RESET";
-const ISSUER_PREFIX: &str = "Twenty";
+const ISSUER_PREFIX: &str = "Nudge";
 
 const METHOD_ALREADY_PROVISIONED_MESSAGE: &str =
     "A two factor authentication method has already been set. Please delete it and try again.";
@@ -2143,13 +2143,13 @@ mod tests {
         assert_eq!(
             otpauth_uri(
                 "totp-vectors@nudge.test",
-                "Twenty - Nudge HQ",
+                "Nudge - Nudge HQ",
                 fixed_secret()
             ),
             vectors["uri"].as_str().expect("uri")
         );
         assert_eq!(
-            otpauth_uri("totp-vectors@nudge.test", "Twenty", fixed_secret()),
+            otpauth_uri("totp-vectors@nudge.test", "Nudge", fixed_secret()),
             vectors["uriPlainIssuer"].as_str().expect("plain uri")
         );
     }
@@ -2161,7 +2161,7 @@ mod tests {
         assert_eq!(percent_encode_component("a:b"), "a%3Ab");
         assert_eq!(percent_encode_component("a!~*'()-_.b"), "a!~*'()-_.b");
         assert_eq!(percent_encode_component("é"), "%C3%A9");
-        assert_eq!(percent_encode_component("Twenty - HQ"), "Twenty%20-%20HQ");
+        assert_eq!(percent_encode_component("Nudge - HQ"), "Nudge%20-%20HQ");
     }
 
     #[test]

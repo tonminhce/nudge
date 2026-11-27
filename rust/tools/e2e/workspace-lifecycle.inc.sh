@@ -73,7 +73,7 @@ check "impersonation start needs auth" 401 "$STATUS"
 
 post /auth/impersonate "{\"workspaceId\":\"$WL_SECOND_WORKSPACE\",\"userId\":\"$WL_OTHER_USER\"}" -H "authorization: Bearer $WL_TOKEN"
 check "impersonation without the admin role denied" 403 "$STATUS"
-check_value "  permission denied code" "$([ "$(error_code)" = "PERMISSION_DENIED" ] && echo 1 || echo 0)"
+check_value "  server level forbidden envelope" "$([ "$(error_code)" = "FORBIDDEN_EXCEPTION" ] && echo 1 || echo 0)"
 
 post /auth/impersonate "{\"workspaceId\":\"$WL_SECOND_WORKSPACE\",\"userId\":\"$(uuidgen)\"}" -H "authorization: Bearer $WL_SECOND_TOKEN"
 check "unknown target user workspace" 500 "$STATUS"
@@ -89,7 +89,7 @@ check_value "  server level message" "$(printf '%s' "$BODY" | grep -c 'Server le
 
 post /auth/impersonate "{\"workspaceId\":\"$WL_OTHER_WORKSPACE\",\"userId\":\"$WL_OTHER_USER\"}" -H "authorization: Bearer $WL_OTHER_TOKEN"
 check "non admin cannot impersonate" 403 "$STATUS"
-check_value "  non admin code" "$([ "$(error_code)" = "PERMISSION_DENIED" ] && echo 1 || echo 0)"
+check_value "  self impersonation forbidden envelope" "$([ "$(error_code)" = "FORBIDDEN_EXCEPTION" ] && echo 1 || echo 0)"
 
 post /auth/stop-impersonation "{}"
 check "stop impersonation needs auth" 401 "$STATUS"

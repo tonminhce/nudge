@@ -228,13 +228,27 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
     .fetch_one(&mut *transaction)
     .await?;
 
-    sqlx::query(
+    let user_workspace_id: (Uuid,) = sqlx::query_as(
         "INSERT INTO core.\"userWorkspace\" (\"userId\", \"workspaceId\", locale) \
-         VALUES ($1, $2, $3)",
+         VALUES ($1, $2, $3) RETURNING id",
     )
     .bind(user_id.0)
     .bind(workspace_id)
     .bind(&locale)
+    .fetch_one(&mut *transaction)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO core.\"roleTarget\" \
+         (\"workspaceId\", \"roleId\", \"userWorkspaceId\", \"universalIdentifier\", \
+          \"applicationId\") \
+         SELECT $1, $2, $3, $4, w.\"workspaceCustomApplicationId\" \
+         FROM core.\"workspace\" w WHERE w.id = $1",
+    )
+    .bind(workspace_id)
+    .bind(admin_role_id)
+    .bind(user_workspace_id.0)
+    .bind(Uuid::new_v4())
     .execute(&mut *transaction)
     .await?;
 
@@ -244,12 +258,33 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
 
     transaction.commit().await?;
 
-    if let Err(error) = crate::standard_objects::seed_standard_objects(state, workspace_id).await {
-        tracing::error!(
-            workspace_id = %workspace_id,
-            error = %error.message,
-            "standard object seeding failed during sign-up; workspace needs activation retry"
-        );
+    match crate::standard_objects::seed_standard_objects(state, workspace_id).await {
+        Ok(_) => {
+            if let Err(error) = sqlx::query(&format!(
+                "INSERT INTO \"{}\".\"workspaceMember\" (\"userId\", \"userEmail\", locale) \
+                 VALUES ($1, $2, $3)",
+                schema_name
+            ))
+            .bind(user_id.0)
+            .bind(&email)
+            .bind(&locale)
+            .execute(&state.core_pool)
+            .await
+            {
+                tracing::error!(
+                    workspace_id = %workspace_id,
+                    error = %error,
+                    "workspace member seeding failed during sign-up; workspace needs activation retry"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::error!(
+                workspace_id = %workspace_id,
+                error = %error.message,
+                "standard object seeding failed during sign-up; workspace needs activation retry"
+            );
+        }
     }
 
     let issued =

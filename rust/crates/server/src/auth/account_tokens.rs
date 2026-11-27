@@ -872,7 +872,7 @@ async fn resend_email_verification_token(
 
     tracing::info!(
         to = %email,
-        subject = "Welcome to Twenty: Please Confirm Your Email",
+        subject = "Welcome to Nudge: Please Confirm Your Email",
         link = %link,
         "email verification link (EMAIL_DRIVER=LOGGER)"
     );
@@ -1428,7 +1428,7 @@ async fn create_workspace_invitation(
 
     tracing::info!(
         to = %email,
-        subject = "Join your team on Twenty",
+        subject = "Join your team on Nudge",
         workspace = workspace_display_name.unwrap_or("Workspace"),
         link = %link,
         "workspace invitation email (EMAIL_DRIVER=LOGGER)"
