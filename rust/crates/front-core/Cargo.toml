@@ -1,0 +1,24 @@
+[package]
+name = "nudge-front-core"
+version = "0.1.0"
+description = "Nudge front logic layer: GraphQL transport, metadata store, query cache, record index, SSE decoding and optimistic updates."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "front_core"
+doctest = false
+
+[dependencies]
+async-trait = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { workspace = true }
