@@ -143,7 +143,16 @@ pub fn AuthPage() -> impl IntoView {
                 }>
                     <div class="auth-field">
                         <input class="t-input auth-input" autocomplete="email"
-                            placeholder="Email" bind:value=email />
+                            placeholder="Email" bind:value=email
+                            on:input=move |_| {
+                                if step.get() == AuthStep::Password {
+                                    step.set(AuthStep::Email);
+                                    password.set(String::new());
+                                    password_visible.set(false);
+                                    error.set(None);
+                                }
+                            }
+                        />
                     </div>
                     {move || match step.get() {
                         AuthStep::Email => ().into_any(),
@@ -188,7 +197,8 @@ pub fn AuthPage() -> impl IntoView {
                             disabled=move || {
                                 loading.get()
                                     || (step.get() == AuthStep::Password
-                                        && password.get().chars().count() < 8)
+                                        && (password.get().chars().count() < 8
+                                            || !is_valid_email(&email.get())))
                             }
                             data-variant="solid"
                             data-color="neutral"
@@ -367,4 +377,28 @@ async fn fetch_current_user(token: &str) -> Result<serde_json::Value, String> {
         )
         .await
         .map_err(|error| error.to_string())
+}
+
+fn is_valid_email(email: &str) -> bool {
+    let trimmed = email.trim();
+    !trimmed.is_empty()
+        && trimmed.contains('@')
+        && !trimmed.starts_with('@')
+        && !trimmed.ends_with('@')
+        && !trimmed.contains(char::is_whitespace)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_email;
+
+    #[test]
+    fn email_validation_matches_the_auth_service() {
+        assert!(is_valid_email("person@example.com"));
+        assert!(is_valid_email(" person@example.com "));
+        assert!(!is_valid_email("bad-email"));
+        assert!(!is_valid_email("@example.com"));
+        assert!(!is_valid_email("person@"));
+        assert!(!is_valid_email("person @example.com"));
+    }
 }
