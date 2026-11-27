@@ -29,8 +29,8 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 | 1 | Server foundation: config, Postgres/Redis, core-schema migrations, health | **done** — schema parity verified against the live 2.61.0 reference |
 | 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **done** — passwords, tokens, sessions, CSRF, API keys, 2FA, invitations, email verification, password reset, workspace lifecycle, impersonation, SSO (SAML signature verification flag-gated, ADR-013); permission *enforcement* moves to wave 4 with the query runner |
 | 3 | Metadata engine: standard objects seeding, workspace schema creation | **mostly done** — U1–U6 + U8 merged (runner, seeding, deferred worker, DB parity vs live reference, 312 unit tests, both e2e gates green); U9 metadata API and U10 update/delete matrix in progress on their branches |
-| 4 | Workspace GraphQL (dynamic schema) + REST + query runner (filter/sort/paginate/groupBy/aggregate) | open |
-| 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open |
+| 4 | Workspace GraphQL (dynamic schema) + REST + query runner (filter/sort/paginate/groupBy/aggregate) | **done** — U3–U7 merged plus the same-database parity pass; 18/18 record captures and 18/18 REST error/shape probes match the live reference |
+| 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open — U1 design system landed; U2 front-core and the U1 completion audit in progress on `wave5/u2` / `wave5/u1b` |
 | 6 | Webhooks, files, email (SMTP), search, import/export, timeline, favorites, notes/tasks | open |
 | 7 | Workers/queues (own queue, not BullMQ — ADR-007), workflows, messaging + calendar sync, AI agents, MCP, billing | open |
 
@@ -255,3 +255,39 @@ Units U3 and U5.
   matrix verified against the live reference, including the `targetTableName='DEPRECATED'`
   parity fix (upstream stores the literal and derives the physical table name from
   `nameSingular` + application identifier; the runner must derive, not read the column).
+
+### wave4/query-layer (done 2026-11-27)
+Units U3–U7 plus the parity pass, on `wave4/u3`..`wave4/u7` + `wave4/parity` (all merged).
+- `query/filter` (operator DSL), `query/cursor` (base64url keyset), `query/order`,
+  `query/compile` (`:name` → `$n`), `query/repository` (table shapes + mutation SQL),
+  `query/runner` (find/create/mutation/aggregate/groupBy/nested), `query/entry`
+  (direct GraphQL workspace execution + the REST dispatcher).
+- Same-database parity technique: Nudge boots against `twenty_ref` with
+  `SKIP_MIGRATIONS=true` and the reference APP_SECRET, then mints an access token for the
+  reference owner through `/auth/login-token` + `/auth/tokens` (no origin header) and is
+  compared live against the reference server via `tools/parity-compare.py --records`
+  (18 captures: findMany/findOne/company-filter/orderBy-pagination/mutation-roundtrip/
+  error-bad-filter/rest-findMany) and `tools/parity-rest-errors.py` (18 error and shape
+  probes). Launcher: `tools/run-same-db-server.py` (reads the reference APP_SECRET from
+  the ZCode session store; never prints it).
+- Gates at merge: fmt + clippy `-D warnings` clean, 92 core + 468 server unit tests,
+  `tools/auth-e2e.sh` 367/367, `tools/metadata-parity.sh` five sections zero-diff,
+  `tools/prove-attnum-parity.sh` 39/39 tables identical ordered columns, both live parity
+  harnesses 0 diffs against the reference.
+- Upstream REST rules verified from the compiled server dist and locked in the port:
+  record keys are physical column names, error bodies carry no `code` key, `fields`
+  maps relation names to join columns at depth 0 and expands relations at depth 1,
+  delete defaults to destroy with `Filters are mandatory for bulk destroy operations.`
+  for missing filters, `group_by` is ignored on plain find, and unknown query params are
+  silently ignored.
+
+### wave5/frontend-research (done)
+`research/frontend-architecture.md` pins the wave-5 plan: two-router layout mounted on
+login state, the `AppPath` URL contract, the 25-kind metadata store with collection
+hashes, the query-level cache recommendation (ADR-015), the SSE contract on `/metadata`,
+the slot-based table virtualization (240 slots, 32 px rows), Tauri 2 as a Nudge-original
+shell (ADR-014), and the U1–U6 unit split with acceptance criteria and flows.
+
+### wave5/u1 (done) — `crates/front-ui` design system crate
+Tokens, icon set, and the first component set with a gallery page (merged to main;
+continuation audit on `wave5/u1b`).
