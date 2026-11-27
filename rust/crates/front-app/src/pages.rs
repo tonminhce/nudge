@@ -4,6 +4,7 @@ use front_ui::icons::IconSettings;
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
+use leptos_router::hooks::use_query_map;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 
@@ -16,6 +17,7 @@ use crate::side_panel::RecordSidePanel;
 #[component]
 pub fn RecordShowPage() -> impl IntoView {
     let params = use_params_map();
+    let query = use_query_map();
     let auth = expect_context::<AuthState>();
     let record = RwSignal::new(None::<Value>);
     let object = RwSignal::new(None::<front_core::projection::ObjectMetadata>);
@@ -133,6 +135,16 @@ pub fn RecordShowPage() -> impl IntoView {
         });
     };
 
+    Effect::new(move || {
+        let query = query.get();
+        if query.get("panel").as_deref() == Some("details") {
+            show_side_panel.set(true);
+        }
+        if query.get("edit").as_deref() == Some("1") && singular_name.get() == "person" {
+            start_edit();
+        }
+    });
+
     let save_edit = move || {
         let Some(token) = auth.token.get() else {
             return;
@@ -226,6 +238,11 @@ pub fn RecordShowPage() -> impl IntoView {
                             <form class="record-edit-form" on:submit=move |event| {
                                 event.prevent_default();
                                 save_edit();
+                            } on:keydown=move |event| {
+                                if event.key() == "Enter" && (event.meta_key() || event.ctrl_key()) {
+                                    event.prevent_default();
+                                    save_edit();
+                                }
                             }>
                                 <div class="record-edit-grid">
                                     <label>"First name"<input class="t-input" bind:value=draft_first_name /></label>
