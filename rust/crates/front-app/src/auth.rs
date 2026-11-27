@@ -42,6 +42,20 @@ enum AuthStep {
     Password,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthMode {
+    SignIn,
+    SignUp,
+}
+
+fn auth_mode(user_exists: bool) -> AuthMode {
+    if user_exists {
+        AuthMode::SignIn
+    } else {
+        AuthMode::SignUp
+    }
+}
+
 #[component]
 pub fn AuthPage() -> impl IntoView {
     let auth = expect_context::<AuthState>();
@@ -86,10 +100,9 @@ pub fn AuthPage() -> impl IntoView {
             error.set(None);
             loading.set(true);
             leptos::task::spawn_local(async move {
-                let result = if exists {
-                    sign_up(&email_value, &password_value).await
-                } else {
-                    sign_in(&email_value, &password_value).await
+                let result = match auth_mode(exists) {
+                    AuthMode::SignUp => sign_up(&email_value, &password_value).await,
+                    AuthMode::SignIn => sign_in(&email_value, &password_value).await,
                 };
                 match result {
                     Ok(session) => {
@@ -214,8 +227,10 @@ pub fn AuthPage() -> impl IntoView {
                                         } else {
                                             match step.get() {
                                                 AuthStep::Email => "Continue".to_string(),
-                                                AuthStep::Password if user_exists.get() => "Sign in".to_string(),
-                                                AuthStep::Password => "Sign up".to_string(),
+                                                AuthStep::Password => match auth_mode(user_exists.get()) {
+                                                    AuthMode::SignIn => "Sign in".to_string(),
+                                                    AuthMode::SignUp => "Sign up".to_string(),
+                                                },
                                             }
                                         }
                                     }}
@@ -390,7 +405,15 @@ fn is_valid_email(email: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::auth_mode;
     use super::is_valid_email;
+    use super::AuthMode;
+
+    #[test]
+    fn account_status_selects_the_matching_auth_action() {
+        assert_eq!(auth_mode(true), AuthMode::SignIn);
+        assert_eq!(auth_mode(false), AuthMode::SignUp);
+    }
 
     #[test]
     fn email_validation_matches_the_auth_service() {
