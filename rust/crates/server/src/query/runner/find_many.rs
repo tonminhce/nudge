@@ -367,7 +367,7 @@ impl RelationJoins {
     }
 }
 
-fn from_with_joins(
+pub(crate) fn from_with_joins(
     model: &super::base::ObjectModel,
     alias: &str,
     joins: &RelationJoins,
@@ -419,7 +419,7 @@ pub fn add_to_one_join(
     Ok(())
 }
 
-fn collect_filter_relation_joins(
+pub(crate) fn collect_filter_relation_joins(
     schema: &RunnerSchema,
     object_name: &str,
     alias: &str,

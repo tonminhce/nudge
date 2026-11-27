@@ -125,7 +125,16 @@ R-002 (verify auth behaviour against upstream, never guess).
     the null-equivalent empty string back to null. The DB-gated test seeds a workspace and
     exercises composite filters, relation filters/orders, pagination totals, nested to-one
     loading, findOne and arg conflicts. HTTP/GraphQL wiring remains for wave 4 U6/U7.
-  - Next: U4 aggregates/group-by, then U5 mutation runners; wave 5 (Leptos front) spec
+  - U4 `query::runner::aggregate` + `query::runner::group_by` (branch `wave4/u4`): the
+    aggregate SQL expression matrix (`totalCount`, `countEmpty/NotEmpty`, unique counts,
+    percentages, boolean counts, min/max/avg/sum with the rating split-part cast) and the
+    upstream result names (`countNotEmptyName`, `minCreatedAt`, ...). `group_by` resolves
+    physical/composite columns, emits the upstream date-granularity SQL, validates
+    `MISSING_TIMEZONE_FOR_DATE_GROUP_BY` and `INVALID_TIMEZONE`, always computes
+    `totalCount`, and defaults to 50 groups ordered by the group key. The DB-gated test
+    seeds a workspace and proves company aggregate names/values, ordered person groups with
+    per-group totalCount, and both timezone error codes.
+  - Next: U5 mutation runners; wave 5 (Leptos front) spec
     `research/frontend-architecture.md`.
 
 ## How to run everything
