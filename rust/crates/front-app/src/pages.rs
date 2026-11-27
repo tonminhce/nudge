@@ -141,7 +141,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                     </div>
                 }
             >
-                <div class="record-table" role="table" aria-label=title>
+                <div class="record-table" role="table" aria-label="Records">
                     <div class="record-table-head" role="row">
                         <span class="cell-checkbox"></span><span>"Name"</span><span>"Company"</span><span>"Emails"</span><span>"Created at"</span><span></span>
                     </div>

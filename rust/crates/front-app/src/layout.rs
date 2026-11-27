@@ -10,6 +10,7 @@ use front_ui::icons::IconSearch;
 use front_ui::icons::IconSettings;
 use front_ui::icons::IconStar;
 use front_ui::icons::IconUsers;
+use front_ui::tokens::Scheme;
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 use leptos_router::components::A;
@@ -18,9 +19,13 @@ use leptos_router::hooks::use_navigate;
 use crate::app::AuthState;
 use crate::auth::ThemeToggle;
 
+const LOGO_LIGHT: &str = include_str!("../assets/nudge-logo-light.svg");
+const LOGO_DARK: &str = include_str!("../assets/nudge-logo-dark.svg");
+
 #[component]
 pub fn WorkspaceLayout() -> impl IntoView {
     let auth = expect_context::<AuthState>();
+    let theme = expect_context::<RwSignal<Scheme>>();
     let navigate = use_navigate();
     let auth_for_effect = auth.clone();
     let navigate_for_effect = navigate.clone();
@@ -45,7 +50,12 @@ pub fn WorkspaceLayout() -> impl IntoView {
             <div class="workspace-shell">
                 <header class="app-header">
                     <div class="header-brand">
-                        <A href="/objects/people" attr:class="header-logo">"nudge"</A>
+                        <A href="/objects/people" attr:class="header-logo">
+                            <span class="header-logo-art" inner_html=move || match theme.get() {
+                                Scheme::Light => LOGO_LIGHT,
+                                Scheme::Dark => LOGO_DARK,
+                            }></span>
+                        </A>
                         <span class="header-divider"></span>
                         <button class="workspace-switcher">
                             <span class="workspace-avatar">"R"</span>
