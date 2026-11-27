@@ -1823,6 +1823,8 @@ mod db_tests {
         FieldSelection {
             alias: None,
             name: name.to_string(),
+            line: 1,
+            column: 1,
             arguments: vec![("input".to_string(), input)],
             selection: Vec::new(),
             spreads: Vec::new(),

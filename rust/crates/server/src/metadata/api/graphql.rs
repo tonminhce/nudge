@@ -27,6 +27,8 @@ impl OperationKind {
 pub struct FieldSelection {
     pub alias: Option<String>,
     pub name: String,
+    pub line: usize,
+    pub column: usize,
     pub arguments: Vec<(String, Value)>,
     pub selection: Vec<FieldSelection>,
     pub spreads: Vec<String>,
@@ -551,6 +553,15 @@ impl<'a> Parser<'a> {
         scope: &mut Scope,
         variables: &Value,
     ) -> Result<FieldSelection, GraphQlError> {
+        let start = self.position;
+        let prefix = &self.input[..start];
+        let line = prefix.iter().filter(|byte| **byte == b'\n').count() + 1;
+        let column = prefix
+            .iter()
+            .rev()
+            .take_while(|byte| **byte != b'\n')
+            .count()
+            + 1;
         let mut alias = None;
 
         let mut name = self.read_name()?;
@@ -588,6 +599,8 @@ impl<'a> Parser<'a> {
         Ok(FieldSelection {
             alias,
             name,
+            line,
+            column,
             arguments,
             selection,
             spreads,
@@ -963,6 +976,14 @@ mod tests {
 
         assert_eq!(document.operations[0].kind, OperationKind::Query);
         assert_eq!(document.operations[0].fields[0].name, "objects");
+    }
+
+    #[test]
+    fn field_locations_track_line_and_column() {
+        let document = parse("query nope { nonexistentField }", json!({})).unwrap();
+        let field = &document.operations[0].fields[0];
+        assert_eq!(field.line, 1);
+        assert_eq!(field.column, 14);
     }
 
     #[test]
