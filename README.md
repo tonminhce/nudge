@@ -1,5 +1,23 @@
 <p align="center">
-  <img src="nudge.png" alt="nudge" width="420">
+  <picture>
+    <source
+      srcset=".github/assets/logo-nudge-dark.svg"
+      media="(prefers-color-scheme: dark)"
+    >
+    <source
+      srcset=".github/assets/logo-nudge-light.svg"
+      media="(prefers-color-scheme: light)"
+    >
+    <img
+      src=".github/assets/logo-nudge-light.svg"
+      alt="Nudge logo"
+      width="360"
+    >
+  </picture>
+</p>
+
+<p align="center">
+  The super lightweight CRM.
 </p>
 
 <h1 align="center">Nudge</h1>
