@@ -128,18 +128,23 @@ pub fn AuthPage() -> impl IntoView {
 
     view! {
         <main class="auth-layout">
-            <section class="auth-card" aria-label="Welcome to Nudge">
+            <section
+                class=move || if step.get() == AuthStep::Password { "auth-card auth-card-password" } else { "auth-card" }
+                aria-label="Welcome to Nudge"
+            >
                 <div class="auth-brand">
-                    <div class="auth-logo" inner_html=LOGO_MARK></div>
-                    <span class="auth-workspace-badge">"N"</span>
+                    <a href="/welcome" class="auth-logo" inner_html=LOGO_MARK></a>
+                    <span class="auth-workspace-badge-wrap"><span class="auth-workspace-badge"><span>"N"</span></span></span>
                 </div>
                 <div class="auth-heading"><h1>"Welcome, Nudge."</h1></div>
                 <form class="auth-form" on:submit=move |event| {
                     event.prevent_default();
                     submit();
                 }>
-                    <input class="t-input auth-input" type="text" inputmode="email" autocomplete="email" required
-                        placeholder="Email" bind:value=email />
+                    <div class="auth-field">
+                        <input class="t-input auth-input" autocomplete="email"
+                            placeholder="Email" bind:value=email />
+                    </div>
                     {move || match step.get() {
                         AuthStep::Email => ().into_any(),
                         AuthStep::Password => view! {
@@ -147,73 +152,89 @@ pub fn AuthPage() -> impl IntoView {
                                 <input
                                     class="t-input auth-input"
                                     type=move || if password_visible.get() { "text" } else { "password" }
-                                    autocomplete=move || if user_exists.get() { "current-password" } else { "new-password" }
-                                    minlength=8
-                                    required
-                                    autofocus=true
+                                    autocomplete="off"
+                                    aria-describedby=move || (!user_exists.get()).then_some("auth-password-hint")
                                     placeholder="Password"
                                     bind:value=password
                                 />
-                                <button
-                                    type="button"
-                                    class="auth-password-toggle"
-                                    aria-label=move || if password_visible.get() { "Hide password" } else { "Show password" }
-                                    on:click=move |_| password_visible.update(|visible| *visible = !*visible)
-                                >
-                                    {move || {
-                                        if password_visible.get() {
-                                            view! { <Icon name="eye-off" size=16/> }.into_any()
-                                        } else {
-                                            view! { <Icon name="eye" size=16/> }.into_any()
-                                        }
-                                    }}
-                                </button>
+                                <div class="auth-password-reveal">
+                                    <div
+                                        data-testid="reveal-password-button"
+                                        class="auth-password-toggle"
+                                        on:click=move |_| password_visible.update(|visible| *visible = !*visible)
+                                    >
+                                        {move || {
+                                            if password_visible.get() {
+                                                view! { <Icon name="eye-off" size=16/> }.into_any()
+                                            } else {
+                                                view! { <Icon name="eye" size=16/> }.into_any()
+                                            }
+                                        }}
+                                    </div>
+                                </div>
                             </div>
                             {if user_exists.get() {
                                 None
                             } else {
-                                Some(view! { <div class="auth-password-hint">{"At least 8 characters long."}</div> })
+                                Some(view! { <p id="auth-password-hint" class="auth-password-hint">{"At least 8 characters long."}</p> })
                             }}
                         }.into_any(),
                     }}
                     {move || error.get().map(|message| view! { <div class="auth-error" role="alert">{message}</div> })}
+                    <div class="auth-submit-row">
+                        <button
+                            class="t-button auth-submit"
+                            type="submit"
+                            disabled=move || {
+                                loading.get()
+                                    || (step.get() == AuthStep::Password
+                                        && password.get().chars().count() < 8)
+                            }
+                            data-variant="solid"
+                            data-color="neutral"
+                            data-size="md"
+                            data-full-width="true"
+                            data-elevated="true"
+                        >
+                            <span class="t-button-content">
+                                <span class="t-button-label">
+                                    {move || {
+                                        if loading.get() {
+                                            "Please wait...".to_string()
+                                        } else {
+                                            match step.get() {
+                                                AuthStep::Email => "Continue".to_string(),
+                                                AuthStep::Password if user_exists.get() => "Sign in".to_string(),
+                                                AuthStep::Password => "Sign up".to_string(),
+                                            }
+                                        }
+                                    }}
+                                </span>
+                            </span>
+                        </button>
+                    </div>
+                </form>
+                <Show when=move || step.get() == AuthStep::Password fallback=|| ()>
                     <button
-                        class="t-button auth-submit"
-                        type="submit"
-                        disabled=move || {
-                            loading.get()
-                                || (step.get() == AuthStep::Password
-                                    && password.get().chars().count() < 8)
-                        }
-                        data-variant="solid"
+                        type="button"
+                        class="auth-forgot"
+                        data-variant="link"
                         data-color="neutral"
                         data-size="md"
-                        data-full-width="true"
-                        data-elevated="true"
+                        on:click=move |_| forgot_password()
                     >
-                        {move || {
-                            if loading.get() {
-                                "Please wait...".to_string()
-                            } else {
-                                match step.get() {
-                                    AuthStep::Email => "Continue".to_string(),
-                                    AuthStep::Password if user_exists.get() => "Sign in".to_string(),
-                                    AuthStep::Password => "Sign up".to_string(),
-                                }
-                            }
-                        }}
+                        <span class="t-button-content">
+                            <span class="t-button-label">{"Forgot your password?"}</span>
+                        </span>
                     </button>
-                    <Show when=move || step.get() == AuthStep::Password fallback=|| ()>
-                        <button type="button" class="auth-forgot" on:click=move |_| forgot_password()>
-                            {"Forgot your password?"}
-                        </button>
-                    </Show>
-                </form>
-                <footer class="auth-footer">
-                    <a href="/privacy-policy">"Privacy Policy"</a>
-                    <span>"•"</span>
-                    <a href="/terms">"Terms of Service"</a>
-                </footer>
+                </Show>
+                <Show when=move || step.get() == AuthStep::Email fallback=|| ()>
+                    <div class="auth-footer">
+                        <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">"Privacy Policy"</a>
+                        <span>"•"</span>
+                        <a href="/terms" target="_blank" rel="noopener noreferrer">"Terms of Service"</a>
+                    </div>
+                </Show>
             </section>
             <Show when=move || notice.get().is_some() fallback=|| ()>
                 <ToastViewport>

@@ -84,6 +84,16 @@ function browserExtractor(selectors) {
   };
 }
 
+const VISUAL_STYLE_KEYS = [
+  'display', 'position', 'flexDirection', 'flexWrap', 'alignItems', 'alignSelf',
+  'justifyContent', 'gap', 'color', 'background', 'backgroundColor', 'backgroundImage',
+  'border', 'borderRadius', 'outline', 'boxShadow', 'opacity', 'fontFamily', 'fontSize',
+  'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'textAlign', 'textDecoration',
+  'textTransform', 'whiteSpace', 'overflow', 'overflowX', 'overflowY', 'transform',
+  'animationDuration', 'animationTimingFunction', 'animationDelay', 'animationFillMode',
+  'animationPlayState',
+];
+
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -127,6 +137,15 @@ export function diffSurfaces(reference, nudge, options = {}) {
   const keys = [...new Set([...Object.keys(referenceFlat), ...Object.keys(nudgeFlat)])].sort();
   const differences = [];
   for (const key of keys) {
+    if (options.visualOnly) {
+      if (/\.(children\[|attributes\.|text$|tag$|svg\.markup)/.test(key)) {
+        continue;
+      }
+      const styleKey = key.match(/\.style\.([^.]+)$/)?.[1];
+      if (styleKey && !VISUAL_STYLE_KEYS.includes(styleKey)) {
+        continue;
+      }
+    }
     if (ignored.some((path) => key === path || key.startsWith(`${path}.`) || key.startsWith(`${path}[`))) {
       continue;
     }

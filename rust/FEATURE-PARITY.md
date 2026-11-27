@@ -24,10 +24,11 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 - Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
 - Quality gates: fmt clean, clippy `-D warnings` clean, **92 core + 468 server tests** pass.
-- Frontend gates: Trunk release build, native clippy/tests and `wasm32-unknown-unknown` check pass; 32 front-core tests, 138 front-ui tests and 15 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
+- Frontend gates: `tools/build-frontend.sh`, native clippy/tests and `wasm32-unknown-unknown` check pass; 32 front-core tests, 138 front-ui tests and 15 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
 - Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Real pointer interactions pass for reset, sorting, selection, row activation, popover, collapsible and toast. The welcome heading/font metrics now match the reference; authenticated product-surface parity remains open.
 - Auth browser checkpoint: new and existing email branches match the reference labels and layout; 8-character validation, password visibility and the password-reset notice work against the local auth endpoints. The reset toast uses the shared reference-matched `Toast` primitive, Web Animations timing, manual close and timed auto-dismiss; `parity/ui/toast-diff.json` records a zero-difference visual diff.
-- UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. The reusable DOM/style/icon/animation harness is `tools/ui-parity-harness.mjs`; toast evidence is under `parity/ui/`. These are evidence snapshots, not a full-parity certificate.
+- Auth surface checkpoint: the exact upstream Inter 400/500/600 font files are bundled. `parity/ui/welcome-diff.json`, `parity/ui/password-diff.json` and `parity/ui/signin-diff.json` each record a zero-difference visual diff against Twenty 2.61.0.
+- UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. The reusable DOM/style/icon/animation harness is `tools/ui-parity-harness.mjs`; toast and auth evidence is under `parity/ui/`. These are evidence snapshots, not a full-parity certificate.
 
 ## A. Data model and metadata engine
 
