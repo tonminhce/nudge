@@ -7,10 +7,18 @@ pub mod order;
 pub mod repository;
 pub mod runner;
 
+pub use runner::aggregate;
 pub use runner::find_many;
 pub use runner::find_one;
+pub use runner::group_by;
+pub use runner::Aggregate;
+pub use runner::AggregateOperation;
+pub use runner::AggregateValue;
 pub use runner::FindManyArgs;
 pub use runner::FindManyResult;
+pub use runner::Granularity;
+pub use runner::GroupByDefinition;
+pub use runner::GroupByRow;
 pub use runner::NestedRelationSelection;
 pub use runner::RunnerError;
 pub use runner::RunnerSchema;

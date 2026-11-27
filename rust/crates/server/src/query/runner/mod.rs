@@ -6,11 +6,21 @@ use crate::query::order::OrderError;
 use crate::query::repository::table_shape::ColumnShape;
 use crate::query::repository::table_shape::TableShape;
 
+pub mod aggregate;
 pub mod base;
 pub mod find_many;
 pub mod find_one;
+pub mod group_by;
 pub mod nested;
+#[cfg(test)]
+pub(crate) mod test_support;
 
+pub use aggregate::aggregate;
+pub use aggregate::aggregate_expression;
+pub use aggregate::aggregate_result_name;
+pub use aggregate::Aggregate;
+pub use aggregate::AggregateOperation;
+pub use aggregate::AggregateValue;
 pub use base::RunnerSchema;
 pub use base::COMMON_QUERY_COMPLEXITY_LIMIT;
 pub use base::DEFAULT_PAGE_SIZE;
@@ -22,6 +32,12 @@ pub use find_many::FindManyArgs;
 pub use find_many::FindManyResult;
 pub use find_many::NestedRelationSelection;
 pub use find_one::find_one;
+pub use group_by::group_by;
+pub use group_by::group_expression;
+pub use group_by::Granularity;
+pub use group_by::GroupByDefinition;
+pub use group_by::GroupByRow;
+pub use group_by::DEFAULT_NUMBER_OF_GROUPS_LIMIT;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunnerError {
