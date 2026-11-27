@@ -1,4 +1,5 @@
 use front_core::client::GraphQLClient;
+use front_ui::icons::Icon;
 use front_ui::icons::IconSettings;
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -10,6 +11,7 @@ use crate::app::AuthState;
 use crate::records::load_object_metadata;
 use crate::records::records_from_response;
 use crate::records::update_record;
+use crate::side_panel::RecordSidePanel;
 
 #[component]
 pub fn RecordShowPage() -> impl IntoView {
@@ -21,6 +23,7 @@ pub fn RecordShowPage() -> impl IntoView {
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let editing = RwSignal::new(false);
+    let show_side_panel = RwSignal::new(false);
     let draft_first_name = RwSignal::new(String::new());
     let draft_last_name = RwSignal::new(String::new());
     let draft_email = RwSignal::new(String::new());
@@ -192,6 +195,10 @@ pub fn RecordShowPage() -> impl IntoView {
                 <A href="/objects/people" attr:class="breadcrumb">"People"</A>
                 <span>" / "</span>
                 <h1>{move || singular_name.get()}</h1>
+                <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
+                    aria-label="Open record details" on:click=move |_| show_side_panel.set(!show_side_panel.get())>
+                    <Icon name="layout-sidebar-right" size=16 />
+                </button>
                 <Show when=move || singular_name.get() == "person" fallback=|| view! { <span /> }>
                     <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
                         on:click=move |_| start_edit()>"Edit"</button>
@@ -256,6 +263,7 @@ pub fn RecordShowPage() -> impl IntoView {
                             </form>
                         </Show>
                     </section>
+                    <RecordSidePanel record=record.clone() open=show_side_panel />
                 })}
             </Show>
         </div>
@@ -378,7 +386,7 @@ pub fn NotFoundPage() -> impl IntoView {
     }
 }
 
-fn display_name(record: &Value) -> String {
+pub(crate) fn display_name(record: &Value) -> String {
     let first = record["name"]["firstName"].as_str().unwrap_or_default();
     let last = record["name"]["lastName"].as_str().unwrap_or_default();
     match (first.is_empty(), last.is_empty()) {
@@ -389,14 +397,14 @@ fn display_name(record: &Value) -> String {
     }
 }
 
-fn primary_email(record: &Value) -> String {
+pub(crate) fn primary_email(record: &Value) -> String {
     record["emails"]["primaryEmail"]
         .as_str()
         .unwrap_or_default()
         .to_string()
 }
 
-fn created_at(record: &Value) -> String {
+pub(crate) fn created_at(record: &Value) -> String {
     record["createdAt"].as_str().unwrap_or_default().to_string()
 }
 

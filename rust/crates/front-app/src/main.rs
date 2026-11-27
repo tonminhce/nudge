@@ -11,6 +11,7 @@ mod pages;
 mod record_index;
 mod record_views;
 mod records;
+mod side_panel;
 
 use app::App;
 
