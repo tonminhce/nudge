@@ -14,8 +14,6 @@ use crate::app::server_url;
 use crate::app::write_storage;
 use crate::app::AuthState;
 
-const LOGO_MARK: &str = include_str!("../assets/nudge-mark.svg");
-
 #[component]
 pub fn ThemeToggle() -> impl IntoView {
     let theme = expect_context::<RwSignal<Scheme>>();
@@ -140,22 +138,24 @@ pub fn AuthPage() -> impl IntoView {
     };
 
     view! {
-        <main class="auth-layout">
+        <div class="auth-layout">
             <section
                 class=move || if step.get() == AuthStep::Password { "auth-card auth-card-password" } else { "auth-card" }
                 aria-label="Welcome to Nudge"
             >
                 <div class="auth-brand">
-                    <a href="/welcome" class="auth-logo" inner_html=LOGO_MARK></a>
-                    <span class="auth-workspace-badge-wrap"><span class="auth-workspace-badge"><span>"N"</span></span></span>
+                    <a href="/welcome" class="auth-logo" data-discover="true">
+                        <div class="auth-logo-mark"></div>
+                    </a>
+                    <span class="auth-workspace-badge-wrap"><span class="auth-workspace-badge" data-size="lg" data-shape="square"><span>"N"</span></span></span>
                 </div>
-                <div class="auth-heading"><h1>"Welcome, Nudge."</h1></div>
+                <div class="auth-heading"><div class="auth-heading-text" data-duration="normal">"Welcome, Nudge."</div></div>
                 <form class="auth-form" on:submit=move |event| {
                     event.prevent_default();
                     submit();
                 }>
                     <div class="auth-field">
-                        <input class="t-input auth-input" autocomplete="email"
+                        <input class="t-input auth-input" autocomplete="email" tabindex="0" value=""
                             placeholder="Email" bind:value=email
                             on:input=move |_| {
                                 if step.get() == AuthStep::Password {
@@ -207,6 +207,7 @@ pub fn AuthPage() -> impl IntoView {
                         <button
                             class="t-button auth-submit"
                             type="submit"
+                            tabindex="0"
                             disabled=move || {
                                 loading.get()
                                     || (step.get() == AuthStep::Password
@@ -271,7 +272,7 @@ pub fn AuthPage() -> impl IntoView {
                     />
                 </ToastViewport>
             </Show>
-        </main>
+        </div>
     }
 }
 

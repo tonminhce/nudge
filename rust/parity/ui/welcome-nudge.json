@@ -1,10 +1,10 @@
 {
   "capture": {
     "selectors": {
-      "layout": "main",
+      "layout": ".auth-layout",
       "logo": ".auth-logo",
       "badge": ".auth-workspace-badge",
-      "heading": ".auth-heading h1",
+      "heading": ".auth-heading-text",
       "form": ".auth-form",
       "email": ".auth-input",
       "submit": ".auth-submit",
@@ -29,7 +29,9 @@
     "badge": {
       "animations": [],
       "attributes": {
-        "class": "auth-workspace-badge"
+        "class": "auth-workspace-badge",
+        "data-shape": "square",
+        "data-size": "lg"
       },
       "children": [
         {
@@ -120,7 +122,9 @@
       "attributes": {
         "autocomplete": "email",
         "class": "t-input auth-input",
-        "placeholder": "Email"
+        "placeholder": "Email",
+        "tabindex": "0",
+        "value": ""
       },
       "children": [],
       "found": true,
@@ -314,8 +318,8 @@
       "children": [
         {
           "rect": {
-            "bottom": 318,
-            "height": 32,
+            "bottom": 306,
+            "height": 44,
             "right": 317.5,
             "width": 440,
             "x": 317.5,
@@ -409,7 +413,10 @@
     },
     "heading": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "auth-heading-text",
+        "data-duration": "normal"
+      },
       "children": [],
       "found": true,
       "matchCount": 1,
@@ -478,7 +485,7 @@
         "zIndex": "auto"
       },
       "svg": null,
-      "tag": "H1",
+      "tag": "DIV",
       "text": "Welcome, Nudge."
     },
     "layout": {
@@ -511,7 +518,7 @@
         "y": 0
       },
       "style": {
-        "alignItems": "center",
+        "alignItems": "normal",
         "alignSelf": "auto",
         "animationDelay": "0s",
         "animationDuration": "0s",
@@ -519,12 +526,12 @@
         "animationName": "none",
         "animationPlayState": "running",
         "animationTimingFunction": "ease",
-        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
-        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "background": "color(display-p3 0.988 0.988 0.988) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "color(display-p3 0.988 0.988 0.988)",
         "backgroundImage": "none",
         "border": "0px none color(display-p3 0.2 0.2 0.2)",
         "borderRadius": "0px",
-        "bottom": "auto",
+        "bottom": "0px",
         "boxShadow": "none",
         "color": "color(display-p3 0.2 0.2 0.2)",
         "display": "flex",
@@ -538,62 +545,43 @@
         "gridTemplateColumns": "none",
         "gridTemplateRows": "none",
         "height": "769px",
-        "inset": "auto",
-        "justifyContent": "center",
-        "left": "auto",
+        "inset": "0px",
+        "justifyContent": "normal",
+        "left": "0px",
         "letterSpacing": "normal",
         "lineHeight": "normal",
         "margin": "0px",
         "maxHeight": "none",
         "maxWidth": "none",
-        "minHeight": "769px",
+        "minHeight": "0px",
         "minWidth": "0px",
         "opacity": "1",
         "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
         "overflow": "visible",
         "overflowX": "visible",
         "overflowY": "visible",
-        "padding": "40px",
-        "position": "static",
-        "right": "auto",
+        "padding": "0px",
+        "position": "relative",
+        "right": "0px",
         "textAlign": "start",
         "textDecoration": "none",
         "textTransform": "none",
-        "top": "auto",
+        "top": "0px",
         "transform": "none",
         "transition": "all",
         "whiteSpace": "normal",
         "width": "1075px",
         "zIndex": "auto"
       },
-      "svg": {
-        "height": null,
-        "markup": {
-          "attributes": {
-            "fill": "none",
-            "viewBox": "0 0 32 32",
-            "xmlns": "http://www.w3.org/2000/svg"
-          },
-          "innerHTML": "\n  <rect width=\"32\" height=\"32\" rx=\"8\" fill=\"#4762D9\"></rect>\n  <path d=\"M8 10h7v12H8V10Zm9 0h7v12h-7V10Z\" fill=\"white\"></path>\n"
-        },
-        "rect": {
-          "bottom": 502,
-          "height": 48,
-          "right": 513.5,
-          "width": 48,
-          "x": 513.5,
-          "y": 219
-        },
-        "stroke": null,
-        "width": null
-      },
-      "tag": "MAIN",
+      "svg": null,
+      "tag": "DIV",
       "text": "NWelcome, Nudge.ContinuePrivacy Policy•Terms of Service"
     },
     "logo": {
       "animations": [],
       "attributes": {
         "class": "auth-logo",
+        "data-discover": "true",
         "href": "/welcome"
       },
       "children": [
@@ -606,7 +594,7 @@
             "x": 513.5,
             "y": 219
           },
-          "tag": "svg",
+          "tag": "DIV",
           "text": ""
         }
       ],
@@ -632,11 +620,11 @@
         "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
         "backgroundColor": "rgba(0, 0, 0, 0)",
         "backgroundImage": "none",
-        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "border": "0px none rgb(0, 0, 238)",
         "borderRadius": "0px",
         "bottom": "auto",
         "boxShadow": "none",
-        "color": "color(display-p3 0.2 0.2 0.2)",
+        "color": "rgb(0, 0, 238)",
         "display": "inline",
         "flexDirection": "row",
         "flexWrap": "nowrap",
@@ -647,7 +635,7 @@
         "gap": "normal",
         "gridTemplateColumns": "none",
         "gridTemplateRows": "none",
-        "height": "48px",
+        "height": "auto",
         "inset": "auto",
         "justifyContent": "normal",
         "left": "auto",
@@ -659,7 +647,7 @@
         "minHeight": "0px",
         "minWidth": "0px",
         "opacity": "1",
-        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "outline": "rgb(0, 0, 238) none 3px",
         "overflow": "visible",
         "overflowX": "visible",
         "overflowY": "visible",
@@ -673,30 +661,10 @@
         "transform": "none",
         "transition": "all",
         "whiteSpace": "normal",
-        "width": "48px",
+        "width": "auto",
         "zIndex": "auto"
       },
-      "svg": {
-        "height": null,
-        "markup": {
-          "attributes": {
-            "fill": "none",
-            "viewBox": "0 0 32 32",
-            "xmlns": "http://www.w3.org/2000/svg"
-          },
-          "innerHTML": "\n  <rect width=\"32\" height=\"32\" rx=\"8\" fill=\"#4762D9\"></rect>\n  <path d=\"M8 10h7v12H8V10Zm9 0h7v12h-7V10Z\" fill=\"white\"></path>\n"
-        },
-        "rect": {
-          "bottom": 502,
-          "height": 48,
-          "right": 513.5,
-          "width": 48,
-          "x": 513.5,
-          "y": 219
-        },
-        "stroke": null,
-        "width": null
-      },
+      "svg": null,
       "tag": "A",
       "text": ""
     },
@@ -727,7 +695,7 @@
         "animationName": "none",
         "animationPlayState": "running",
         "animationTimingFunction": "ease",
-        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0px 0px / auto padding-box border-box",
         "backgroundColor": "rgba(0, 0, 0, 0)",
         "backgroundImage": "none",
         "border": "0px none color(display-p3 0.6 0.6 0.6)",
@@ -787,6 +755,7 @@
         "data-full-width": "true",
         "data-size": "md",
         "data-variant": "solid",
+        "tabindex": "0",
         "type": "submit"
       },
       "children": [
@@ -900,7 +869,7 @@
         "animationName": "none",
         "animationPlayState": "running",
         "animationTimingFunction": "ease",
-        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0px 0px / auto padding-box border-box",
         "backgroundColor": "rgba(0, 0, 0, 0)",
         "backgroundImage": "none",
         "border": "0px none color(display-p3 0.6 0.6 0.6)",

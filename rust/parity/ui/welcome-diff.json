@@ -27,6 +27,10 @@
     "selectors.heading.attributes.class",
     "selectors.heading.attributes.id",
     "selectors.heading.attributes.style",
+    "selectors.heading.rect.right",
+    "selectors.heading.rect.width",
+    "selectors.heading.rect.x",
+    "selectors.heading.style.animationName",
     "selectors.heading.text",
     "selectors.layout.attributes.class",
     "selectors.layout.attributes.id",
@@ -57,7 +61,7 @@
         "layout": "#root > div:last-child",
         "logo": "a[href=\"/welcome\"]",
         "badge": "a[href=\"/welcome\"] + div > span",
-        "heading": "#root .sfyinng > div",
+        "heading": "#root .sfyinng > div > div",
         "form": "form",
         "email": "input[autocomplete=email]",
         "submit": "button[type=submit]",
@@ -72,10 +76,10 @@
     },
     "nudge": {
       "selectors": {
-        "layout": "main",
+        "layout": ".auth-layout",
         "logo": ".auth-logo",
         "badge": ".auth-workspace-badge",
-        "heading": ".auth-heading h1",
+        "heading": ".auth-heading-text",
         "form": ".auth-form",
         "email": ".auth-input",
         "submit": ".auth-submit",
@@ -89,16 +93,8 @@
       "fullPage": false
     }
   },
-  "differenceCount": 56,
+  "differenceCount": 12,
   "differences": [
-    {
-      "path": "selectors.badge.attributes.data-shape",
-      "reference": "square"
-    },
-    {
-      "path": "selectors.badge.attributes.data-size",
-      "reference": "lg"
-    },
     {
       "path": "selectors.badge.rect.bottom",
       "reference": 492.015625,
@@ -120,14 +116,6 @@
       "path": "selectors.badge.style.minWidth",
       "reference": "auto",
       "nudge": "0px"
-    },
-    {
-      "path": "selectors.email.attributes.tabindex",
-      "reference": "0"
-    },
-    {
-      "path": "selectors.email.attributes.value",
-      "reference": ""
     },
     {
       "path": "selectors.email.style.minHeight",
@@ -155,165 +143,9 @@
       "nudge": "0px"
     },
     {
-      "path": "selectors.form.children[0].rect.bottom",
-      "reference": 306,
-      "nudge": 318,
-      "delta": 12
-    },
-    {
-      "path": "selectors.form.children[0].rect.height",
-      "reference": 44,
-      "nudge": 32,
-      "delta": -12
-    },
-    {
-      "path": "selectors.heading.children[0].rect.bottom",
-      "reference": 406
-    },
-    {
-      "path": "selectors.heading.children[0].rect.height",
-      "reference": 24.015625
-    },
-    {
-      "path": "selectors.heading.children[0].rect.right",
-      "reference": 392.25
-    },
-    {
-      "path": "selectors.heading.children[0].rect.width",
-      "reference": 290.5
-    },
-    {
-      "path": "selectors.heading.children[0].rect.x",
-      "reference": 392.25
-    },
-    {
-      "path": "selectors.heading.children[0].rect.y",
-      "reference": 338.984375
-    },
-    {
-      "path": "selectors.heading.children[0].tag",
-      "reference": "DIV"
-    },
-    {
-      "path": "selectors.heading.children[0].text",
-      "reference": "Welcome, WL Cookie Second."
-    },
-    {
-      "path": "selectors.heading.rect.right",
-      "reference": 392.25,
-      "nudge": 451.546875,
-      "delta": 59.296875
-    },
-    {
-      "path": "selectors.heading.rect.width",
-      "reference": 290.5,
-      "nudge": 171.921875,
-      "delta": -118.578125
-    },
-    {
-      "path": "selectors.heading.rect.x",
-      "reference": 392.25,
-      "nudge": 451.53125,
-      "delta": 59.28125
-    },
-    {
-      "path": "selectors.heading.style.animationDuration",
-      "reference": "0s",
-      "nudge": "0.3s"
-    },
-    {
-      "path": "selectors.heading.style.animationName",
-      "reference": "none",
-      "nudge": "auth-fade-in"
-    },
-    {
-      "path": "selectors.heading.style.animationTimingFunction",
-      "reference": "ease",
-      "nudge": "linear"
-    },
-    {
-      "path": "selectors.heading.style.margin",
-      "reference": "16px 0px",
-      "nudge": "0px"
-    },
-    {
       "path": "selectors.heading.style.width",
       "reference": "290.5px",
       "nudge": "171.922px"
-    },
-    {
-      "path": "selectors.heading.tag",
-      "reference": "DIV",
-      "nudge": "H1"
-    },
-    {
-      "path": "selectors.layout.style.alignItems",
-      "reference": "normal",
-      "nudge": "center"
-    },
-    {
-      "path": "selectors.layout.style.background",
-      "reference": "color(display-p3 0.988 0.988 0.988) none repeat scroll 0% 0% / auto padding-box border-box",
-      "nudge": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box"
-    },
-    {
-      "path": "selectors.layout.style.backgroundColor",
-      "reference": "color(display-p3 0.988 0.988 0.988)",
-      "nudge": "rgba(0, 0, 0, 0)"
-    },
-    {
-      "path": "selectors.layout.style.bottom",
-      "reference": "0px",
-      "nudge": "auto"
-    },
-    {
-      "path": "selectors.layout.style.inset",
-      "reference": "0px",
-      "nudge": "auto"
-    },
-    {
-      "path": "selectors.layout.style.justifyContent",
-      "reference": "normal",
-      "nudge": "center"
-    },
-    {
-      "path": "selectors.layout.style.left",
-      "reference": "0px",
-      "nudge": "auto"
-    },
-    {
-      "path": "selectors.layout.style.minHeight",
-      "reference": "0px",
-      "nudge": "769px"
-    },
-    {
-      "path": "selectors.layout.style.padding",
-      "reference": "0px",
-      "nudge": "40px"
-    },
-    {
-      "path": "selectors.layout.style.position",
-      "reference": "relative",
-      "nudge": "static"
-    },
-    {
-      "path": "selectors.layout.style.right",
-      "reference": "0px",
-      "nudge": "auto"
-    },
-    {
-      "path": "selectors.layout.style.top",
-      "reference": "0px",
-      "nudge": "auto"
-    },
-    {
-      "path": "selectors.layout.tag",
-      "reference": "DIV",
-      "nudge": "MAIN"
-    },
-    {
-      "path": "selectors.logo.attributes.data-discover",
-      "reference": "true"
     },
     {
       "path": "selectors.logo.rect.bottom",
@@ -326,45 +158,6 @@
       "reference": 218.984375,
       "nudge": 219,
       "delta": 0.015625
-    },
-    {
-      "path": "selectors.logo.style.border",
-      "reference": "0px none rgb(0, 0, 238)",
-      "nudge": "0px none color(display-p3 0.2 0.2 0.2)"
-    },
-    {
-      "path": "selectors.logo.style.color",
-      "reference": "rgb(0, 0, 238)",
-      "nudge": "color(display-p3 0.2 0.2 0.2)"
-    },
-    {
-      "path": "selectors.logo.style.height",
-      "reference": "auto",
-      "nudge": "48px"
-    },
-    {
-      "path": "selectors.logo.style.outline",
-      "reference": "rgb(0, 0, 238) none 3px",
-      "nudge": "color(display-p3 0.2 0.2 0.2) none 3px"
-    },
-    {
-      "path": "selectors.logo.style.width",
-      "reference": "auto",
-      "nudge": "48px"
-    },
-    {
-      "path": "selectors.privacy.style.background",
-      "reference": "rgba(0, 0, 0, 0) none repeat scroll 0px 0px / auto padding-box border-box",
-      "nudge": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box"
-    },
-    {
-      "path": "selectors.submit.attributes.tabindex",
-      "reference": "0"
-    },
-    {
-      "path": "selectors.terms.style.background",
-      "reference": "rgba(0, 0, 0, 0) none repeat scroll 0px 0px / auto padding-box border-box",
-      "nudge": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box"
     }
   ]
 }

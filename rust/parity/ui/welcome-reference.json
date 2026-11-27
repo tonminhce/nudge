@@ -4,7 +4,7 @@
       "layout": "#root > div:last-child",
       "logo": "a[href=\"/welcome\"]",
       "badge": "a[href=\"/welcome\"] + div > span",
-      "heading": "#root .sfyinng > div",
+      "heading": "#root .sfyinng > div > div",
       "form": "form",
       "email": "input[autocomplete=email]",
       "submit": "button[type=submit]",
@@ -417,23 +417,10 @@
     "heading": {
       "animations": [],
       "attributes": {
-        "class": "sdtdivd",
-        "style": "--sdtdivd-0: var(--t-spacing-4);"
+        "class": "f5jqen4",
+        "data-duration": "normal"
       },
-      "children": [
-        {
-          "rect": {
-            "bottom": 406,
-            "height": 24.015625,
-            "right": 392.25,
-            "width": 290.5,
-            "x": 392.25,
-            "y": 338.984375
-          },
-          "tag": "DIV",
-          "text": "Welcome, WL Cookie Second."
-        }
-      ],
+      "children": [],
       "found": true,
       "matchCount": 1,
       "rect": {
@@ -448,11 +435,11 @@
         "alignItems": "normal",
         "alignSelf": "auto",
         "animationDelay": "0s",
-        "animationDuration": "0s",
+        "animationDuration": "0.3s",
         "animationFillMode": "none",
-        "animationName": "none",
+        "animationName": "animated-ease-in-animatedEaseInFadeIn-f5jqen4",
         "animationPlayState": "running",
-        "animationTimingFunction": "ease",
+        "animationTimingFunction": "linear",
         "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
         "backgroundColor": "rgba(0, 0, 0, 0)",
         "backgroundImage": "none",
@@ -477,7 +464,7 @@
         "left": "auto",
         "letterSpacing": "normal",
         "lineHeight": "24.024px",
-        "margin": "16px 0px",
+        "margin": "0px",
         "maxHeight": "none",
         "maxWidth": "none",
         "minHeight": "0px",
