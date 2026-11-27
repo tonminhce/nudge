@@ -16,6 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
+use tower_http::compression::CompressionLayer;
 
 use crate::auth;
 use crate::state::AppState;
@@ -34,6 +35,7 @@ pub fn router(state: AppState) -> Router {
             auth::csrf::cookie_session_csrf,
         ))
         .fallback(not_found_fallback)
+        .layer(CompressionLayer::new().br(true).gzip(true))
         .with_state(state)
 }
 
