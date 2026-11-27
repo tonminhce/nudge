@@ -15,7 +15,6 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub core_pool: PgPool,
     pub redis: Client,
-    #[expect(dead_code, reason = "used by the key rotation surface in a later wave")]
     pub signing_keys: Arc<SigningKeyManager>,
     pub jwt: Arc<JwtService>,
     pub metadata_cache: Arc<WorkspaceFlatMapsCache>,

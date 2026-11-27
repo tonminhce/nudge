@@ -18,10 +18,6 @@ const CURRENT_KEY_CACHE_TTL: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub struct SigningKeyPair {
     pub id: Uuid,
-    #[expect(
-        dead_code,
-        reason = "exposed for JWKS and rotation logging in later waves"
-    )]
     pub public_key_pem: String,
     pub private_key_pem: String,
 }

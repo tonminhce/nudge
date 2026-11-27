@@ -15,6 +15,7 @@ pub struct AuthContext {
     pub user_workspace_id: Option<Uuid>,
     pub workspace_member_id: Option<Uuid>,
     pub api_key_id: Option<Uuid>,
+    pub agent_id: Option<Uuid>,
     pub auth_provider: Option<String>,
     pub is_impersonating: bool,
 }
@@ -51,6 +52,7 @@ fn parse_payload(payload: &Value) -> AuthResult<AuthContext> {
                 user_workspace_id: None,
                 workspace_member_id: None,
                 api_key_id: uuid_claim(payload, "jti"),
+                agent_id: uuid_claim(payload, "agentId"),
                 auth_provider: None,
                 is_impersonating: false,
             })
@@ -62,6 +64,7 @@ fn parse_payload(payload: &Value) -> AuthResult<AuthContext> {
             user_workspace_id: None,
             workspace_member_id: None,
             api_key_id: None,
+            agent_id: uuid_claim(payload, "agentId"),
             auth_provider: string_claim(payload, "authProvider"),
             is_impersonating: false,
         }),
@@ -80,6 +83,7 @@ fn parse_payload(payload: &Value) -> AuthResult<AuthContext> {
                 user_workspace_id: uuid_claim(payload, "userWorkspaceId"),
                 workspace_member_id: uuid_claim(payload, "workspaceMemberId"),
                 api_key_id: None,
+                agent_id: uuid_claim(payload, "agentId"),
                 auth_provider: string_claim(payload, "authProvider"),
                 is_impersonating: payload
                     .get("isImpersonating")

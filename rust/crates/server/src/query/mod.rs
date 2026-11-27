@@ -2,6 +2,7 @@
 
 pub mod compile;
 pub mod cursor;
+pub mod entry;
 pub mod filter;
 pub mod order;
 pub mod repository;

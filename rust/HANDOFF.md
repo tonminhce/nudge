@@ -147,7 +147,21 @@ R-002 (verify auth behaviour against upstream, never guess).
     `UPSERT_MULTIPLE_MATCHING_RECORDS_CONFLICT`, strips `createdBy`, clears `deletedAt`,
     and updates the existing row. The DB-gated test proves actor/position stamps, update,
     soft-delete/restore visibility, destroy, and company upsert by `domainName.primaryLinkUrl`.
-  - Next: U6 GraphQL entry/schema, then U7 REST entry; wave 5 (Leptos front) spec
+  - U6 `query::entry` (branch `wave4/u6`): `/graphql` is mounted for POST JSON,
+    POST `application/graphql` and GET query parameters. Requests hydrate through the existing
+    bearer/session auth, refuse agent tokens (`INVALID_AUTH_CONTEXT`), classify top-level
+    roots into introspection / workspace / core, and reject core+workspace mixes with the
+    upstream split-request message (`BAD_USER_INPUT` / `CORE_WORKSPACE_MIX`). The workspace
+    resolver map follows `getResolverName`: `people`, `person`, `createPerson`,
+    `createPeople`, `updatePerson`, `deletePerson`, `destroyPerson`, `restorePerson`,
+    `peopleGroupBy`. Find-many returns the connection shape with real per-record cursors,
+    pageInfo and totalCount; findOne and create/update/delete/destroy/restore project the
+    selected record shape and load selected one-level relations. `currentUser` and
+    `currentWorkspace` are the first core resolvers. The metadata-derived introspection model
+    exposes `__schema` root types, object/connection/edge/pageInfo fields and `__type`; SDL is
+    available from `WorkspaceSchema::sdl()`. E2E covers unauthenticated, introspection,
+    connection, create/update/delete visibility, and the mix rejection.
+  - Next: U7 REST entry; then groupBy/root operation fan-out and wave 5 (Leptos front) spec
     `research/frontend-architecture.md`.
 
 ## How to run everything

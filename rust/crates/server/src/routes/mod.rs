@@ -18,6 +18,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .merge(auth_routes)
         .nest("/metadata", crate::metadata::api::router())
+        .nest("/graphql", crate::query::entry::graphql::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::csrf::cookie_session_csrf,
