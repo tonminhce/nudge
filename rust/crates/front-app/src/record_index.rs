@@ -9,6 +9,7 @@ use front_ui::icons::IconUsers;
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
+use leptos_router::hooks::use_query_map;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -59,6 +60,7 @@ pub fn virtual_range(scroll_top: usize, viewport_height: usize, total: usize) ->
 #[component]
 pub fn RecordIndexPage() -> impl IntoView {
     let params = use_params_map();
+    let query = use_query_map();
     let auth = expect_context::<AuthState>();
     let records = RwSignal::new(Vec::<Value>::new());
     let metadata = RwSignal::new(None::<ObjectMetadata>);
@@ -229,6 +231,12 @@ pub fn RecordIndexPage() -> impl IntoView {
             }
         });
     };
+
+    Effect::new(move || {
+        if query.get().get("create").is_some() {
+            open_create();
+        }
+    });
 
     let submit_create = move || {
         let Some(token) = auth.token.get() else {
@@ -521,7 +529,7 @@ pub fn RecordIndexPage() -> impl IntoView {
     }
 }
 
-fn text_filter(object: &str, query: &str) -> Option<Value> {
+pub(crate) fn text_filter(object: &str, query: &str) -> Option<Value> {
     let query = query.trim();
     if query.is_empty() {
         return None;

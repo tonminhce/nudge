@@ -25,6 +25,7 @@ const LOGO_DARK: &str = include_str!("../assets/nudge-logo-dark.svg");
 #[component]
 pub fn WorkspaceLayout() -> impl IntoView {
     let auth = expect_context::<AuthState>();
+    let command_menu_open = expect_context::<RwSignal<bool>>();
     let theme = expect_context::<RwSignal<Scheme>>();
     let navigate = use_navigate();
     let auth_for_effect = auth.clone();
@@ -63,7 +64,7 @@ pub fn WorkspaceLayout() -> impl IntoView {
                             <IconChevronDown size=14 />
                         </button>
                     </div>
-                    <button class="global-search">
+                    <button class="global-search" on:click=move |_| command_menu_open.set(true)>
                         <IconSearch size=16 />
                         <span>"Search"</span>
                         <kbd>"⌘ K"</kbd>

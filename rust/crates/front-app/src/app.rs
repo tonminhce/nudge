@@ -9,6 +9,7 @@ use leptos_router::path;
 use serde_json::Value;
 
 use crate::auth::AuthPage;
+use crate::command_menu::CommandMenu;
 use crate::layout::WorkspaceLayout;
 use crate::pages::NotFoundPage;
 use crate::pages::RecordShowPage;
@@ -93,6 +94,7 @@ pub fn App() -> impl IntoView {
     );
     provide_context(auth.clone());
     provide_context(theme);
+    provide_context(RwSignal::new(false));
 
     Effect::new(move |_| {
         let class = match theme.get() {
@@ -141,6 +143,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("*rest") view=NotFoundPage />
             </Routes>
         </Router>
+        <CommandMenu />
     }
 }
 
