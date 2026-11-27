@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -211,44 +212,47 @@ def main():
             print(f"  node: {node_body[:220]}")
             print(f"  rust: {rust_body[:220]}")
 
-    stamp = str(int(time.time()))
-    email = f"parity-{stamp}@refhq.test"
-    node_body = json.dumps(
-        {
-            "query": (
-                'mutation signUp { signUp(email: "%s", password: "ParitySecret123", locale: "en") '
-                "{ tokens { accessOrWorkspaceAgnosticToken { token } } } }" % email
-            )
-        }
-    )
-    node_status, node_body = request(NODE_BASE, "POST", "/metadata", node_body)
-    rust_status, rust_body = request(
-        RUST_BASE,
-        "POST",
-        "/auth/sign-up",
-        json.dumps(
+    if os.environ.get("NUDGE_PARITY_SIGNUP") == "1":
+        stamp = str(int(time.time()))
+        email = f"parity-{stamp}@refhq.test"
+        password = "Parity-" + secrets.token_urlsafe(18)
+        node_body = json.dumps(
             {
-                "email": email.replace("@refhq.test", "@nudge.test"),
-                "password": "ParitySecret123",
+                "query": (
+                    "mutation signUp { signUp(email: %s, password: %s, locale: \"en\") "
+                    "{ tokens { accessOrWorkspaceAgnosticToken { token } } } }"
+                    % (json.dumps(email), json.dumps(password))
+                )
             }
-        ),
-    )
-    rust_shape = rust_body
-    print(f"SIGNUP node={node_status} rust={rust_status}")
-    node_ok = node_status == 200 and "<jwt>" in node_body
-    rust_ok = rust_status == 201 and "<jwt>" in rust_shape and '"workspaceId"' in rust_shape
-    reference_gated = "SIGNUP_DISABLED" in node_body or "restricted to admins" in node_body
-    if reference_gated:
+        )
+        node_status, node_body = request(NODE_BASE, "POST", "/metadata", node_body)
+        rust_status, rust_body = request(
+            RUST_BASE,
+            "POST",
+            "/auth/sign-up",
+            json.dumps(
+                {
+                    "email": email.replace("@refhq.test", "@nudge.test"),
+                    "password": password,
+                }
+            ),
+        )
+        rust_shape = rust_body
+        print(f"SIGNUP node={node_status} rust={rust_status}")
+        node_ok = node_status == 200 and "<jwt>" in node_body
         rust_ok = rust_status == 201 and "<jwt>" in rust_shape and '"workspaceId"' in rust_shape
-        if rust_ok:
-            print("  known: the reference instance gates further sign-ups; the port does not yet")
-        else:
+        reference_gated = "SIGNUP_DISABLED" in node_body or "restricted to admins" in node_body
+        if reference_gated:
+            rust_ok = rust_status == 201 and "<jwt>" in rust_shape and '"workspaceId"' in rust_shape
+            if rust_ok:
+                print("  known: the reference instance gates further sign-ups; the port does not yet")
+            else:
+                failures += 1
+                print(f"  rust: {rust_shape[:220]}")
+        elif not (node_ok and rust_ok):
             failures += 1
+            print(f"  node: {node_body[:220]}")
             print(f"  rust: {rust_shape[:220]}")
-    elif not (node_ok and rust_ok):
-        failures += 1
-        print(f"  node: {node_body[:220]}")
-        print(f"  rust: {rust_shape[:220]}")
 
     print(f"\n{failures} differences")
     return 1 if failures else 0

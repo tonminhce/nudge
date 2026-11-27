@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -7,6 +8,9 @@ BASE = "http://127.0.0.1:3001/metadata"
 ORIGIN = "http://refhq.localhost:3001"
 EMAIL = f"owner-{int(time.time())}@refhq.test"
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
+PASSWORD = os.environ.get("TWENTY_REFERENCE_PASSWORD")
+if not PASSWORD:
+    raise SystemExit("TWENTY_REFERENCE_PASSWORD is required")
 
 
 def gql(query, token=None, origin=None):
@@ -25,8 +29,9 @@ def gql(query, token=None, origin=None):
 
 
 r = gql(
-    f'mutation signUp {{ signUp(email: "{EMAIL}", password: "ReferenceSecret123", locale: "en") '
+    "mutation signUp { signUp(email: %s, password: %s, locale: \"en\") "
     "{ tokens { accessOrWorkspaceAgnosticToken { token } } } }"
+    % (json.dumps(EMAIL), json.dumps(PASSWORD))
 )
 agnostic = r["signUp"]["tokens"]["accessOrWorkspaceAgnosticToken"]["token"]
 print("signed up", EMAIL)
