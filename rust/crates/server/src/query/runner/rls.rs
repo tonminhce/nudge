@@ -12,10 +12,15 @@ use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::names::compute_composite_column_name;
 use crate::permissions::ObjectRecordsOperationType;
 use crate::permissions::RowLevelRecordsPermissions;
+use crate::query::filter::compile_filter;
 use crate::query::filter::CompiledFilter;
+use crate::query::filter::FilterKeyInfo;
+use crate::query::filter::FilterSchema;
+use crate::query::filter::JoinOp;
+use crate::query::filter::Suffixes;
+use crate::query::filter::WhereClause;
 use crate::query::repository::quote_identifier;
 
-use super::base::compile_runner_filter;
 use super::base::RunnerSchema;
 use super::RunnerError;
 
@@ -24,43 +29,481 @@ pub async fn row_access_filter(
     schema: &RunnerSchema,
     object_name_singular: &str,
     operation: ObjectRecordsOperationType,
-    suffixes: &mut crate::query::filter::Suffixes,
+    suffixes: &mut Suffixes,
 ) -> Result<Option<CompiledFilter>, RunnerError> {
-    let model = schema.object(object_name_singular)?;
-    let Some(permissions) = schema.records_permissions() else {
-        return Ok(None);
+    row_access_filter_with_alias(
+        pool,
+        schema,
+        object_name_singular,
+        operation,
+        object_name_singular,
+        suffixes,
+    )
+    .await
+}
+
+pub(super) async fn row_access_filter_with_alias(
+    pool: &PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    operation: ObjectRecordsOperationType,
+    alias: &str,
+    suffixes: &mut Suffixes,
+) -> Result<Option<CompiledFilter>, RunnerError> {
+    let mut compiler = AccessCompiler {
+        pool,
+        schema,
+        suffixes,
+        member_values: HashMap::new(),
+        relation_stack: HashSet::new(),
     };
-    let Some(object) = permissions.object(model.object.id) else {
-        return Ok(None);
-    };
-    let operation = operation.enforced();
-    if object.operation_allowed(operation) {
-        return Ok(None);
+    compiler
+        .compile_access(object_name_singular, operation, alias, false)
+        .await
+}
+
+struct AccessCompiler<'a> {
+    pool: &'a PgPool,
+    schema: &'a RunnerSchema,
+    suffixes: &'a mut Suffixes,
+    member_values: HashMap<String, Value>,
+    relation_stack: HashSet<Uuid>,
+}
+
+struct AliasedFilterSchema<'a> {
+    schema: &'a RunnerSchema,
+    object_name: &'a str,
+}
+
+struct RelationPredicate<'a> {
+    field: &'a crate::metadata::flat::FlatFieldMetadata,
+    relation_field_id: Uuid,
+    full_name: bool,
+    operand: &'a str,
+    value: Value,
+    raw_filter: Option<Value>,
+    sub_field_name: Option<&'a str>,
+}
+
+impl FilterSchema for AliasedFilterSchema<'_> {
+    fn lookup(&self, _object_name: &str, key: &str) -> Option<FilterKeyInfo> {
+        self.schema.lookup(self.object_name, key)
     }
-    let rules = object
-        .row_level_records_permissions
-        .as_ref()
-        .into_iter()
-        .flatten()
-        .filter(|rule| rule_allows(rule, operation))
-        .collect::<Vec<_>>();
-    if rules.is_empty() {
-        return Ok(Some(unsatisfiable_filter()));
+}
+
+impl AccessCompiler<'_> {
+    async fn compile_access(
+        &mut self,
+        object_name: &str,
+        operation: ObjectRecordsOperationType,
+        alias: &str,
+        deny_missing: bool,
+    ) -> Result<Option<CompiledFilter>, RunnerError> {
+        let model = self.schema.object(object_name)?;
+        let Some(permissions) = self.schema.records_permissions() else {
+            return Ok(None);
+        };
+        let Some(object) = permissions.object(model.object.id) else {
+            return Ok(deny_missing.then(unsatisfiable_filter));
+        };
+        let operation = operation.enforced();
+        if object.operation_allowed(operation) {
+            return Ok(None);
+        }
+        let rules = object
+            .row_level_records_permissions
+            .as_ref()
+            .into_iter()
+            .flatten()
+            .filter(|rule| rule_allows(rule, operation))
+            .collect::<Vec<_>>();
+        if rules.is_empty() {
+            return Ok(Some(unsatisfiable_filter()));
+        }
+        if !self.relation_stack.insert(model.object.id) {
+            return Err(invalid("Row-level permission relation cycle detected"));
+        }
+        let result = self.compile_rules(object_name, alias, &rules).await;
+        self.relation_stack.remove(&model.object.id);
+        Ok(Some(result?))
     }
-    let mut member_values = HashMap::new();
-    let mut filters = Vec::with_capacity(rules.len());
-    for rule in rules {
-        filters.push(
-            compile_rule_value(pool, schema, object_name_singular, rule, &mut member_values)
-                .await?,
-        );
+
+    async fn compile_rules(
+        &mut self,
+        object_name: &str,
+        alias: &str,
+        rules: &[&RowLevelRecordsPermissions],
+    ) -> Result<CompiledFilter, RunnerError> {
+        let mut filters = Vec::with_capacity(rules.len());
+        for rule in rules {
+            filters.push(self.compile_rule(object_name, alias, rule).await?);
+        }
+        Ok(combine_compiled_filters(JoinOp::Or, filters))
     }
-    let filter = if filters.len() == 1 {
-        filters.remove(0)
-    } else {
-        json!({ "or": filters })
-    };
-    compile_runner_filter(schema, object_name_singular, Some(&filter), suffixes)
+
+    async fn compile_rule(
+        &mut self,
+        object_name: &str,
+        alias: &str,
+        rule: &RowLevelRecordsPermissions,
+    ) -> Result<CompiledFilter, RunnerError> {
+        let predicates = rule.predicates.as_slice();
+        let groups = rule.predicate_groups.as_slice();
+        let mut filters = Vec::new();
+        for predicate in predicates {
+            if predicate_group_id(predicate).is_none() {
+                filters.push(
+                    self.compile_predicate(object_name, alias, predicate)
+                        .await?,
+                );
+            }
+        }
+        let mut visiting = HashSet::new();
+        for group in groups {
+            if parent_group_id(group).is_none() {
+                filters.push(
+                    self.compile_group(
+                        object_name,
+                        alias,
+                        predicates,
+                        groups,
+                        group,
+                        &mut visiting,
+                    )
+                    .await?,
+                );
+            }
+        }
+        Ok(combine_compiled_filters(JoinOp::And, filters))
+    }
+
+    async fn compile_group(
+        &mut self,
+        object_name: &str,
+        alias: &str,
+        predicates: &[Value],
+        groups: &[Value],
+        group: &Value,
+        visiting: &mut HashSet<String>,
+    ) -> Result<CompiledFilter, RunnerError> {
+        let group_id = required_string(group, "id")?;
+        if !visiting.insert(group_id.to_string()) {
+            return Err(invalid(
+                "Row-level permission predicate group cycle detected",
+            ));
+        }
+        let mut filters = Vec::new();
+        for predicate in predicates {
+            if predicate_group_id(predicate).as_deref() == Some(group_id) {
+                filters.push(
+                    self.compile_predicate(object_name, alias, predicate)
+                        .await?,
+                );
+            }
+        }
+        for child in groups {
+            if parent_group_id(child).as_deref() == Some(group_id) {
+                filters.push(
+                    Box::pin(self.compile_group(
+                        object_name,
+                        alias,
+                        predicates,
+                        groups,
+                        child,
+                        visiting,
+                    ))
+                    .await?,
+                );
+            }
+        }
+        visiting.remove(group_id);
+        let operator = group
+            .get("logicalOperator")
+            .and_then(Value::as_str)
+            .unwrap_or("AND");
+        let operator = if operator == "OR" {
+            JoinOp::Or
+        } else {
+            JoinOp::And
+        };
+        Ok(combine_compiled_filters(operator, filters))
+    }
+
+    async fn compile_predicate(
+        &mut self,
+        object_name: &str,
+        alias: &str,
+        predicate: &Value,
+    ) -> Result<CompiledFilter, RunnerError> {
+        let field_id = required_uuid(predicate, "fieldMetadataId")?;
+        let field = self
+            .schema
+            .field_metadata(field_id)
+            .ok_or_else(|| invalid("Field metadata not found for row-level predicate"))?;
+        let operand = required_string(predicate, "operand")?;
+        let sub_field_name = optional_string(predicate, "subFieldName");
+        let relation_field_id = optional_uuid(predicate, "relationFieldMetadataId")?;
+        let member_relation_field_id =
+            optional_uuid(predicate, "workspaceMemberRelationFieldMetadataId")?;
+        if (relation_field_id.is_some() || member_relation_field_id.is_some())
+            && !self
+                .schema
+                .records_permissions()
+                .is_some_and(|permissions| permissions.relation_hop_enabled)
+        {
+            return Ok(unsatisfiable_filter());
+        }
+        let mut value = predicate.get("value").cloned().unwrap_or(Value::Null);
+        if let Some(member_field_id) = optional_uuid(predicate, "workspaceMemberFieldMetadataId")? {
+            value = resolve_member_value(
+                self.pool,
+                self.schema,
+                predicate,
+                member_field_id,
+                &mut self.member_values,
+            )
+            .await?;
+            if value.is_null() {
+                return Ok(unsatisfiable_filter());
+            }
+        }
+        if !matches!(
+            operand,
+            "IS_NOT_NULL"
+                | "IS_EMPTY"
+                | "IS_NOT_EMPTY"
+                | "IS_IN_PAST"
+                | "IS_IN_FUTURE"
+                | "IS_TODAY"
+        ) && (value.is_null()
+            || value.as_str() == Some("")
+            || value.as_str() == Some("[]")
+            || value.as_array().is_some_and(Vec::is_empty))
+        {
+            return Ok(unsatisfiable_filter());
+        }
+        let full_name = field.field_type == FieldMetadataType::FullName && sub_field_name.is_none();
+        let raw_filter = (!full_name)
+            .then(|| {
+                operand_filter(
+                    field.field_type,
+                    operand,
+                    sub_field_name.as_deref(),
+                    value.clone(),
+                )
+            })
+            .transpose()?;
+        if let Some(relation_field_id) = relation_field_id {
+            return self
+                .compile_relation_predicate(
+                    object_name,
+                    alias,
+                    RelationPredicate {
+                        field,
+                        relation_field_id,
+                        full_name,
+                        operand,
+                        value,
+                        raw_filter,
+                        sub_field_name: sub_field_name.as_deref(),
+                    },
+                )
+                .await;
+        }
+        let filter = if matches!(
+            field.field_type,
+            FieldMetadataType::Relation | FieldMetadataType::MorphRelation
+        ) {
+            let model = self.schema.object(object_name)?;
+            let join_column = model
+                .shape
+                .relation(&field.name)
+                .and_then(|relation| relation.join_column_name.clone())
+                .ok_or_else(|| invalid("Relation join column not found for row-level predicate"))?;
+            json!({ (join_column): raw_filter.expect("relation filter") })
+        } else if full_name {
+            full_name_filter(&field.name, operand, value)?
+        } else {
+            with_sub_field(
+                &field.name,
+                sub_field_name.as_deref(),
+                raw_filter.expect("non-full-name filter"),
+            )
+        };
+        self.compile_value_filter(object_name, alias, filter)
+    }
+
+    async fn compile_relation_predicate(
+        &mut self,
+        object_name: &str,
+        alias: &str,
+        predicate: RelationPredicate<'_>,
+    ) -> Result<CompiledFilter, RunnerError> {
+        let RelationPredicate {
+            field,
+            relation_field_id,
+            full_name,
+            operand,
+            value,
+            raw_filter,
+            sub_field_name,
+        } = predicate;
+        let model = self.schema.object(object_name)?;
+        let relation_field = self
+            .schema
+            .field_metadata(relation_field_id)
+            .ok_or_else(|| invalid("Relation field metadata not found for row-level predicate"))?;
+        if relation_field.object_metadata_id != model.object.id {
+            return Err(invalid(
+                "Relation field metadata does not belong to the row-level predicate object",
+            ));
+        }
+        let (_, relation, target) = self.schema.relation(object_name, &relation_field.name)?;
+        if field.object_metadata_id != target.object.id {
+            return Err(invalid(
+                "Row-level relation predicate field does not belong to the target object",
+            ));
+        }
+        let filter = if full_name {
+            full_name_filter(&field.name, operand, value)?
+        } else {
+            with_sub_field(
+                &field.name,
+                sub_field_name,
+                raw_filter.expect("non-full-name filter"),
+            )
+        };
+        let target_alias = format!("rls_{}", self.suffixes.take());
+        let predicate =
+            self.compile_value_filter(&target.object.name_singular, &target_alias, filter)?;
+        let target_access = Box::pin(self.compile_access(
+            &target.object.name_singular,
+            ObjectRecordsOperationType::Read,
+            &target_alias,
+            true,
+        ))
+        .await?;
+        let predicate_sql = super::base::resolve_where_clauses(
+            self.schema,
+            &target.object.name_singular,
+            &target_alias,
+            &predicate.clauses,
+        )?;
+        let mut conditions = vec![
+            if let Some(join_column) = relation.join_column_name.as_deref() {
+                format!(
+                    "{}.{} = {}.{}",
+                    quote_identifier(&target_alias)?,
+                    quote_identifier("id")?,
+                    quote_identifier(alias)?,
+                    quote_identifier(join_column)?
+                )
+            } else {
+                let child_join_column = self
+                    .schema
+                    .child_join_column(object_name, &relation_field.name)?;
+                format!(
+                    "{}.{} = {}.{}",
+                    quote_identifier(&target_alias)?,
+                    quote_identifier(&child_join_column)?,
+                    quote_identifier(alias)?,
+                    quote_identifier("id")?
+                )
+            },
+        ];
+        if target.shape.has_deleted_at_column {
+            conditions.push(format!(
+                "{}.{} IS NULL",
+                quote_identifier(&target_alias)?,
+                quote_identifier("deletedAt")?
+            ));
+        }
+        conditions.push(predicate_sql);
+        let mut params = predicate.params;
+        if let Some(access) = target_access {
+            let access_sql = super::base::resolve_where_clauses(
+                self.schema,
+                &target.object.name_singular,
+                &target_alias,
+                &access.clauses,
+            )?;
+            conditions.push(access_sql);
+            params.extend(access.params);
+        }
+        Ok(CompiledFilter {
+            clauses: vec![WhereClause::sql(
+                JoinOp::And,
+                relation_exists_sql(
+                    &target.shape.schema_name,
+                    &target.shape.table_name,
+                    &target_alias,
+                    conditions,
+                )?,
+            )],
+            params,
+        })
+    }
+
+    fn compile_value_filter(
+        &mut self,
+        object_name: &str,
+        alias: &str,
+        filter: Value,
+    ) -> Result<CompiledFilter, RunnerError> {
+        let schema = AliasedFilterSchema {
+            schema: self.schema,
+            object_name,
+        };
+        compile_filter(&filter, alias, &schema, self.suffixes)
+            .map_err(RunnerError::from_filter)
+            .map(|filter| filter.unwrap_or_else(unsatisfiable_filter))
+    }
+}
+
+fn relation_exists_sql(
+    schema_name: &str,
+    table_name: &str,
+    target_alias: &str,
+    conditions: Vec<String>,
+) -> Result<String, RunnerError> {
+    Ok(format!(
+        "EXISTS (SELECT 1 FROM {}.{} AS {} WHERE {})",
+        quote_identifier(schema_name)?,
+        quote_identifier(table_name)?,
+        quote_identifier(target_alias)?,
+        conditions.join(" AND ")
+    ))
+}
+
+fn combine_compiled_filters(operator: JoinOp, filters: Vec<CompiledFilter>) -> CompiledFilter {
+    if filters.is_empty() {
+        return unsatisfiable_filter();
+    }
+    if filters.len() == 1 {
+        return filters.into_iter().next().expect("one filter");
+    }
+    let mut clauses = Vec::with_capacity(filters.len());
+    let mut params = Vec::new();
+    for (index, filter) in filters.into_iter().enumerate() {
+        if filter.clauses.len() == 1 {
+            let mut clause = filter.clauses.into_iter().next().expect("one clause");
+            clause.operator = if index == 0 { JoinOp::And } else { operator };
+            clauses.push(clause);
+        } else {
+            clauses.push(WhereClause {
+                operator: if index == 0 { JoinOp::And } else { operator },
+                kind: crate::query::filter::ClauseKind::Group {
+                    negated: false,
+                    clauses: filter.clauses,
+                },
+            });
+        }
+        params.extend(filter.params);
+    }
+    CompiledFilter {
+        clauses: vec![WhereClause::group(JoinOp::And, false, clauses)],
+        params,
+    }
 }
 
 pub fn requires_row_access(
@@ -106,7 +549,38 @@ where
     else {
         return Ok(());
     };
+    validate_rows(executor, schema, object_name_singular, ids, &access, false).await
+}
+
+pub(super) async fn validate_updated_rows<'e, E>(
+    executor: E,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    ids: &[Uuid],
+    access: &CompiledFilter,
+) -> Result<(), RunnerError>
+where
+    E: Executor<'e, Database = sqlx::Postgres>,
+{
+    validate_rows(executor, schema, object_name_singular, ids, access, true).await
+}
+
+async fn validate_rows<'e, E>(
+    executor: E,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    ids: &[Uuid],
+    access: &CompiledFilter,
+    updated: bool,
+) -> Result<(), RunnerError>
+where
+    E: Executor<'e, Database = sqlx::Postgres>,
+{
+    if ids.is_empty() {
+        return Ok(());
+    }
     let model = schema.object(object_name_singular)?;
+    let alias = quote_identifier(object_name_singular)?;
     let condition = super::base::resolve_where_clauses(
         schema,
         object_name_singular,
@@ -118,12 +592,14 @@ where
         String::from("ids"),
         Value::Array(ids.iter().map(|id| Value::String(id.to_string())).collect()),
     );
-    parameters.extend(access.params);
+    parameters.extend(access.params.iter().cloned());
     let sql = format!(
-        "SELECT {} FROM {}.{} WHERE {} = ANY(ARRAY[:...ids]::uuid[]) AND ({condition})",
+        "SELECT {} FROM {}.{} AS {} WHERE {}.{} = ANY(ARRAY[:...ids]::uuid[]) AND ({condition})",
         quote_identifier("id")?,
         quote_identifier(&model.shape.schema_name)?,
         quote_identifier(&model.shape.table_name)?,
+        alias,
+        alias,
         quote_identifier("id")?,
     );
     let compiled = crate::query::compile::compile_named_parameters(&sql, &parameters)
@@ -139,7 +615,11 @@ where
     if visible.len() != ids.len() {
         return Err(RunnerError::new(
             "RECORD_DOES_NOT_SATISFY_RLS",
-            "Record does not satisfy row-level security constraints of your current role",
+            if updated {
+                "Updated record does not satisfy row-level security constraints of your current role"
+            } else {
+                "Record does not satisfy row-level security constraints of your current role"
+            },
         ));
     }
     Ok(())
@@ -195,192 +675,66 @@ fn unsatisfiable_filter() -> CompiledFilter {
     }
 }
 
-async fn compile_rule_value(
-    pool: &PgPool,
-    schema: &RunnerSchema,
-    object_name_singular: &str,
-    rule: &RowLevelRecordsPermissions,
-    member_values: &mut HashMap<String, Value>,
-) -> Result<Value, RunnerError> {
-    let predicates = rule.predicates.as_slice();
-    let groups = rule.predicate_groups.as_slice();
-    let mut filters = Vec::new();
-    for predicate in predicates {
-        if predicate_group_id(predicate).is_none() {
-            filters.push(
-                compile_predicate_value(
-                    pool,
-                    schema,
-                    object_name_singular,
-                    predicate,
-                    member_values,
-                )
-                .await?,
-            );
-        }
-    }
-    let mut visiting = HashSet::new();
-    for group in groups {
-        if parent_group_id(group).is_none() {
-            filters.push(
-                compile_group_value(
-                    pool,
-                    schema,
-                    object_name_singular,
-                    predicates,
-                    groups,
-                    group,
-                    member_values,
-                    &mut visiting,
-                )
-                .await?,
-            );
-        }
-    }
-    Ok(combine_filters("AND", filters))
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn compile_group_value(
-    pool: &PgPool,
-    schema: &RunnerSchema,
-    object_name_singular: &str,
-    predicates: &[Value],
-    groups: &[Value],
-    group: &Value,
-    member_values: &mut HashMap<String, Value>,
-    visiting: &mut HashSet<String>,
-) -> Result<Value, RunnerError> {
-    let group_id = required_string(group, "id")?;
-    if !visiting.insert(group_id.to_string()) {
-        return Err(invalid(
-            "Row-level permission predicate group cycle detected",
-        ));
-    }
-    let mut filters = Vec::new();
-    for predicate in predicates {
-        if predicate_group_id(predicate).as_deref() == Some(group_id) {
-            filters.push(
-                compile_predicate_value(
-                    pool,
-                    schema,
-                    object_name_singular,
-                    predicate,
-                    member_values,
-                )
-                .await?,
-            );
-        }
-    }
-    for child in groups {
-        if parent_group_id(child).as_deref() == Some(group_id) {
-            filters.push(
-                Box::pin(compile_group_value(
-                    pool,
-                    schema,
-                    object_name_singular,
-                    predicates,
-                    groups,
-                    child,
-                    member_values,
-                    visiting,
-                ))
-                .await?,
-            );
-        }
-    }
-    visiting.remove(group_id);
-    let operator = group
-        .get("logicalOperator")
-        .and_then(Value::as_str)
-        .unwrap_or("AND");
-    Ok(combine_filters(operator, filters))
-}
-
-fn combine_filters(operator: &str, filters: Vec<Value>) -> Value {
-    match filters.len() {
-        0 => unsatisfiable_value(),
-        1 => filters.into_iter().next().expect("one filter"),
-        _ if operator == "OR" => json!({ "or": filters }),
-        _ => json!({ "and": filters }),
-    }
-}
-
-async fn compile_predicate_value(
-    pool: &PgPool,
-    schema: &RunnerSchema,
-    object_name_singular: &str,
-    predicate: &Value,
-    member_values: &mut HashMap<String, Value>,
-) -> Result<Value, RunnerError> {
-    let field_id = required_uuid(predicate, "fieldMetadataId")?;
-    let field = schema
-        .field_metadata(field_id)
-        .ok_or_else(|| invalid("Field metadata not found for row-level predicate"))?;
-    let operand = required_string(predicate, "operand")?;
-    let sub_field_name = optional_string(predicate, "subFieldName");
-    let mut value = predicate.get("value").cloned().unwrap_or(Value::Null);
-    if let Some(member_field_id) = optional_uuid(predicate, "workspaceMemberFieldMetadataId")? {
-        value =
-            resolve_member_value(pool, schema, predicate, member_field_id, member_values).await?;
-        if value.is_null() {
-            return Ok(unsatisfiable_value());
-        }
-    }
-    if !matches!(operand, "IS_NOT_NULL" | "IS_EMPTY" | "IS_NOT_EMPTY")
-        && (value.is_null()
-            || value.as_str() == Some("")
-            || value.as_str() == Some("[]")
-            || value.as_array().is_some_and(Vec::is_empty))
-    {
-        return Ok(unsatisfiable_value());
-    }
-    let full_name = field.field_type == FieldMetadataType::FullName && sub_field_name.is_none();
-    let raw_filter = (!full_name)
-        .then(|| {
-            operand_filter(
-                field.field_type,
+fn operand_supported(
+    field_type: FieldMetadataType,
+    operand: &str,
+    sub_field_name: Option<&str>,
+) -> bool {
+    let empty = matches!(operand, "IS_EMPTY" | "IS_NOT_EMPTY");
+    match field_type {
+        FieldMetadataType::Boolean => operand == "IS",
+        FieldMetadataType::TsVector => operand == "VECTOR_SEARCH",
+        FieldMetadataType::Uuid
+        | FieldMetadataType::Relation
+        | FieldMetadataType::MorphRelation
+        | FieldMetadataType::Select => matches!(operand, "IS" | "IS_NOT") || empty,
+        FieldMetadataType::Number | FieldMetadataType::Numeric | FieldMetadataType::Rating => {
+            matches!(
                 operand,
-                sub_field_name.as_deref(),
-                value.clone(),
-            )
-        })
-        .transpose()?;
-    if let Some(relation_field_id) = optional_uuid(predicate, "relationFieldMetadataId")? {
-        let relation_field = schema
-            .field_metadata(relation_field_id)
-            .ok_or_else(|| invalid("Relation field metadata not found for row-level predicate"))?;
-        let filter = if full_name {
-            full_name_filter(&field.name, operand, value)?
-        } else {
-            with_sub_field(
-                &field.name,
-                sub_field_name.as_deref(),
-                raw_filter.expect("non-full-name filter"),
-            )
-        };
-        return Ok(json!({ (relation_field.name.as_str()): filter }));
+                "IS" | "IS_NOT" | "GREATER_THAN_OR_EQUAL" | "LESS_THAN_OR_EQUAL"
+            ) || empty
+        }
+        FieldMetadataType::Date | FieldMetadataType::DateTime => {
+            matches!(
+                operand,
+                "IS" | "IS_RELATIVE"
+                    | "IS_IN_PAST"
+                    | "IS_IN_FUTURE"
+                    | "IS_TODAY"
+                    | "IS_BEFORE"
+                    | "IS_AFTER"
+            ) || empty
+        }
+        FieldMetadataType::Currency => match sub_field_name {
+            Some("currencyCode") => matches!(operand, "IS" | "IS_NOT") || empty,
+            Some("amountMicros") => {
+                matches!(
+                    operand,
+                    "IS" | "IS_NOT" | "GREATER_THAN_OR_EQUAL" | "LESS_THAN_OR_EQUAL"
+                ) || empty
+            }
+            None => matches!(operand, "GREATER_THAN_OR_EQUAL" | "LESS_THAN_OR_EQUAL") || empty,
+            Some(_) => false,
+        },
+        FieldMetadataType::Actor
+            if matches!(sub_field_name, Some("source" | "workspaceMemberId")) =>
+        {
+            matches!(operand, "IS" | "IS_NOT") || empty
+        }
+        FieldMetadataType::Actor
+        | FieldMetadataType::Address
+        | FieldMetadataType::Array
+        | FieldMetadataType::Emails
+        | FieldMetadataType::Files
+        | FieldMetadataType::FullName
+        | FieldMetadataType::Links
+        | FieldMetadataType::MultiSelect
+        | FieldMetadataType::Phones
+        | FieldMetadataType::RawJson => matches!(operand, "CONTAINS" | "DOES_NOT_CONTAIN") || empty,
+        FieldMetadataType::Text | FieldMetadataType::RichText | FieldMetadataType::Position => {
+            matches!(operand, "IS" | "IS_NOT" | "CONTAINS" | "DOES_NOT_CONTAIN") || empty
+        }
     }
-    if matches!(
-        field.field_type,
-        FieldMetadataType::Relation | FieldMetadataType::MorphRelation
-    ) {
-        let model = schema.object(object_name_singular)?;
-        let join_column = model
-            .shape
-            .relation(&field.name)
-            .and_then(|relation| relation.join_column_name.clone())
-            .ok_or_else(|| invalid("Relation join column not found for row-level predicate"))?;
-        return Ok(json!({ (join_column): raw_filter.expect("relation filter") }));
-    }
-    if full_name {
-        return full_name_filter(&field.name, operand, value);
-    }
-    Ok(with_sub_field(
-        &field.name,
-        sub_field_name.as_deref(),
-        raw_filter.expect("non-full-name filter"),
-    ))
 }
 
 fn operand_filter(
@@ -389,6 +743,52 @@ fn operand_filter(
     sub_field_name: Option<&str>,
     value: Value,
 ) -> Result<Value, RunnerError> {
+    if !operand_supported(field_type, operand, sub_field_name) {
+        return Err(invalid(format!(
+            "Operand {operand} is not supported for {} row-level predicates",
+            field_type.as_str()
+        )));
+    }
+    if matches!(operand, "IS_IN_PAST" | "IS_IN_FUTURE" | "IS_TODAY") {
+        let now = chrono::Utc::now();
+        return match field_type {
+            FieldMetadataType::Date => {
+                let today = now.format("%Y-%m-%d").to_string();
+                Ok(match operand {
+                    "IS_IN_PAST" => json!({ "lt": today }),
+                    "IS_IN_FUTURE" => json!({ "gte": today }),
+                    _ => json!({ "eq": today }),
+                })
+            }
+            FieldMetadataType::DateTime => {
+                let rounded = chrono::DateTime::from_timestamp((now.timestamp() + 30) / 60 * 60, 0)
+                    .ok_or_else(|| invalid("Cannot resolve current date-time"))?;
+                let rounded = rounded.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                Ok(match operand {
+                    "IS_IN_PAST" => json!({ "lt": rounded }),
+                    "IS_IN_FUTURE" => json!({ "gt": rounded }),
+                    _ => {
+                        let start = now
+                            .date_naive()
+                            .and_hms_opt(0, 0, 0)
+                            .ok_or_else(|| invalid("Cannot resolve start of day"))?
+                            .and_utc();
+                        let end = start + chrono::Duration::days(1);
+                        json!({
+                            "and": [
+                                { "gte": start.to_rfc3339_opts(chrono::SecondsFormat::Secs, true) },
+                                { "lt": end.to_rfc3339_opts(chrono::SecondsFormat::Secs, true) }
+                            ]
+                        })
+                    }
+                })
+            }
+            _ => Err(invalid(format!(
+                "Operand {operand} is not supported for {} row-level predicates",
+                field_type.as_str()
+            ))),
+        };
+    }
     if matches!(operand, "IS_EMPTY" | "IS_NOT_EMPTY") {
         let empty = if matches!(
             field_type,
@@ -403,9 +803,6 @@ fn operand_filter(
         } else {
             empty
         });
-    }
-    if operand == "IS_NOT_NULL" {
-        return Ok(json!({ "is": "NOT_NULL" }));
     }
     let operator = match operand {
         "IS" => "eq",
@@ -537,10 +934,6 @@ fn contains_pattern(value: Value) -> Result<Value, RunnerError> {
         .as_str()
         .map(|value| Value::String(format!("%{value}%")))
         .ok_or_else(|| invalid("Row-level permission contains operand requires a string"))
-}
-
-fn unsatisfiable_value() -> Value {
-    json!({ "id": { "is": "NULL" } })
 }
 
 async fn resolve_member_value(
@@ -716,22 +1109,53 @@ mod tests {
 
     #[test]
     fn root_and_nested_filters_use_the_group_operator() {
-        assert_eq!(
-            combine_filters(
-                "OR",
-                vec![
-                    json!({ "status": { "eq": "OPEN" } }),
-                    json!({ "priority": { "gte": 3 } })
-                ],
-            ),
-            json!({
-                "or": [
-                    { "status": { "eq": "OPEN" } },
-                    { "priority": { "gte": 3 } }
-                ]
-            })
+        let filter = combine_compiled_filters(
+            JoinOp::Or,
+            vec![
+                CompiledFilter {
+                    clauses: vec![WhereClause::sql(JoinOp::And, "status = :status")],
+                    params: vec![(String::from("status"), json!("OPEN"))],
+                },
+                CompiledFilter {
+                    clauses: vec![WhereClause::sql(JoinOp::And, "priority >= :priority")],
+                    params: vec![(String::from("priority"), json!(3))],
+                },
+            ],
         );
-        assert_eq!(combine_filters("AND", Vec::new()), unsatisfiable_value());
+        assert_eq!(
+            filter.render(),
+            "((status = :status) OR (priority >= :priority))"
+        );
+        assert_eq!(
+            filter.params,
+            vec![
+                (String::from("status"), json!("OPEN")),
+                (String::from("priority"), json!(3))
+            ]
+        );
+        assert_eq!(
+            combine_compiled_filters(JoinOp::And, Vec::new()).render(),
+            "(FALSE)"
+        );
+    }
+
+    #[test]
+    fn relation_exists_keeps_target_scope_in_the_same_query() {
+        let sql = relation_exists_sql(
+            "workspace",
+            "company",
+            "rls_0000000001",
+            vec![
+                String::from("\"rls_0000000001\".\"id\" = \"person\".\"companyId\""),
+                String::from("\"rls_0000000001\".\"deletedAt\" IS NULL"),
+                String::from("(\"rls_0000000001\".\"name\" = :name0000000002)"),
+                String::from("(\"rls_0000000001\".\"domainName\" IS NOT NULL)"),
+            ],
+        )
+        .unwrap();
+        assert!(sql.contains("FROM \"workspace\".\"company\" AS \"rls_0000000001\""));
+        assert!(sql.contains("AND (\"rls_0000000001\".\"domainName\" IS NOT NULL)"));
+        assert!(sql.contains("\"rls_0000000001\".\"id\" = \"person\".\"companyId\""));
     }
 
     #[test]
@@ -767,6 +1191,52 @@ mod tests {
     }
 
     #[test]
+    fn text_predicates_reject_upstream_unsupported_operands() {
+        for operand in ["IS_NOT_NULL", "GREATER_THAN_OR_EQUAL", "IS_BEFORE"] {
+            assert!(!operand_supported(FieldMetadataType::Text, operand, None));
+        }
+        assert!(operand_supported(
+            FieldMetadataType::Text,
+            "IS_NOT_EMPTY",
+            None
+        ));
+        assert!(operand_supported(
+            FieldMetadataType::Number,
+            "GREATER_THAN_OR_EQUAL",
+            None
+        ));
+    }
+
+    #[test]
+    fn value_less_date_operands_match_upstream_boundaries() {
+        let past =
+            operand_filter(FieldMetadataType::Date, "IS_IN_PAST", None, Value::Null).unwrap();
+        assert_eq!(past.as_object().unwrap().len(), 1);
+        assert!(past["lt"].as_str().is_some_and(|value| value.len() == 10));
+
+        let future =
+            operand_filter(FieldMetadataType::Date, "IS_IN_FUTURE", None, Value::Null).unwrap();
+        assert!(future["gte"]
+            .as_str()
+            .is_some_and(|value| value.len() == 10));
+
+        let today =
+            operand_filter(FieldMetadataType::DateTime, "IS_TODAY", None, Value::Null).unwrap();
+        assert_eq!(today["and"].as_array().unwrap().len(), 2);
+        assert!(today["and"][0].get("gte").is_some());
+        assert!(today["and"][1].get("lt").is_some());
+
+        let future = operand_filter(
+            FieldMetadataType::DateTime,
+            "IS_IN_FUTURE",
+            None,
+            Value::Null,
+        )
+        .unwrap();
+        assert!(future.get("gt").is_some());
+    }
+
+    #[test]
     fn predicate_fields_wrap_exactly_once() {
         assert_eq!(
             with_sub_field(
@@ -790,5 +1260,294 @@ mod tests {
                 .code(),
             "RECORD_PERMISSION_QUERY_INVALID"
         );
+    }
+
+    #[tokio::test]
+    async fn relation_hop_applies_target_read_scope_for_to_one() {
+        let (pool, schema) = relation_schema("person", "company", "company", true, false);
+        let access = row_access_filter(
+            &pool,
+            &schema,
+            "person",
+            ObjectRecordsOperationType::Read,
+            &mut Suffixes::new(),
+        )
+        .await
+        .expect("to-one relation access")
+        .expect("to-one relation filter");
+
+        assert!(access
+            .render()
+            .contains("\"rls_0000000001\".\"id\" = \"person\".\"companyId\""));
+        assert!(access
+            .render()
+            .contains("\"rls_0000000001\".\"name\" = :name0000000002"));
+        assert!(
+            access
+                .render()
+                .contains("\"rls_0000000001\".\"status\" = :status0000000004"),
+            "{} {:?}",
+            access.render(),
+            access.params
+        );
+        assert_eq!(access.params.len(), 2);
+        assert_eq!(access.params[0].1, json!("Visible"));
+        assert_eq!(access.params[1].1, json!("ACTIVE"));
+    }
+
+    #[tokio::test]
+    async fn relation_hop_applies_target_read_scope_for_to_many() {
+        let (pool, schema) = relation_schema("company", "person", "people", true, false);
+        let access = row_access_filter(
+            &pool,
+            &schema,
+            "company",
+            ObjectRecordsOperationType::Read,
+            &mut Suffixes::new(),
+        )
+        .await
+        .expect("to-many relation access")
+        .expect("to-many relation filter");
+
+        assert!(access
+            .render()
+            .contains("\"rls_0000000001\".\"companyId\" = \"company\".\"id\""));
+        assert!(access
+            .render()
+            .contains("\"rls_0000000001\".\"name\" = :name0000000002"));
+        assert!(
+            access
+                .render()
+                .contains("\"rls_0000000001\".\"status\" = :status0000000004"),
+            "{} {:?}",
+            access.render(),
+            access.params
+        );
+        assert_eq!(access.params.len(), 2);
+        assert_ne!(access.params[0].0, access.params[1].0);
+    }
+
+    #[tokio::test]
+    async fn relation_hop_is_denied_until_both_feature_flags_are_enabled() {
+        let (pool, schema) = relation_schema("person", "company", "company", false, false);
+        let access = row_access_filter(
+            &pool,
+            &schema,
+            "person",
+            ObjectRecordsOperationType::Read,
+            &mut Suffixes::new(),
+        )
+        .await
+        .expect("disabled relation access")
+        .expect("disabled relation filter");
+
+        assert_eq!(access.render(), "(FALSE)");
+    }
+
+    #[tokio::test]
+    async fn member_relation_hops_are_denied_when_the_feature_is_disabled() {
+        let (pool, schema) = relation_schema("person", "company", "company", false, true);
+        let access = row_access_filter(
+            &pool,
+            &schema,
+            "person",
+            ObjectRecordsOperationType::Read,
+            &mut Suffixes::new(),
+        )
+        .await
+        .expect("disabled member relation access")
+        .expect("disabled member relation filter");
+
+        assert_eq!(access.render(), "(FALSE)");
+    }
+
+    fn relation_schema(
+        source_name: &str,
+        target_name: &str,
+        relation_name: &str,
+        relation_hop_enabled: bool,
+        member_relation: bool,
+    ) -> (PgPool, RunnerSchema) {
+        let workspace_id = Uuid::new_v4();
+        let person_id = Uuid::new_v4();
+        let company_id = Uuid::new_v4();
+        let person_name = field(person_id, "name");
+        let company_name = field(company_id, "name");
+        let person_status = field(person_id, "status");
+        let company_status = field(company_id, "status");
+        let mut company = relation_field(person_id, "company", company_id);
+        let mut people = relation_field(company_id, "people", person_id);
+        company.relation_target_field_metadata_id = Some(people.id);
+        people.relation_target_field_metadata_id = Some(company.id);
+        company.settings = Some(json!({ "relationType": "MANY_TO_ONE" }));
+        people.settings = Some(json!({ "relationType": "ONE_TO_MANY" }));
+        let person_fields = vec![
+            field(person_id, "id"),
+            person_name.clone(),
+            person_status.clone(),
+            company.clone(),
+        ];
+        let company_fields = vec![
+            field(company_id, "id"),
+            company_name.clone(),
+            company_status.clone(),
+            people.clone(),
+        ];
+        let mut fields = crate::metadata::flat::FlatEntityMaps::default();
+
+        for item in person_fields.iter().chain(&company_fields) {
+            fields.add(
+                item.id.to_string(),
+                item.clone(),
+                item.id.to_string(),
+                workspace_id.to_string(),
+            );
+        }
+
+        let person = object(workspace_id, person_id, "person", &person_fields);
+        let company_object = object(workspace_id, company_id, "company", &company_fields);
+        let (source_id, target_id, relation_field_id, name_field_id, status_field_id) =
+            if relation_name == "company" {
+                (
+                    person_id,
+                    company_id,
+                    company.id,
+                    company_name.id,
+                    company_status.id,
+                )
+            } else {
+                (
+                    company_id,
+                    person_id,
+                    people.id,
+                    person_name.id,
+                    person_status.id,
+                )
+            };
+        let mut relation_predicate = json!({
+            "id": Uuid::new_v4().to_string(),
+            "fieldMetadataId": name_field_id.to_string(),
+            "relationFieldMetadataId": relation_field_id.to_string(),
+            "objectMetadataId": source_id.to_string(),
+            "operand": "IS",
+            "value": "Visible"
+        });
+        if member_relation {
+            relation_predicate["workspaceMemberRelationFieldMetadataId"] =
+                Value::String(relation_field_id.to_string());
+        }
+        let relation_rule = rule(vec![relation_predicate]);
+        let target_rule = rule(vec![json!({
+            "id": Uuid::new_v4().to_string(),
+            "fieldMetadataId": status_field_id.to_string(),
+            "objectMetadataId": target_id.to_string(),
+            "operand": "IS",
+            "value": "ACTIVE"
+        })]);
+        let mut permissions = crate::permissions::RoleRecordsPermissions {
+            objects: [
+                (source_id.to_string(), Default::default()),
+                (target_id.to_string(), Default::default()),
+            ]
+            .into_iter()
+            .collect(),
+            relation_hop_enabled,
+            ..Default::default()
+        };
+        let source_permission = permissions
+            .objects
+            .get_mut(&source_id.to_string())
+            .expect("source permission");
+        source_permission.object_metadata_id = source_id.to_string();
+        source_permission.row_level_records_permissions = Some(vec![relation_rule]);
+        source_permission.can_read_some_records = true;
+        let target_permission = permissions
+            .objects
+            .get_mut(&target_id.to_string())
+            .expect("target permission");
+        target_permission.object_metadata_id = target_id.to_string();
+        target_permission.row_level_records_permissions = Some(vec![target_rule]);
+        target_permission.can_read_some_records = true;
+        let schema = RunnerSchema::build_with_permissions(
+            &workspace_id,
+            &[person, company_object],
+            &fields,
+            &crate::metadata::flat::FlatEntityMaps::default(),
+            permissions,
+            None,
+        )
+        .expect("relation permission schema");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/nudge")
+            .expect("lazy relation pool");
+
+        assert_eq!(
+            schema.object(source_name).expect("source").object.id,
+            source_id
+        );
+        assert_eq!(
+            schema.object(target_name).expect("target").object.id,
+            target_id
+        );
+        (pool, schema)
+    }
+
+    fn object(
+        workspace_id: Uuid,
+        id: Uuid,
+        name: &str,
+        fields: &[crate::metadata::flat::FlatFieldMetadata],
+    ) -> crate::metadata::flat::FlatObjectMetadata {
+        crate::metadata::flat::FlatObjectMetadata {
+            id,
+            workspace_id,
+            name_singular: name.to_string(),
+            name_plural: format!("{name}s"),
+            label_singular: name.to_string(),
+            label_plural: format!("{name}s"),
+            target_table_name: Some(name.to_string()),
+            field_ids: fields.iter().map(|field| field.id.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn field(object_id: Uuid, name: &str) -> crate::metadata::flat::FlatFieldMetadata {
+        crate::metadata::flat::FlatFieldMetadata {
+            id: Uuid::new_v4(),
+            object_metadata_id: object_id,
+            field_type: if name == "id" {
+                FieldMetadataType::Uuid
+            } else {
+                FieldMetadataType::Text
+            },
+            name: name.to_string(),
+            label: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn relation_field(
+        object_id: Uuid,
+        name: &str,
+        target_object_id: Uuid,
+    ) -> crate::metadata::flat::FlatFieldMetadata {
+        crate::metadata::flat::FlatFieldMetadata {
+            id: Uuid::new_v4(),
+            object_metadata_id: object_id,
+            field_type: FieldMetadataType::Relation,
+            name: name.to_string(),
+            label: name.to_string(),
+            relation_target_object_metadata_id: Some(target_object_id),
+            ..Default::default()
+        }
+    }
+
+    fn rule(predicates: Vec<Value>) -> RowLevelRecordsPermissions {
+        RowLevelRecordsPermissions {
+            rule_id: Uuid::new_v4().to_string(),
+            can_read_records: true,
+            predicates,
+            ..Default::default()
+        }
     }
 }

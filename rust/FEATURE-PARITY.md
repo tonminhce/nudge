@@ -12,7 +12,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 |---|---|---|
 | A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (seeding, DDL runner, metadata CRUD API and deferred queue merged; validation rules and UI editors remain) |
 | B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL and REST verified live; search, duplicates/merge, advanced permissions, SSE and hooks remain) |
-| C. Auth and access control | ~12k LOC server | **part** (wave 2 and P1–P3 landed; object/field enforcement and core row-level predicates are implemented; advanced update/relation RLS, sharing and the remaining permission surfaces are open) |
+| C. Auth and access control | ~12k LOC server | **part** (wave 2 and P1–P3 landed; object/field enforcement, transactional update RLS and feature-gated relation-hop RLS are implemented; access-group synchronization, sharing and the remaining permission surfaces are open) |
 | D. Web interface (Leptos) | ~330k LOC React | **part** (front-core, design system, app shell and core record surfaces landed; exact full-feature UI parity and the remaining product screens are open) |
 | E. Automations and integrations | ~60k LOC server | todo |
 | F. Platform and operations | ~10k LOC | **part** |
@@ -20,10 +20,10 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 ### Measured checkpoints (2026-11-27)
 - Wave 4 live record parity: `tools/parity-compare.py --records` — **18/18 captures match** the real `twentycrm/twenty:v2.61.0` server on the same database.
 - REST error/shape parity: `tools/parity-rest-errors.py` — **18/18 probes match** live.
-- Auth + metadata + record E2E: `tools/auth-e2e.sh` — **367/367 checks pass**.
+- Auth + metadata + record E2E: `tools/auth-e2e.sh` — **372/372 checks pass**.
 - Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
-- Quality gates: fmt clean, clippy `-D warnings` clean, **92 core + 468 server tests** pass.
+- Quality gates: fmt clean, clippy `-D warnings` clean, **5 core + 526 server tests** pass; the server suite runs serially against an isolated Postgres database.
 - Frontend gates: `tools/build-frontend.sh`, native clippy/tests and `wasm32-unknown-unknown` check pass; 32 front-core tests, 138 front-ui tests and 16 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
 - Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Real pointer interactions pass for reset, sorting, selection, row activation, popover, collapsible and toast. The welcome heading/font metrics now match the reference; authenticated product-surface parity remains open.
 - Auth browser checkpoint: new and existing email branches match the reference labels and layout; malformed email advances to sign-up, editing email returns to account selection, invalid email or short password keeps submit disabled, password visibility and the password-reset notice work against the local auth endpoints. The reset toast uses the shared reference-matched `Toast` primitive, Web Animations timing, manual close and timed auto-dismiss; `parity/ui/toast-diff.json` records a zero-difference visual diff.
@@ -61,7 +61,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
 | `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
 | Full text search | todo | 4→6 | tsvector columns and GIN indexes exist; the cross-object Search resolver remains |
-| Record permissions, sharing, private records | **part** | 4 | P1–P3 and core RLS landed: role/object/field gates, predicate groups, current-member substitution, create rollback and read/count/mutation/nested injection. Advanced update/relation-hop parity and sharing remain. |
+| Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope and upstream relation-hop feature gating. Access-group synchronization and sharing remain. |
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
 | Dynamic GraphQL schema generated from metadata | **done** | 4 | direct workspace execution with resolver classification, introspection and connection shaping |
@@ -89,7 +89,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Invitations | **done** | 2 | verbatim tokens, resend rotation, upstream throttle set |
 | Email verification and password reset | **done** | 2 | hashed tokens, upstream error matrix, 3/15 min reset throttle, `PASSWORD_CHANGED` revocations |
 | Browser email/password auth flow | **part** | 5 | Existing/new email branching, reference-matched second step, validation, password visibility and reset notice are implemented; SSO/2FA screens and full account-recovery UI remain |
-| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 and core RLS landed; advanced update/relation RLS and sharing remain |
+| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 plus transactional update RLS and feature-gated relation-hop RLS landed; access-group synchronization and sharing remain |
 
 ## D. Web interface (Leptos)
 
@@ -101,7 +101,7 @@ the live reference in the browser.
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
 | Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **done** | 5 | U2 `crates/front-core`; native tests, wasm check and a live Twenty round trip pass |
-| Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 137 front-ui tests; the gallery has browser-verified sorting, selection, row activation and custom cells. The email/password auth flow is compared against the live reference. Exact component and page parity remains open. |
+| Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 138 front-ui tests; the gallery has browser-verified sorting, selection, row activation and custom cells. The email/password auth flow is compared against the live reference. Exact component and page parity remains open. |
 | Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; U4b adds a Cmd/Ctrl+K command menu with navigation, create actions and debounced record search, plus a record-details side panel with Escape/focus behavior; broader side-panel pages remain |
 | Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records; U4b adds server filters, sorting, 240-slot virtualization, Person/Company create dialogs, relation selection and functional List/Kanban/Calendar view dispatch; drag/drop, groups and aggregates remain |
 | Record kanban board | **part** | 5 | U4b grouping and view dispatch landed; upstream drag/drop and live visual parity remain |

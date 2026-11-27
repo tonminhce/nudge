@@ -240,12 +240,7 @@ pub fn format_result_rows(
                 let object = entry.as_object_mut().expect("composite container");
                 object.insert(base::lowercase_first(suffix), value);
             } else {
-                let key = if column.column_name != column.field_name {
-                    column.column_name.clone()
-                } else {
-                    column.field_name.clone()
-                };
-                record.insert(key, value);
+                record.insert(column.field_name.clone(), value);
             }
         }
 

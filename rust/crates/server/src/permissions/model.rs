@@ -261,6 +261,8 @@ pub struct RoleRecordsPermissions {
     pub can_destroy_all_records: bool,
     pub objects: BTreeMap<String, ObjectRecordsPermissions>,
     pub can_read_some_records: bool,
+    #[serde(skip)]
+    pub relation_hop_enabled: bool,
 }
 
 impl RoleRecordsPermissions {
@@ -279,6 +281,7 @@ pub struct WorkspacePermissionSet {
     pub permission_flags: HashMap<Uuid, HashSet<String>>,
     pub object_ids: BTreeSet<Uuid>,
     pub object_order: Vec<Uuid>,
+    pub feature_flags: HashMap<String, bool>,
 }
 
 impl WorkspacePermissionSet {
@@ -288,6 +291,18 @@ impl WorkspacePermissionSet {
 
     pub fn flags(&self, role_id: Uuid) -> Option<&HashSet<String>> {
         self.permission_flags.get(&role_id)
+    }
+
+    pub fn relation_hop_enabled(&self) -> bool {
+        self.feature_flags
+            .get("IS_ACCESS_GROUPS_ENABLED")
+            .copied()
+            .unwrap_or(false)
+            && self
+                .feature_flags
+                .get("IS_ROW_LEVEL_PERMISSION_RELATION_HOP_ENABLED")
+                .copied()
+                .unwrap_or(false)
     }
 }
 
@@ -347,12 +362,27 @@ pub fn full_access_records_permissions(
         can_destroy_all_records: true,
         objects,
         can_read_some_records: true,
+        ..Default::default()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relation_hop_requires_both_upstream_feature_flags() {
+        let mut workspace = WorkspacePermissionSet::default();
+        workspace
+            .feature_flags
+            .insert("IS_ACCESS_GROUPS_ENABLED".to_string(), true);
+        assert!(!workspace.relation_hop_enabled());
+        workspace.feature_flags.insert(
+            "IS_ROW_LEVEL_PERMISSION_RELATION_HOP_ENABLED".to_string(),
+            true,
+        );
+        assert!(workspace.relation_hop_enabled());
+    }
 
     #[test]
     fn create_follows_update_until_the_feature_flag_is_enabled() {

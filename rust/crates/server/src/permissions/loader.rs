@@ -158,6 +158,12 @@ struct PermissionFlagRow {
     key: String,
 }
 
+#[derive(Debug, FromRow)]
+struct FeatureFlagRow {
+    key: String,
+    value: bool,
+}
+
 pub async fn load_workspace_permission_set(
     pool: &PgPool,
     workspace_id: Uuid,
@@ -378,6 +384,17 @@ async fn load_permission_set(
         }
     }
 
+    let feature_flag_rows: Vec<FeatureFlagRow> =
+        sqlx::query_as("SELECT key, value FROM core.\"featureFlag\" WHERE \"workspaceId\" = $1")
+            .bind(workspace_id)
+            .fetch_all(pool)
+            .await
+            .map_err(database_error)?;
+    let feature_flags = feature_flag_rows
+        .into_iter()
+        .map(|row| (row.key, row.value))
+        .collect();
+
     let object_order_rows: Vec<ObjectOrderRow> =
         sqlx::query_as("SELECT id FROM core.\"objectMetadata\" WHERE \"workspaceId\" = $1")
             .bind(workspace_id)
@@ -399,6 +416,7 @@ async fn load_permission_set(
         permission_flags,
         object_ids: objects.iter().map(|object| object.id).collect(),
         object_order: object_order_rows.into_iter().map(|row| row.id).collect(),
+        feature_flags,
     })
 }
 

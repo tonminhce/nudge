@@ -262,6 +262,7 @@ mod tests {
             permission_flags: [(role_id, HashSet::new())].into_iter().collect(),
             object_ids: [object_id].into_iter().collect(),
             object_order: vec![object_id],
+            ..Default::default()
         };
         let context = PermissionsContext {
             workspace_id: Some(Uuid::new_v4()),

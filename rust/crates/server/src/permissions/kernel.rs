@@ -191,6 +191,7 @@ pub fn compute_role_records_permissions(
         can_destroy_all_records: role.can_destroy_all_object_records,
         objects: object_permissions,
         can_read_some_records: role.can_read_all_object_records,
+        ..Default::default()
     };
     restrict_disabled_actions(
         &mut permissions,
@@ -456,12 +457,13 @@ pub fn compute_context_records_permissions(
     if main_role_ids.is_empty() {
         main_role_ids = context.role_ids().into_iter().collect();
     }
-    let main = compute_permission_union(
+    let mut main = compute_permission_union(
         &main_role_ids
             .iter()
             .filter_map(|role_id| workspace.role(*role_id))
             .collect::<Vec<_>>(),
     );
+    main.relation_hop_enabled = workspace.relation_hop_enabled();
     if context.limiting_role_ids.is_empty() {
         return main;
     }
@@ -474,7 +476,9 @@ pub fn compute_context_records_permissions(
         .collect::<Vec<_>>();
     let limiting =
         compute_permission_intersection(&limiting_permissions.iter().collect::<Vec<_>>());
-    compute_permission_intersection(&[&main, &limiting])
+    let mut permissions = compute_permission_intersection(&[&main, &limiting]);
+    permissions.relation_hop_enabled = main.relation_hop_enabled;
+    permissions
 }
 
 fn to_limiting_role_records_permissions(
@@ -606,6 +610,91 @@ mod tests {
                 None,
             ));
         role
+    }
+
+    #[test]
+    fn empty_string_predicates_keep_their_rule() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let rule_id = Uuid::new_v4();
+        let mut role = role_with_read_rule(role_id, object_id, rule_id);
+        role.row_level_permission_predicates[0].value = Some(json!(""));
+        let permissions = compute_role_records_permissions(
+            &role,
+            &[object(object_id, "person", false)],
+            &[],
+            false,
+            None,
+        );
+        let object = &permissions.objects[&object_id.to_string()];
+        let rules = object
+            .row_level_records_permissions
+            .as_ref()
+            .expect("empty-string rule remains attached");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].predicates[0]["value"], json!(""));
+        assert!(object.can_read_some_records);
+    }
+
+    #[test]
+    fn mixed_groups_preserve_empty_and_non_empty_predicates() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let rule_id = Uuid::new_v4();
+        let group_id = Uuid::new_v4();
+        let mut role = role_with_read_rule(role_id, object_id, rule_id);
+        let mut invalid = role.row_level_permission_predicates[0].clone();
+        invalid.row_level_permission_predicate_group_id = Some(group_id);
+        invalid.position_in_row_level_permission_predicate_group = Some(0.0);
+        invalid.value = Some(json!(""));
+        let mut valid = predicate_definition(
+            Uuid::new_v4(),
+            object_id,
+            role_id,
+            rule_id,
+            Some(group_id),
+            Some(1.0),
+        );
+        valid.value = Some(json!("active"));
+        role.row_level_permission_predicates = vec![invalid, valid];
+        role.row_level_permission_predicate_groups
+            .push(predicate_group_definition(
+                group_id, object_id, role_id, rule_id, None, "OR", 0.0, false,
+            ));
+        let permissions = compute_role_records_permissions(
+            &role,
+            &[object(object_id, "person", false)],
+            &[],
+            false,
+            None,
+        );
+        let rules = permissions.objects[&object_id.to_string()]
+            .row_level_records_permissions
+            .as_ref()
+            .expect("mixed rule remains attached");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].predicates.len(), 2);
+    }
+
+    #[test]
+    fn member_substitution_rules_are_not_dropped_for_null_literals() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let rule_id = Uuid::new_v4();
+        let mut role = role_with_read_rule(role_id, object_id, rule_id);
+        role.row_level_permission_predicates[0].workspace_member_field_metadata_id =
+            Some(Uuid::new_v4());
+        role.row_level_permission_predicates[0].value = None;
+        let permissions = compute_role_records_permissions(
+            &role,
+            &[object(object_id, "person", false)],
+            &[],
+            false,
+            None,
+        );
+        assert!(permissions.objects[&object_id.to_string()]
+            .row_level_records_permissions
+            .is_some());
     }
 
     #[test]
@@ -760,6 +849,7 @@ mod tests {
             .into_iter()
             .collect(),
             can_read_some_records: true,
+            ..Default::default()
         };
         let second = RoleRecordsPermissions::empty();
         let intersection = compute_permission_intersection(&[&first, &second]);
