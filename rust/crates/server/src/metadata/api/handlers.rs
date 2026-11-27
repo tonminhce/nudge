@@ -584,10 +584,8 @@ async fn update_one_field(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
                 return Err(GraphQlError::internal("Object metadata not found"));
             };
 
-            let backing = super::service::build_unique_backing_index(
-                &flat_object_universal(object),
-                &merged,
-            );
+            let backing =
+                super::service::build_unique_backing_index(&flat_object_universal(object), &merged);
 
             add_to_create(
                 &mut matrix,
@@ -1081,8 +1079,15 @@ async fn list_page(
 
     let pagination = parse_paging(&paging)?;
 
+    let soft_delete = matches!(table, "application" | "view");
+
     let mut sql = format!(
-        "SELECT id FROM core.\"{table}\" WHERE \"workspaceId\" = $1 AND \"deletedAt\" IS NULL"
+        "SELECT id FROM core.\"{table}\" WHERE \"workspaceId\" = $1{}",
+        if soft_delete {
+            " AND \"deletedAt\" IS NULL"
+        } else {
+            ""
+        }
     );
 
     let mut params: Vec<FilterParam> = Vec::new();

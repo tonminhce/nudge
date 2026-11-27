@@ -610,7 +610,14 @@ pub fn transpile_create_field(
 
     sanitize_string_fields(
         &mut sanitized,
-        &["description", "icon", "label", "name", "objectMetadataId", "type"],
+        &[
+            "description",
+            "icon",
+            "label",
+            "name",
+            "objectMetadataId",
+            "type",
+        ],
     );
 
     if optional_bool(&sanitized, "isRemoteCreation").unwrap_or(false) {
@@ -738,7 +745,12 @@ pub fn transpile_create_field(
 
         sanitize_string_fields(
             &mut payload,
-            &["targetFieldIcon", "targetFieldLabel", "targetObjectMetadataId", "type"],
+            &[
+                "targetFieldIcon",
+                "targetFieldLabel",
+                "targetObjectMetadataId",
+                "type",
+            ],
         );
 
         let payload = &payload;
@@ -968,8 +980,10 @@ pub fn build_relation_backing_index(
     let index_universal_identifier = Uuid::new_v4().to_string();
 
     let column = compute_relation_join_column_name(&field.name);
-    let table_name =
-        compute_object_target_table(&object.name_singular, &object.application_universal_identifier);
+    let table_name = compute_object_target_table(
+        &object.name_singular,
+        &object.application_universal_identifier,
+    );
 
     UniversalFlatIndexMetadata {
         universal_identifier: index_universal_identifier.clone(),

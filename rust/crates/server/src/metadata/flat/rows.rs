@@ -23,7 +23,7 @@ use crate::metadata::error::EngineError;
 use crate::metadata::error::MetadataError;
 use crate::metadata::error::MetadataResult;
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Default, FromRow)]
 pub struct ObjectMetadataRow {
     pub id: Uuid,
     #[sqlx(rename = "universalIdentifier")]
@@ -81,7 +81,7 @@ pub struct ObjectMetadataRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Default, FromRow)]
 pub struct FieldMetadataRow {
     pub id: Uuid,
     #[sqlx(rename = "universalIdentifier")]
@@ -111,8 +111,6 @@ pub struct FieldMetadataRow {
     pub is_system_side_effect: bool,
     #[sqlx(rename = "isNullable")]
     pub is_nullable: bool,
-    #[sqlx(rename = "isUnique")]
-    pub is_unique: bool,
     #[sqlx(rename = "isAuditLogged")]
     pub is_audit_logged: bool,
     #[sqlx(rename = "isUIEditable")]
@@ -133,7 +131,7 @@ pub struct FieldMetadataRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Default, FromRow)]
 pub struct IndexMetadataRow {
     pub id: Uuid,
     #[sqlx(rename = "universalIdentifier")]
@@ -159,7 +157,7 @@ pub struct IndexMetadataRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Default, FromRow)]
 pub struct IndexFieldMetadataRow {
     pub id: Uuid,
     #[sqlx(rename = "indexMetadataId")]
@@ -178,7 +176,7 @@ pub struct IndexFieldMetadataRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Default, FromRow)]
 pub struct FieldMetadataOptionRow {
     pub id: Uuid,
     #[sqlx(rename = "universalIdentifier")]
@@ -202,7 +200,7 @@ pub struct FieldMetadataOptionRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Default, FromRow)]
 pub struct SearchFieldMetadataRow {
     pub id: Uuid,
     #[sqlx(rename = "universalIdentifier")]
@@ -247,6 +245,36 @@ pub fn assemble_workspace_maps(rows: WorkspaceMetadataRows) -> MetadataResult<Fl
         .field_metadata
         .iter()
         .map(|row| (row.id, row.universal_identifier))
+        .collect();
+
+    let index_fields_by_index: HashMap<Uuid, Vec<(Uuid, Option<String>)>> = rows
+        .index_field_metadata
+        .iter()
+        .fold(HashMap::new(), |mut acc, row| {
+            acc.entry(row.index_metadata_id)
+                .or_default()
+                .push((row.field_metadata_id, row.sub_field_name.clone()));
+            acc
+        });
+
+    let unique_field_ids: std::collections::HashSet<Uuid> = rows
+        .index_metadata
+        .iter()
+        .filter(|index| index.is_unique && index.is_system_side_effect)
+        .filter_map(|index| {
+            let fields = index_fields_by_index.get(&index.id)?;
+
+            match fields.as_slice() {
+                [(field_id, None)] => Some(*field_id),
+                _ => None,
+            }
+        })
+        .collect();
+
+    let searchable_field_ids: std::collections::HashSet<Uuid> = rows
+        .search_field_metadata
+        .iter()
+        .map(|row| row.field_metadata_id)
         .collect();
 
     let mut object_maps: FlatEntityMaps<FlatObjectMetadata> = FlatEntityMaps::default();
@@ -359,8 +387,8 @@ pub fn assemble_workspace_maps(rows: WorkspaceMetadataRows) -> MetadataResult<Fl
             is_system: row.is_system,
             is_system_side_effect: row.is_system_side_effect,
             is_nullable: row.is_nullable,
-            is_unique: row.is_unique,
-            is_searchable: false,
+            is_unique: unique_field_ids.contains(&row.id),
+            is_searchable: searchable_field_ids.contains(&row.id),
             is_audit_logged: row.is_audit_logged,
             is_ui_editable: row.is_ui_editable,
             disabled_field_permission_actions: row.disabled_field_permission_actions.clone(),
@@ -801,7 +829,7 @@ async fn load_field_metadata_rows(
         "SELECT \"id\", \"universalIdentifier\", \"applicationId\", \"workspaceId\", \
          \"objectMetadataId\", \"type\"::text AS \"type\", \"name\", \"label\", \"description\", \
          \"icon\", \"defaultValue\", \"options\", \"settings\", \"overrides\", \"isActive\", \
-         \"isSystem\", \"isSystemSideEffect\", \"isNullable\", \"isUnique\", \"isAuditLogged\", \
+         \"isSystem\", \"isSystemSideEffect\", \"isNullable\", \"isAuditLogged\", \
          \"isUIEditable\", \"disabledFieldPermissionActions\", \"isLabelSyncedWithName\", \
          \"relationTargetFieldMetadataId\", \"relationTargetObjectMetadataId\", \"morphId\", \
          \"createdAt\", \"updatedAt\" \
@@ -879,4 +907,270 @@ async fn load_search_field_metadata_rows(
     .await?;
 
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn fixed_time() -> DateTime<Utc> {
+        Utc.timestamp_opt(1_700_000_000, 0).unwrap()
+    }
+
+    fn object_row(id: Uuid, workspace_id: Uuid, application_id: Uuid) -> ObjectMetadataRow {
+        ObjectMetadataRow {
+            id,
+            universal_identifier: Uuid::new_v4(),
+            application_id,
+            workspace_id,
+            name_singular: "widget".to_string(),
+            name_plural: "widgets".to_string(),
+            label_singular: "Widget".to_string(),
+            label_plural: "Widgets".to_string(),
+            target_table_name: "DEPRECATED".to_string(),
+            is_active: true,
+            is_ui_editable: true,
+            is_ui_creatable: true,
+            is_audit_logged: true,
+            open_record_in: "RECORD_PAGE".to_string(),
+            created_at: fixed_time(),
+            updated_at: fixed_time(),
+            ..ObjectMetadataRow::default()
+        }
+    }
+
+    fn field_row(
+        id: Uuid,
+        workspace_id: Uuid,
+        application_id: Uuid,
+        object_id: Uuid,
+        name: &str,
+        field_type: &str,
+    ) -> FieldMetadataRow {
+        FieldMetadataRow {
+            id,
+            universal_identifier: Uuid::new_v4(),
+            application_id,
+            workspace_id,
+            object_metadata_id: object_id,
+            field_type: field_type.to_string(),
+            name: name.to_string(),
+            label: name.to_string(),
+            is_active: true,
+            is_nullable: true,
+            is_ui_editable: true,
+            created_at: fixed_time(),
+            updated_at: fixed_time(),
+            ..FieldMetadataRow::default()
+        }
+    }
+
+    fn index_row(
+        id: Uuid,
+        workspace_id: Uuid,
+        application_id: Uuid,
+        object_id: Uuid,
+        is_unique: bool,
+        is_system_side_effect: bool,
+    ) -> IndexMetadataRow {
+        IndexMetadataRow {
+            id,
+            universal_identifier: Uuid::new_v4(),
+            application_id,
+            workspace_id,
+            name: "IDX_test".to_string(),
+            object_metadata_id: object_id,
+            is_unique,
+            index_type: "BTREE".to_string(),
+            is_system_side_effect,
+            created_at: fixed_time(),
+            updated_at: fixed_time(),
+            ..IndexMetadataRow::default()
+        }
+    }
+
+    fn index_field_row(
+        index_id: Uuid,
+        field_id: Uuid,
+        workspace_id: Uuid,
+        sub_field: Option<&str>,
+    ) -> IndexFieldMetadataRow {
+        IndexFieldMetadataRow {
+            id: Uuid::new_v4(),
+            index_metadata_id: index_id,
+            field_metadata_id: field_id,
+            workspace_id,
+            order: 1,
+            sub_field_name: sub_field.map(String::from),
+            created_at: fixed_time(),
+            updated_at: fixed_time(),
+        }
+    }
+
+    fn search_row(
+        workspace_id: Uuid,
+        application_id: Uuid,
+        object_id: Uuid,
+        field_id: Uuid,
+        ts_vector_field_id: Uuid,
+    ) -> SearchFieldMetadataRow {
+        SearchFieldMetadataRow {
+            id: Uuid::new_v4(),
+            universal_identifier: Uuid::new_v4(),
+            application_id,
+            workspace_id,
+            object_metadata_id: object_id,
+            field_metadata_id: field_id,
+            ts_vector_field_metadata_id: ts_vector_field_id,
+            position: 1.0,
+            is_system_side_effect: true,
+            created_at: fixed_time(),
+            updated_at: fixed_time(),
+        }
+    }
+
+    fn unique_derivation(is_unique: bool, side_effect: bool, sub_field: Option<&str>) -> bool {
+        let workspace_id = Uuid::new_v4();
+        let application_id = Uuid::new_v4();
+        let object_id = Uuid::new_v4();
+        let field_id = Uuid::new_v4();
+        let index_id = Uuid::new_v4();
+
+        let maps = assemble_workspace_maps(WorkspaceMetadataRows {
+            object_metadata: vec![object_row(object_id, workspace_id, application_id)],
+            field_metadata: vec![field_row(
+                field_id,
+                workspace_id,
+                application_id,
+                object_id,
+                "code",
+                "TEXT",
+            )],
+            index_metadata: vec![index_row(
+                index_id,
+                workspace_id,
+                application_id,
+                object_id,
+                is_unique,
+                side_effect,
+            )],
+            index_field_metadata: vec![index_field_row(
+                index_id,
+                field_id,
+                workspace_id,
+                sub_field,
+            )],
+            field_metadata_option: Vec::new(),
+            search_field_metadata: Vec::new(),
+        })
+        .expect("assembling maps");
+
+        maps.field_metadata_maps
+            .find_by_id(&field_id.to_string())
+            .expect("field present")
+            .is_unique
+    }
+
+    #[test]
+    fn a_single_member_unique_side_effect_index_marks_the_field_unique() {
+        assert!(unique_derivation(true, true, None));
+    }
+
+    #[test]
+    fn a_user_declared_unique_index_does_not_mark_the_field_unique() {
+        assert!(!unique_derivation(true, false, None));
+    }
+
+    #[test]
+    fn a_non_unique_index_does_not_mark_the_field_unique() {
+        assert!(!unique_derivation(false, true, None));
+    }
+
+    #[test]
+    fn a_composite_sub_field_member_does_not_mark_the_field_unique() {
+        assert!(!unique_derivation(true, true, Some("primaryEmail")));
+    }
+
+    #[test]
+    fn a_search_field_row_marks_the_field_searchable() {
+        let workspace_id = Uuid::new_v4();
+        let application_id = Uuid::new_v4();
+        let object_id = Uuid::new_v4();
+        let field_id = Uuid::new_v4();
+        let ts_vector_field_id = Uuid::new_v4();
+
+        let maps = assemble_workspace_maps(WorkspaceMetadataRows {
+            object_metadata: vec![object_row(object_id, workspace_id, application_id)],
+            field_metadata: vec![
+                field_row(
+                    field_id,
+                    workspace_id,
+                    application_id,
+                    object_id,
+                    "name",
+                    "TEXT",
+                ),
+                field_row(
+                    ts_vector_field_id,
+                    workspace_id,
+                    application_id,
+                    object_id,
+                    "searchVector",
+                    "TS_VECTOR",
+                ),
+            ],
+            index_metadata: Vec::new(),
+            index_field_metadata: Vec::new(),
+            field_metadata_option: Vec::new(),
+            search_field_metadata: vec![search_row(
+                workspace_id,
+                application_id,
+                object_id,
+                field_id,
+                ts_vector_field_id,
+            )],
+        })
+        .expect("assembling maps");
+
+        assert!(
+            maps.field_metadata_maps
+                .find_by_id(&field_id.to_string())
+                .expect("field present")
+                .is_searchable
+        );
+    }
+
+    #[test]
+    fn a_field_without_a_search_row_is_not_searchable() {
+        let workspace_id = Uuid::new_v4();
+        let application_id = Uuid::new_v4();
+        let object_id = Uuid::new_v4();
+        let field_id = Uuid::new_v4();
+
+        let maps = assemble_workspace_maps(WorkspaceMetadataRows {
+            object_metadata: vec![object_row(object_id, workspace_id, application_id)],
+            field_metadata: vec![field_row(
+                field_id,
+                workspace_id,
+                application_id,
+                object_id,
+                "code",
+                "TEXT",
+            )],
+            index_metadata: Vec::new(),
+            index_field_metadata: Vec::new(),
+            field_metadata_option: Vec::new(),
+            search_field_metadata: Vec::new(),
+        })
+        .expect("assembling maps");
+
+        assert!(
+            !maps
+                .field_metadata_maps
+                .find_by_id(&field_id.to_string())
+                .expect("field present")
+                .is_searchable
+        );
+    }
 }
