@@ -5,11 +5,12 @@ use crate::query::filter::Suffixes;
 use super::base::compile_runner_filter;
 use super::base::execute_json_rows;
 use super::base::resolve_where_clauses;
-use super::base::select_columns;
 use super::base::RunnerSchema;
 use super::base::Selection;
 use super::find_many::NestedRelationSelection;
 use super::format_result_rows;
+use super::permissions::validate_filter_read;
+use super::permissions::validate_read;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Default)]
@@ -32,6 +33,7 @@ pub async fn find_one(
 
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
+    validate_filter_read(schema, model, Some(filter))?;
     let mut suffixes = Suffixes::new();
     let compiled_filter =
         compile_runner_filter(schema, object_name_singular, Some(filter), &mut suffixes)?;
@@ -64,10 +66,11 @@ pub async fn find_one(
     } else {
         format!(" WHERE {}", predicates.join(" AND "))
     };
-    let columns = select_columns(
+    let columns = schema.select_read_columns(
         model,
         &Selection::from_fields(args.selected_field_names.clone()),
     )?;
+    validate_read(schema, model, &columns)?;
     let mapped_columns = columns
         .into_iter()
         .map(|column| {

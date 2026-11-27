@@ -19,14 +19,11 @@ pub fn assert_operation_allowed(
 ) -> Result<(), PermissionError> {
     let object = permissions
         .object(object_metadata_id)
-        .ok_or_else(|| PermissionError::denied("Object is not accessible"))?;
+        .ok_or_else(permission_denied)?;
     if object.can_access_some_records(operation) {
         Ok(())
     } else {
-        Err(PermissionError::denied(format!(
-            "Entity performing the request does not have permission to {} records",
-            operation.as_str()
-        )))
+        Err(permission_denied())
     }
 }
 
@@ -79,6 +76,10 @@ pub fn validate_operation_is_permitted_or_throw(
     Ok(())
 }
 
+fn permission_denied() -> PermissionError {
+    PermissionError::denied("Entity performing the request does not have permission")
+}
+
 fn unreadable_field_error(
     object: &FlatObjectMetadata,
     fields: &BTreeMap<Uuid, &FlatFieldMetadata>,
@@ -104,7 +105,7 @@ fn uneditable_field_error(
         .map(|field| field.name.as_str())
         .unwrap_or("unknown");
     PermissionError::denied(format!(
-        "no permission to update field \"{field_name}\" on \"{}\"",
+        "no permission to write field \"{field_name}\" on \"{}\"",
         object.name_singular
     ))
 }
@@ -195,7 +196,28 @@ mod tests {
             &BTreeSet::new(),
         )
         .unwrap_err();
-        assert!(error.message.contains("update field"));
+        assert!(error.message.contains("write field"));
+    }
+
+    #[test]
+    fn object_denial_uses_the_upstream_message() {
+        let object_id = Uuid::new_v4();
+        let permissions = RoleRecordsPermissions {
+            objects: [(
+                object_id.to_string(),
+                super::super::model::ObjectRecordsPermissions::default(),
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let error =
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read)
+                .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Entity performing the request does not have permission"
+        );
     }
 
     #[test]

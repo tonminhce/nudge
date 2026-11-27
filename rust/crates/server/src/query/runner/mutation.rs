@@ -14,6 +14,8 @@ use super::actors::ActorContext;
 use super::base::compile_runner_filter;
 use super::base::resolve_where_clauses;
 use super::base::RunnerSchema;
+use super::permissions::validate_filter_read;
+use super::permissions::validate_write;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +35,16 @@ impl FilteredMutationKind {
             Self::Restore => MutationKind::Restore,
         }
     }
+
+    pub fn permission_operation(self) -> crate::permissions::ObjectRecordsOperationType {
+        match self {
+            Self::Update => crate::permissions::ObjectRecordsOperationType::Update,
+            Self::SoftDelete | Self::Restore => {
+                crate::permissions::ObjectRecordsOperationType::SoftDelete
+            }
+            Self::Destroy => crate::permissions::ObjectRecordsOperationType::Destroy,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -49,6 +61,7 @@ pub async fn run_mutation(
 ) -> Result<Vec<Value>, RunnerError> {
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
+    validate_filter_read(schema, model, filter.as_ref())?;
     let mut suffixes = Suffixes::new();
     let compiled_filter =
         compile_runner_filter(schema, object_name_singular, filter.as_ref(), &mut suffixes)?;
@@ -94,6 +107,14 @@ pub async fn run_mutation(
     } else {
         returning_columns
     };
+    let data = set_columns.iter().cloned().collect::<Map<String, Value>>();
+    validate_write(
+        schema,
+        model,
+        kind.permission_operation(),
+        &data,
+        &returning_columns,
+    )?;
     let state = MutationStatementState {
         alias,
         shape: &model.shape,

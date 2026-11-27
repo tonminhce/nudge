@@ -60,6 +60,8 @@ pub struct ObjectModel {
 pub struct RunnerSchema {
     objects_by_name: HashMap<String, ObjectModel>,
     objects_by_id: HashMap<Uuid, ObjectModel>,
+    records_permissions: Option<crate::permissions::RoleRecordsPermissions>,
+    mask_unreadable_fields: bool,
 }
 
 impl RunnerSchema {
@@ -68,6 +70,51 @@ impl RunnerSchema {
         objects: &[FlatObjectMetadata],
         fields: &FlatEntityMaps<FlatFieldMetadata>,
         indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
+    ) -> Result<Self, RunnerError> {
+        Self::build_inner(workspace_id, objects, fields, indexes, None, false)
+    }
+
+    pub fn build_with_permissions(
+        workspace_id: &Uuid,
+        objects: &[FlatObjectMetadata],
+        fields: &FlatEntityMaps<FlatFieldMetadata>,
+        indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
+        permissions: crate::permissions::RoleRecordsPermissions,
+    ) -> Result<Self, RunnerError> {
+        Self::build_inner(
+            workspace_id,
+            objects,
+            fields,
+            indexes,
+            Some(permissions),
+            false,
+        )
+    }
+
+    pub fn build_for_rest_with_permissions(
+        workspace_id: &Uuid,
+        objects: &[FlatObjectMetadata],
+        fields: &FlatEntityMaps<FlatFieldMetadata>,
+        indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
+        permissions: crate::permissions::RoleRecordsPermissions,
+    ) -> Result<Self, RunnerError> {
+        Self::build_inner(
+            workspace_id,
+            objects,
+            fields,
+            indexes,
+            Some(permissions),
+            true,
+        )
+    }
+
+    fn build_inner(
+        workspace_id: &Uuid,
+        objects: &[FlatObjectMetadata],
+        fields: &FlatEntityMaps<FlatFieldMetadata>,
+        indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
+        records_permissions: Option<crate::permissions::RoleRecordsPermissions>,
+        mask_unreadable_fields: bool,
     ) -> Result<Self, RunnerError> {
         let mut objects_by_name = HashMap::new();
         let mut objects_by_id = HashMap::new();
@@ -151,7 +198,43 @@ impl RunnerSchema {
         Ok(Self {
             objects_by_name,
             objects_by_id,
+            records_permissions,
+            mask_unreadable_fields,
         })
+    }
+
+    pub fn records_permissions(&self) -> Option<&crate::permissions::RoleRecordsPermissions> {
+        self.records_permissions.as_ref()
+    }
+
+    pub fn masks_unreadable_fields(&self) -> bool {
+        self.mask_unreadable_fields
+    }
+
+    pub fn is_field_unreadable(&self, object_metadata_id: Uuid, field_metadata_id: Uuid) -> bool {
+        self.records_permissions
+            .as_ref()
+            .and_then(|permissions| permissions.object(object_metadata_id))
+            .is_some_and(|object| {
+                object
+                    .unreadable_fields
+                    .iter()
+                    .any(|field_id| field_id == &field_metadata_id.to_string())
+            })
+    }
+
+    pub fn select_read_columns(
+        &self,
+        model: &ObjectModel,
+        selection: &Selection,
+    ) -> Result<Vec<ColumnShape>, RunnerError> {
+        let mut columns = select_columns(model, selection)?;
+        if self.mask_unreadable_fields {
+            columns.retain(|column| {
+                !self.is_field_unreadable(model.object.id, column.field_metadata_id)
+            });
+        }
+        Ok(columns)
     }
 
     pub fn object(&self, name_singular: &str) -> Result<&ObjectModel, RunnerError> {

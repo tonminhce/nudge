@@ -31,6 +31,7 @@ use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::names::camel_case;
 use crate::metadata::names::pascal_case;
 use crate::permissions::current_user_workspace_permissions_for_auth;
+use crate::permissions::records_permissions_for_auth;
 use crate::query::cursor::encode_cursor_data;
 use crate::query::runner::create_many;
 use crate::query::runner::create_one;
@@ -332,8 +333,8 @@ fn error_response_for_key(
         StatusCode::OK,
         [(CONTENT_TYPE, "application/json")],
         Json(json!({
-            "errors": errors.iter().map(GraphQlError::to_json).collect::<Vec<_>>(),
             "data": root_key.map(|key| json!({ key: Value::Null })).unwrap_or(Value::Null),
+            "errors": errors.iter().map(GraphQlError::to_json).collect::<Vec<_>>(),
         })),
     )
         .into_response()
@@ -348,6 +349,14 @@ fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlErro
             GraphQlError::not_found("Record not found"),
             code,
             "This record does not exist or has been deleted.",
+        );
+    }
+
+    if matches!(code, "PERMISSION_DENIED" | "RECORD_NOT_EDITABLE") {
+        return friendly_graphql_error(
+            GraphQlError::forbidden(message),
+            code,
+            "User does not have permission.",
         );
     }
 
@@ -437,13 +446,26 @@ async fn execute_workspace(
     let resolver = schema.resolver(&field.name).ok_or_else(|| {
         GraphQlError::user_input(format!("Unknown workspace field {}", field.name))
     })?;
-    let runner_schema = RunnerSchema::build(
-        &workspace_id,
-        schema.objects(),
-        &maps.field_metadata_maps,
-        &maps.index_metadata_maps,
-    )
-    .map_err(runner_graphql_error)?;
+    let permissions = records_permissions_for_auth(state, auth)
+        .await
+        .map_err(GraphQlError::from)?;
+    let runner_schema = match permissions {
+        Some(permissions) => RunnerSchema::build_with_permissions(
+            &workspace_id,
+            schema.objects(),
+            &maps.field_metadata_maps,
+            &maps.index_metadata_maps,
+            permissions,
+        )
+        .map_err(runner_graphql_error)?,
+        None => RunnerSchema::build(
+            &workspace_id,
+            schema.objects(),
+            &maps.field_metadata_maps,
+            &maps.index_metadata_maps,
+        )
+        .map_err(runner_graphql_error)?,
+    };
     let actor = if auth.workspace_member_id.is_some() {
         Some(ActorContext::manual(
             auth.workspace_member_id.map(|id| id.to_string()),

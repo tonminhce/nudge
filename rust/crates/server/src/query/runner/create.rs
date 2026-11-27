@@ -18,6 +18,7 @@ use super::base::compile_runner_filter;
 use super::base::resolve_where_clauses;
 use super::base::ObjectModel;
 use super::base::RunnerSchema;
+use super::permissions::validate_write;
 use super::position::override_position_on_records;
 use super::RunnerError;
 
@@ -42,6 +43,16 @@ pub async fn create_many(
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
     let mut records = args.records.clone();
+
+    for record in &records {
+        validate_write(
+            schema,
+            model,
+            crate::permissions::ObjectRecordsOperationType::Create,
+            record,
+            &[],
+        )?;
+    }
 
     for (index, record) in records.iter_mut().enumerate() {
         inject_actor_fields_on_create(model, record, args.actor.as_ref())?;

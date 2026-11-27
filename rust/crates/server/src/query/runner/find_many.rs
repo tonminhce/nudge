@@ -27,13 +27,15 @@ use super::base::execute_json_rows;
 use super::base::order_expression;
 use super::base::render_select_list;
 use super::base::resolve_where_clauses;
-use super::base::select_columns;
 use super::base::ResolvedOrder;
 use super::base::RunnerSchema;
 use super::base::Selection;
 use super::base::DEFAULT_PAGE_SIZE;
 use super::base::QUERY_MAX_RECORDS;
 use super::format_result_rows;
+use super::permissions::validate_filter_read;
+use super::permissions::validate_order_read;
+use super::permissions::validate_read;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Default)]
@@ -74,6 +76,8 @@ pub async fn find_many(
 ) -> Result<FindManyResult, RunnerError> {
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
+    validate_filter_read(schema, model, args.filter.as_ref())?;
+    validate_order_read(schema, model, args.order_by.as_ref())?;
     validate_pagination_args(args)?;
     let page_size = page_size(args)?;
     let is_forward = args.before.is_none();
@@ -180,7 +184,8 @@ pub async fn find_many(
     };
     let from_sql = from_with_joins(model, alias, &joins)?;
     let selection = Selection::from_fields(args.selected_field_names.clone());
-    let mut columns = select_columns(model, &selection)?;
+    let mut columns = schema.select_read_columns(model, &selection)?;
+    validate_read(schema, model, &columns)?;
 
     if selection.field_names.is_empty() || !columns.iter().any(|column| column.column_name == "id")
     {

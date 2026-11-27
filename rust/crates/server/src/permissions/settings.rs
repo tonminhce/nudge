@@ -48,6 +48,18 @@ pub async fn user_workspace_permissions_for_auth(
     Ok(Some(user_workspace_permissions(&workspace, &context)))
 }
 
+pub async fn records_permissions_for_auth(
+    state: &AppState,
+    auth: &AuthContext,
+) -> Result<Option<RoleRecordsPermissions>, PermissionError> {
+    let Some((context, workspace)) = load_context_and_set(state, auth).await? else {
+        return Ok(None);
+    };
+    Ok(Some(compute_context_records_permissions(
+        &workspace, &context,
+    )))
+}
+
 pub async fn current_user_workspace_permissions_for_auth(
     state: &AppState,
     auth: &AuthContext,

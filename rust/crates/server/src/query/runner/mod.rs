@@ -15,6 +15,7 @@ pub mod find_one;
 pub mod group_by;
 pub mod mutation;
 pub mod nested;
+pub mod permissions;
 pub mod position;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -149,6 +150,14 @@ impl RunnerError {
 
     pub fn record_not_found() -> Self {
         Self::new("RECORD_NOT_FOUND", "Record was not found")
+    }
+
+    pub fn permission_denied(message: impl Into<String>) -> Self {
+        Self::new("PERMISSION_DENIED", message)
+    }
+
+    pub fn record_not_editable() -> Self {
+        Self::new("RECORD_NOT_EDITABLE", "Record is not editable")
     }
 
     pub fn too_many_records_to_update() -> Self {

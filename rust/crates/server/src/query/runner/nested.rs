@@ -8,12 +8,12 @@ use crate::query::repository::quote_identifier;
 use super::base::column_result_alias;
 use super::base::execute_json_rows;
 use super::base::render_select_list;
-use super::base::select_columns;
 use super::base::RunnerSchema;
 use super::base::Selection;
 use super::base::QUERY_MAX_RECORDS_FROM_RELATION;
 use super::find_many::NestedRelationSelection;
 use super::format_result_rows;
+use super::permissions::validate_read;
 use super::RunnerError;
 
 pub async fn load_nested_relations(
@@ -28,7 +28,8 @@ pub async fn load_nested_relations(
             schema.relation(object_name_singular, &selection.relation_field_name)?;
         let child_alias = format!("{}_{}", object_name_singular, selection.relation_field_name);
         let child_selection = Selection::from_fields(selection.selected_field_names.clone());
-        let columns = select_columns(child, &child_selection)?;
+        let columns = schema.select_read_columns(child, &child_selection)?;
+        validate_read(schema, child, &columns)?;
         let mapped_columns = columns
             .into_iter()
             .map(|column| {

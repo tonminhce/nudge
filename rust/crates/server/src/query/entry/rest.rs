@@ -24,6 +24,8 @@ use crate::metadata::flat::FlatWorkspaceMaps;
 use crate::metadata::flat::RelationType;
 use crate::metadata::names::camel_case;
 use crate::metadata::names::pascal_case;
+use crate::permissions::records_permissions_for_auth;
+use crate::permissions::PermissionError;
 use crate::query::cursor::decode_cursor;
 use crate::query::runner::aggregate::Aggregate;
 use crate::query::runner::aggregate::AggregateOperation;
@@ -71,6 +73,7 @@ pub struct RestError {
     pub error: &'static str,
     pub messages: Vec<String>,
     pub code: &'static str,
+    include_code: bool,
 }
 
 impl RestError {
@@ -85,6 +88,7 @@ impl RestError {
             error,
             messages: vec![message.into()],
             code,
+            include_code: false,
         }
     }
 
@@ -156,16 +160,21 @@ impl RestError {
         self
     }
 
+    pub fn with_response_code(mut self) -> Self {
+        self.include_code = true;
+        self
+    }
+
     pub fn response(&self) -> Response {
-        (
-            self.status,
-            Json(json!({
-                "statusCode": self.status.as_u16(),
-                "error": self.error,
-                "messages": self.messages,
-            })),
-        )
-            .into_response()
+        let mut payload = json!({
+            "statusCode": self.status.as_u16(),
+            "error": self.error,
+            "messages": self.messages,
+        });
+        if self.include_code {
+            payload["code"] = json!(self.code);
+        }
+        (self.status, Json(payload)).into_response()
     }
 }
 
@@ -228,14 +237,30 @@ async fn rest_endpoint(
         Err(error) => return RestError::internal(error.message.clone()).response(),
     };
     let schema = WorkspaceSchema::build(&maps);
-    let runner_schema = match RunnerSchema::build(
-        &workspace_id,
-        schema.objects(),
-        &maps.field_metadata_maps,
-        &maps.index_metadata_maps,
-    ) {
-        Ok(schema) => schema,
-        Err(error) => return RestError::internal(error.message().to_string()).response(),
+    let permissions = match records_permissions_for_auth(&state, &auth).await {
+        Ok(permissions) => permissions,
+        Err(error) => return rest_permission_error(error).response(),
+    };
+    let runner_schema = match permissions {
+        Some(permissions) => match RunnerSchema::build_for_rest_with_permissions(
+            &workspace_id,
+            schema.objects(),
+            &maps.field_metadata_maps,
+            &maps.index_metadata_maps,
+            permissions,
+        ) {
+            Ok(schema) => schema,
+            Err(error) => return RestError::internal(error.message().to_string()).response(),
+        },
+        None => match RunnerSchema::build(
+            &workspace_id,
+            schema.objects(),
+            &maps.field_metadata_maps,
+            &maps.index_metadata_maps,
+        ) {
+            Ok(schema) => schema,
+            Err(error) => return RestError::internal(error.message().to_string()).response(),
+        },
     };
     let path_parts = path
         .split('/')
@@ -1201,9 +1226,22 @@ fn rest_object<'a>(
         .ok_or_else(|| RestError::unknown_object(path_name))
 }
 
+fn rest_permission_error(error: PermissionError) -> RestError {
+    let status =
+        StatusCode::from_u16(error.code.rest_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    RestError::new(status, "Error", error.code.as_str(), error.message).with_response_code()
+}
+
 fn rest_runner_error(error: crate::query::runner::RunnerError) -> RestError {
     match error.code() {
         "RECORD_NOT_FOUND" => RestError::record_not_found(),
+        "PERMISSION_DENIED" | "RECORD_NOT_EDITABLE" => RestError::new(
+            StatusCode::FORBIDDEN,
+            "Error",
+            error.code(),
+            error.message(),
+        )
+        .with_response_code(),
         "INVALID_AUTH_CONTEXT" => RestError::new(
             StatusCode::UNAUTHORIZED,
             "UnauthorizedException",
@@ -1300,6 +1338,10 @@ fn resolve_rest_fields(
             invalid.push(name.clone());
             continue;
         };
+        if runner_schema.is_field_unreadable(model.object.id, field.id) {
+            invalid.push(name.clone());
+            continue;
+        }
 
         if matches!(
             field.field_type,
@@ -1348,4 +1390,53 @@ fn resolve_rest_fields(
     }
 
     Ok((Some(keys), relations))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn response_json(error: RestError) -> Value {
+        let response = error.response();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("error response body");
+        assert_eq!(status, error.status);
+        serde_json::from_slice(&bytes).expect("error response json")
+    }
+
+    #[tokio::test]
+    async fn permission_errors_include_the_upstream_code() {
+        let body = response_json(rest_runner_error(crate::query::runner::RunnerError::new(
+            "PERMISSION_DENIED",
+            "Entity performing the request does not have permission",
+        )))
+        .await;
+        assert_eq!(body["statusCode"], 403);
+        assert_eq!(body["error"], "Error");
+        assert_eq!(body["code"], "PERMISSION_DENIED");
+        assert_eq!(
+            body["messages"][0],
+            "Entity performing the request does not have permission"
+        );
+    }
+
+    #[tokio::test]
+    async fn ordinary_rest_errors_keep_their_existing_shape() {
+        let body = response_json(RestError::unknown_object("missing")).await;
+        assert_eq!(
+            body,
+            json!({
+                "statusCode": 400,
+                "error": "BadRequestException",
+                "messages": ["object 'missing' not found. eg: companies"],
+            })
+        );
+        let body = response_json(
+            RestError::invalid_fields("invalid").with_code("INVALID_FIELDS_QUERY_PARAM"),
+        )
+        .await;
+        assert!(body.get("code").is_none());
+    }
 }

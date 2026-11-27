@@ -11,6 +11,8 @@ use super::base::RunnerSchema;
 use super::find_many::collect_filter_relation_joins;
 use super::find_many::from_with_joins;
 use super::find_many::RelationJoins;
+use super::permissions::validate_filter_read;
+use super::permissions::validate_named_read;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +103,12 @@ pub async fn aggregate(
 ) -> Result<Vec<AggregateValue>, RunnerError> {
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
+    validate_filter_read(schema, model, filter)?;
+    let field_names = aggregates
+        .iter()
+        .filter_map(|aggregate| aggregate.field_name.clone())
+        .collect::<Vec<_>>();
+    validate_named_read(schema, model, &field_names)?;
     let mut suffixes = Suffixes::new();
     let compiled_filter =
         compile_runner_filter(schema, object_name_singular, filter, &mut suffixes)?;

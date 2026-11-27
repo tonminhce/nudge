@@ -15,8 +15,14 @@ use uuid::Uuid;
 
 use model::WorkspacePermissionSet;
 
+pub use error::PermissionError;
+pub use model::ObjectRecordsOperationType;
+pub use model::RoleRecordsPermissions;
 pub use settings::current_user_workspace_permissions_for_auth;
+pub use settings::records_permissions_for_auth;
 pub use settings::user_workspace_permissions_for_auth;
+pub use validate::assert_operation_allowed;
+pub use validate::validate_operation_is_permitted_or_throw;
 
 const PERMISSION_CACHE_CAPACITY: usize = 256;
 
