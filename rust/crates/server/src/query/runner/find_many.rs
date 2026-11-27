@@ -956,8 +956,13 @@ mod db_tests {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        let schema = RunnerSchema::build(&seeded.workspace_id, &objects, &maps.field_metadata_maps)
-            .expect("build runner schema");
+        let schema = RunnerSchema::build(
+            &seeded.workspace_id,
+            &objects,
+            &maps.field_metadata_maps,
+            &maps.index_metadata_maps,
+        )
+        .expect("build runner schema");
 
         let company_shape = schema.object("company").expect("company").shape.clone();
         let person_shape = schema.object("person").expect("person").shape.clone();

@@ -43,11 +43,18 @@ pub const QUERY_MAX_RECORDS_FROM_RELATION: usize = 60;
 
 pub const COMMON_QUERY_COMPLEXITY_LIMIT: usize = 2000;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UniqueField {
+    pub field_name: String,
+    pub sub_field_name: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct ObjectModel {
     pub object: FlatObjectMetadata,
     pub shape: Arc<TableShape>,
     pub fields_by_name: HashMap<String, FlatFieldMetadata>,
+    pub unique_field_groups: Vec<Vec<UniqueField>>,
 }
 
 pub struct RunnerSchema {
@@ -60,9 +67,63 @@ impl RunnerSchema {
         workspace_id: &Uuid,
         objects: &[FlatObjectMetadata],
         fields: &FlatEntityMaps<FlatFieldMetadata>,
+        indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
     ) -> Result<Self, RunnerError> {
         let mut objects_by_name = HashMap::new();
         let mut objects_by_id = HashMap::new();
+        let mut unique_groups_by_object: HashMap<Uuid, Vec<Vec<UniqueField>>> = HashMap::new();
+
+        for index in indexes.by_universal_identifier.values() {
+            if !index.is_unique {
+                continue;
+            }
+
+            let group = index
+                .flat_index_field_metadatas
+                .iter()
+                .flat_map(|index_field| {
+                    let Some(field) =
+                        fields.find_by_id(&index_field.field_metadata_id.to_string())
+                    else {
+                        return Vec::new();
+                    };
+
+                    if let Some(sub_field_name) = index_field.sub_field_name.as_deref() {
+                        return vec![UniqueField {
+                            field_name: field.name.clone(),
+                            sub_field_name: Some(sub_field_name.to_string()),
+                        }];
+                    }
+
+                    if crate::workspace_migrations::column_defs::composite_types::is_composite_field_metadata_type(
+                        crate::workspace_migrations::runner::ddl_field_type(field.field_type),
+                    ) {
+                        return crate::workspace_migrations::column_defs::composite_types::composite_properties(
+                            crate::workspace_migrations::runner::ddl_field_type(field.field_type),
+                        )
+                        .iter()
+                        .filter(|property| property.is_included_in_unique_constraint)
+                        .map(|property| UniqueField {
+                            field_name: field.name.clone(),
+                            sub_field_name: Some(property.name.to_string()),
+                        })
+                        .collect::<Vec<_>>();
+                    }
+
+                    vec![UniqueField {
+                        field_name: field.name.clone(),
+                        sub_field_name: None,
+                    }]
+                })
+                .collect::<Vec<_>>();
+
+            if !group.is_empty() {
+                unique_groups_by_object
+                    .entry(index.object_metadata_id)
+                    .or_default()
+                    .push(group);
+            }
+        }
 
         for object in objects {
             let shape = Arc::new(build_workspace_table_shape(workspace_id, object, fields));
@@ -78,6 +139,9 @@ impl RunnerSchema {
                 object: object.clone(),
                 shape,
                 fields_by_name,
+                unique_field_groups: unique_groups_by_object
+                    .remove(&object.id)
+                    .unwrap_or_default(),
             };
 
             objects_by_name.insert(object.name_singular.clone(), model.clone());
@@ -411,10 +475,17 @@ pub fn render_select_list(
     let mut parts = Vec::with_capacity(columns.len() + order_scan_values.len());
 
     for (column, result_alias, _) in columns {
-        let expression = if column.field_metadata_type == FieldMetadataType::Numeric {
-            format!("{}::text", quoted_column(alias, &column.column_name)?)
-        } else {
-            quoted_column(alias, &column.column_name)?
+        let expression = match column.field_metadata_type {
+            FieldMetadataType::Numeric => {
+                format!("{}::text", quoted_column(alias, &column.column_name)?)
+            }
+            FieldMetadataType::Text
+            | FieldMetadataType::Select
+            | FieldMetadataType::Rating
+            | FieldMetadataType::TsVector => {
+                format!("{}::text", quoted_column(alias, &column.column_name)?)
+            }
+            _ => quoted_column(alias, &column.column_name)?,
         };
 
         parts.push(format!(
@@ -553,7 +624,7 @@ pub fn row_to_json(
     Ok(record)
 }
 
-fn json_cell(row: &sqlx::postgres::PgRow, name: &str) -> Result<Value, RunnerError> {
+pub(crate) fn json_cell(row: &sqlx::postgres::PgRow, name: &str) -> Result<Value, RunnerError> {
     let raw = row.try_get_raw(name).map_err(RunnerError::database)?;
 
     if raw.is_null() {
