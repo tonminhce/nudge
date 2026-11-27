@@ -589,28 +589,41 @@ fn scalar_order(
         }
     }
 
-    if let Some(field) = model.fields_by_name.get(key) {
-        if crate::workspace_migrations::column_defs::composite_types::is_composite_field_metadata_type(
-            crate::workspace_migrations::runner::ddl_field_type(field.field_type),
-        ) {
-            if let Some(parent) = path.last().cloned() {
-                column_name = composite_column(model, &parent, key)?;
-            } else {
-                return Err(RunnerError::unknown_sub_field(key, "", Vec::new()));
-            }
+    if path.len() > 1 {
+        kind = LeafKind::Relation;
+    }
 
-            field_type = model
-                .shape
-                .column(&column_name)
-                .map(|column| column.field_metadata_type)
-                .unwrap_or(field.field_type);
-            kind = LeafKind::Composite;
-            nullable = field.is_nullable;
+    if let Some(parent) = path.last().cloned() {
+        if let Some(parent_field) = model.fields_by_name.get(&parent) {
+            if crate::workspace_migrations::column_defs::composite_types::is_composite_field_metadata_type(
+                crate::workspace_migrations::runner::ddl_field_type(parent_field.field_type),
+            ) {
+                column_name = composite_column(model, &parent, key)?;
+                field_type = model
+                    .shape
+                    .column(&column_name)
+                    .map(|column| column.field_metadata_type)
+                    .unwrap_or_else(|| {
+                        model
+                            .fields_by_name
+                            .get(key)
+                            .map(|field| field.field_type)
+                            .unwrap_or(FieldMetadataType::Text)
+                    });
+                kind = LeafKind::Composite;
+                nullable = parent_field.is_nullable;
+            }
         }
     }
 
-    if path.len() > 1 {
-        kind = LeafKind::Relation;
+    if let Some(field) = model.fields_by_name.get(key) {
+        if path.is_empty()
+            && crate::workspace_migrations::column_defs::composite_types::is_composite_field_metadata_type(
+                crate::workspace_migrations::runner::ddl_field_type(field.field_type),
+            )
+        {
+            return Err(RunnerError::unknown_sub_field(key, "", Vec::new()));
+        }
     }
 
     let mut leaf_path = path.to_owned();

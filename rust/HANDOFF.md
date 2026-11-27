@@ -161,7 +161,20 @@ R-002 (verify auth behaviour against upstream, never guess).
     exposes `__schema` root types, object/connection/edge/pageInfo fields and `__type`; SDL is
     available from `WorkspaceSchema::sdl()`. E2E covers unauthenticated, introspection,
     connection, create/update/delete visibility, and the mix rejection.
-  - Next: U7 REST entry; then groupBy/root operation fan-out and wave 5 (Leptos front) spec
+  - U7 `query::entry::rest` (branch `wave4/u7`): `/rest/{*path}` now dispatches the core
+    record surface: plural object resolution, `findMany`, `findOne`, `createOne`,
+    batch `createMany`, `updateOne`, filtered `updateMany`, soft-delete/destroy by id,
+    filtered bulk delete, restore, and `groupBy` with aggregate names. The REST query DSL
+    parses `and/or/not`, dotted leaf paths, comparator brackets, array values, scalar
+    coercion, `order_by[Direction]`, cursor params, `limit`, `depth`, `fields`,
+    `soft_delete`, `upsert`, `group_by`, and `aggregate`. Responses use the upstream
+    `FormatResult` envelope and field trimming always preserves `id`; errors use the REST
+    `{statusCode,error,messages,code}` shape with the upstream domain-to-HTTP mapping. The
+    create statement now casts actor member IDs to UUID and the find-many order resolver
+    resolves dotted composite sub-fields. E2E covers filtered/ordered list, full CRUD,
+    soft-delete versus destroy, restore, groupBy and the error contracts.
+  - Next: parity comparison of REST payload shapes against the live reference, then
+    groupBy/root operation fan-out and wave 5 (Leptos front) spec
     `research/frontend-architecture.md`.
 
 ## How to run everything
