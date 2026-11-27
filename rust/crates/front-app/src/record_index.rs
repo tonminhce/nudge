@@ -151,6 +151,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                     text_filter(&object.name_singular, &query),
                     order_by(&object.name_singular, sort),
                     depth,
+                    true,
                 )
                 .await?;
                 Ok::<_, String>((object, response))
@@ -203,6 +204,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                 text_filter(&object.name_singular, &applied_search.get()),
                 order_by(&object.name_singular, sort.get()),
                 depth,
+                false,
             )
             .await;
             match result {
@@ -237,7 +239,8 @@ pub fn RecordIndexPage() -> impl IntoView {
                     .into_iter()
                     .find(|object| object.name_singular == "company")
                 {
-                    if let Ok(response) = load_records(&token, &company, None, None, None, 0).await
+                    if let Ok(response) =
+                        load_records(&token, &company, None, None, None, 0, false).await
                     {
                         companies.set(records_from_response(&response, &company.name_plural));
                     }

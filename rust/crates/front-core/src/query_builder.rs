@@ -34,6 +34,7 @@ pub struct FindManyArgs {
     pub before: Option<String>,
     pub offset: Option<i64>,
     pub depth: usize,
+    pub include_total_count: Option<bool>,
 }
 
 pub fn find_many_query(
@@ -96,8 +97,13 @@ pub fn find_many_query(
         .collect::<Vec<_>>()
         .join(", ");
     let arguments = arguments.join(", ");
+    let total_count = if args.include_total_count.unwrap_or(true) {
+        " totalCount"
+    } else {
+        ""
+    };
     let query = format!(
-        "query {operation}({variable_definitions}) {{ {}({arguments}) {{ edges {{ node {{ {projection} }} cursor }} pageInfo {{ hasNextPage hasPreviousPage startCursor endCursor }} totalCount }} }}",
+        "query {operation}({variable_definitions}) {{ {}({arguments}) {{ edges {{ node {{ {projection} }} cursor }} pageInfo {{ hasNextPage hasPreviousPage startCursor endCursor }}{total_count} }} }}",
         object.name_plural
     );
 
@@ -247,6 +253,21 @@ mod tests {
             .query
             .contains("pageInfo { hasNextPage hasPreviousPage startCursor endCursor } totalCount"));
         assert_eq!(document.variables["first"], 2);
+    }
+
+    #[test]
+    fn find_many_query_can_skip_the_total_count_scan() {
+        let document = find_many_query(
+            &person(),
+            FindManyArgs {
+                after: Some(String::from("cursor")),
+                include_total_count: Some(false),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!document.query.contains("totalCount"));
+        assert!(document.query.contains("after: $after"));
     }
 
     #[test]

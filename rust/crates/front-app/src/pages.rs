@@ -123,7 +123,7 @@ pub fn RecordShowPage() -> impl IntoView {
                     .into_iter()
                     .find(|object| object.name_singular == "company")
                     .ok_or_else(|| "Company metadata was not found".to_string())?;
-                crate::records::load_records(&token, &company, None, None, None, 0).await
+                crate::records::load_records(&token, &company, None, None, None, 0, false).await
             }
             .await;
             match result {

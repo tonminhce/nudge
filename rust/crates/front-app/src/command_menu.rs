@@ -100,8 +100,16 @@ async fn search_records(token: &str, query: &str) -> Result<Vec<(String, Value)>
         else {
             continue;
         };
-        let response =
-            load_records(token, &object, None, text_filter(singular, query), None, 1).await?;
+        let response = load_records(
+            token,
+            &object,
+            None,
+            text_filter(singular, query),
+            None,
+            1,
+            false,
+        )
+        .await?;
         for record in records_from_response(&response, &object.name_plural)
             .into_iter()
             .take(5)

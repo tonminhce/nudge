@@ -29,6 +29,7 @@ pub async fn load_records(
     filter: Option<Value>,
     order_by: Option<Value>,
     depth: usize,
+    include_total_count: bool,
 ) -> Result<Value, String> {
     let document = find_many_query(
         object,
@@ -38,6 +39,7 @@ pub async fn load_records(
             filter,
             order_by,
             depth,
+            include_total_count: Some(include_total_count),
             ..Default::default()
         },
     )
