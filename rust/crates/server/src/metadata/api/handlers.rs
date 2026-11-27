@@ -1872,4 +1872,72 @@ mod tests {
         assert!(object.field_universal_identifiers.is_empty());
         assert!(object.view_universal_identifiers.is_empty());
     }
+
+    #[test]
+    fn the_create_expansion_seeds_no_view_or_navigation_entities() {
+        let applications = applications();
+
+        let input = json!({
+            "object": {
+                "nameSingular": "probe",
+                "namePlural": "probes",
+                "labelSingular": "Probe",
+                "labelPlural": "Probes"
+            }
+        });
+
+        let transpilation = transpile_create_object(&input, &applications).unwrap();
+
+        let mut matrix = FlatEntityOperationsMatrix::default();
+
+        add_to_create(&mut matrix, object_entity(&transpilation.entity));
+        add_to_create(&mut matrix, field_entity(name_field(&transpilation)));
+
+        let expansion = expand_matrix_with_side_effects(matrix, &UniversalWorkspaceMaps::default());
+
+        let mut names: Vec<&str> = expansion
+            .matrix
+            .by_metadata_name
+            .iter()
+            .filter(|(_, bucket)| !bucket.to_create.is_empty() || !bucket.to_update.is_empty())
+            .map(|(metadata_name, _)| metadata_name.as_str())
+            .collect();
+
+        names.sort_unstable();
+
+        assert_eq!(
+            names,
+            vec!["fieldMetadata", "objectMetadata"],
+            "wave 3 ports the object + name field only; views, favorites and \
+             navigation are side-effect services outside this scope"
+        );
+
+        let case = create_one_object_migration(&applications);
+
+        let mut migration = case.migration;
+
+        normalize_create_action_entities(&mut migration.actions);
+
+        let unsupported: Vec<MetadataName> = migration
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                UniversalAction::Create(create)
+                    if !matches!(
+                        create.metadata_name,
+                        MetadataName::ObjectMetadata
+                            | MetadataName::FieldMetadata
+                            | MetadataName::Index
+                            | MetadataName::FieldMetadataOption
+                            | MetadataName::SearchFieldMetadata
+                    ) =>
+                {
+                    Some(create.metadata_name)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(unsupported.is_empty(), "no action names the runner rejects");
+    }
 }
