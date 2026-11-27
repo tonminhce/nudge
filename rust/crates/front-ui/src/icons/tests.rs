@@ -1,4 +1,6 @@
-use crate::icons::{icon_class, icon_def, render_icon, IconStroke, ICON_COUNT, ICON_DEFS};
+use crate::icons::{
+    icon_class, icon_def, object_icon, render_icon, IconStroke, ICON_COUNT, ICON_DEFS, OBJECT_ICONS,
+};
 use crate::UPSTREAM_TAG;
 
 fn fixture(name: &str) -> String {
@@ -20,7 +22,38 @@ fn path_lines(svg: &str) -> Vec<String> {
 
 #[test]
 fn icon_count_matches_expected_set() {
-    assert_eq!(ICON_COUNT, 51);
+    assert_eq!(ICON_COUNT, 56);
+}
+
+#[test]
+fn object_icons_match_the_twenty_icon_dictionary() {
+    let expected = [
+        ("person", "user", "IconUser"),
+        ("company", "building-skyscraper", "IconBuildingSkyscraper"),
+        ("opportunity", "target-arrow", "IconTargetArrow"),
+        ("task", "checkbox", "IconCheckbox"),
+        ("note", "notes", "IconNotes"),
+        ("workflow", "settings-automation", "IconSettingsAutomation"),
+        ("agent", "lego", "IconLego"),
+    ];
+    for (key, tabler, upstream) in expected {
+        assert_eq!(object_icon(key), Some(tabler), "{key} maps to {upstream}");
+        assert!(
+            icon_def(tabler).is_some(),
+            "{key}: tabler icon {tabler} must exist in ICON_DEFS"
+        );
+    }
+    assert!(object_icon("not-an-object").is_none());
+}
+
+#[test]
+fn every_object_icon_entry_resolves_to_a_real_icon_def() {
+    for (key, tabler) in OBJECT_ICONS {
+        assert!(
+            icon_def(tabler).is_some(),
+            "{key}: mapped icon {tabler} missing"
+        );
+    }
 }
 
 #[test]

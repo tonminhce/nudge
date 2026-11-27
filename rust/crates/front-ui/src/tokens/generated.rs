@@ -2034,3 +2034,19 @@ pub const DARK_SQUIRCLE: &[(&str, &str)] = &[
     ("--t-border-radius-xl", " 40px"),
     ("--t-border-radius-xxl", " 80px"),
 ];
+
+pub const LAYOUT_TOKENS: &[(&str, &str)] = &[
+    ("--t-app-header-height", " 48px"),
+    ("--t-side-panel-min-width", " 320px"),
+    ("--t-side-panel-default-width", " 400px"),
+    ("--t-side-panel-max-width", " 600px"),
+    ("--t-navigation-drawer-min-width", " 180px"),
+    ("--t-navigation-drawer-default-width", " 220px"),
+    ("--t-navigation-drawer-max-width", " 350px"),
+    ("--t-navigation-drawer-collapsed-width", " 48px"),
+    ("--t-table-row-height", " 32px"),
+    ("--t-table-column-min-width", " 104px"),
+    ("--t-control-height", " 32px"),
+    ("--t-control-height-sm", " 24px"),
+    ("--t-mobile-viewport", " 768px"),
+];
