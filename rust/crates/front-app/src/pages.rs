@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use serde_json::Value;
+use wasm_bindgen::JsCast;
 
 use crate::app::AuthState;
 use crate::records::load_object_metadata;
@@ -20,7 +21,12 @@ pub fn RecordShowPage() -> impl IntoView {
     let loading = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let editing = RwSignal::new(false);
+    let draft_first_name = RwSignal::new(String::new());
+    let draft_last_name = RwSignal::new(String::new());
+    let draft_email = RwSignal::new(String::new());
     let draft_job_title = RwSignal::new(String::new());
+    let draft_company_id = RwSignal::new(String::new());
+    let companies = RwSignal::new(Vec::<Value>::new());
     let saving = RwSignal::new(false);
     let edit_error = RwSignal::new(None::<String>);
 
@@ -65,7 +71,12 @@ pub fn RecordShowPage() -> impl IntoView {
             .await;
             match result {
                 Ok((found_object, Some(found))) => {
-                    draft_job_title.set(found["jobTitle"].as_str().unwrap_or_default().to_string());
+                    let draft = RecordDraft::from_record(&found);
+                    draft_first_name.set(draft.first_name);
+                    draft_last_name.set(draft.last_name);
+                    draft_email.set(draft.email);
+                    draft_job_title.set(draft.job_title);
+                    draft_company_id.set(draft.company_id);
                     singular_name.set(found_object.name_singular.clone());
                     object.set(Some(found_object));
                     record.set(Some(found));
@@ -83,6 +94,42 @@ pub fn RecordShowPage() -> impl IntoView {
         });
     });
 
+    let start_edit = move || {
+        if let Some(current) = record.get_untracked() {
+            let draft = RecordDraft::from_record(&current);
+            draft_first_name.set(draft.first_name);
+            draft_last_name.set(draft.last_name);
+            draft_email.set(draft.email);
+            draft_job_title.set(draft.job_title);
+            draft_company_id.set(draft.company_id);
+        }
+        editing.set(true);
+        edit_error.set(None);
+        let Some(token) = auth.token.get_untracked() else {
+            return;
+        };
+        if !companies.get_untracked().is_empty() {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            let result = async {
+                let objects = load_object_metadata(&token).await?;
+                let company = objects
+                    .into_iter()
+                    .find(|object| object.name_singular == "company")
+                    .ok_or_else(|| "Company metadata was not found".to_string())?;
+                crate::records::load_records(&token, &company, None, None, None, 0).await
+            }
+            .await;
+            match result {
+                Ok(response) => {
+                    companies.set(records_from_response(&response, "companies"));
+                }
+                Err(message) => edit_error.set(Some(message)),
+            }
+        });
+    };
+
     let save_edit = move || {
         let Some(token) = auth.token.get() else {
             return;
@@ -97,7 +144,19 @@ pub fn RecordShowPage() -> impl IntoView {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let job_title = draft_job_title.get_untracked();
+        let company_id = draft_company_id.get_untracked();
+        let company = companies
+            .get_untracked()
+            .into_iter()
+            .find(|company| company["id"].as_str() == Some(company_id.as_str()));
+        let edit = RecordEdit {
+            first_name: draft_first_name.get_untracked(),
+            last_name: draft_last_name.get_untracked(),
+            email: draft_email.get_untracked(),
+            job_title: draft_job_title.get_untracked(),
+            company_id,
+            company,
+        };
         saving.set(true);
         edit_error.set(None);
         leptos::task::spawn_local(async move {
@@ -105,18 +164,17 @@ pub fn RecordShowPage() -> impl IntoView {
                 &token,
                 &object,
                 &id,
-                serde_json::json!({"jobTitle": job_title}),
+                serde_json::json!({
+                    "name": {"firstName": edit.first_name.clone(), "lastName": edit.last_name.clone()},
+                    "emails": {"primaryEmail": edit.email.clone()},
+                    "jobTitle": edit.job_title.clone(),
+                    "companyId": if edit.company_id.is_empty() { Value::Null } else { Value::String(edit.company_id.clone()) }
+                }),
             )
             .await
             {
                 Ok(updated) => {
-                    let mut merged = current_record.as_object().cloned().unwrap_or_default();
-                    if let Some(fields) = updated.as_object() {
-                        for (field, value) in fields {
-                            merged.insert(field.clone(), value.clone());
-                        }
-                    }
-                    record.set(Some(Value::Object(merged)));
+                    record.set(Some(apply_record_edit(&current_record, &updated, &edit)));
                     saving.set(false);
                     editing.set(false);
                 }
@@ -134,8 +192,10 @@ pub fn RecordShowPage() -> impl IntoView {
                 <A href="/objects/people" attr:class="breadcrumb">"People"</A>
                 <span>" / "</span>
                 <h1>{move || singular_name.get()}</h1>
-                <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
-                    on:click=move |_| editing.set(true)>"Edit"</button>
+                <Show when=move || singular_name.get() == "person" fallback=|| view! { <span /> }>
+                    <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
+                        on:click=move |_| start_edit()>"Edit"</button>
+                </Show>
             </header>
             {move || error.get().map(|message| view! { <div class="record-error" role="alert">{message}</div> })}
             <Show
@@ -155,12 +215,35 @@ pub fn RecordShowPage() -> impl IntoView {
                             <dt>"Company"</dt><dd>{record["company"]["name"].as_str().unwrap_or_default().to_string()}</dd>
                             <dt>"Created at"</dt><dd>{created_at(&record)}</dd>
                         </dl>
-                        <Show when=move || editing.get() fallback=|| view! { <span /> }>
+                        <Show when=move || editing.get() && singular_name.get() == "person" fallback=|| view! { <span /> }>
                             <form class="record-edit-form" on:submit=move |event| {
                                 event.prevent_default();
                                 save_edit();
                             }>
+                                <div class="record-edit-grid">
+                                    <label>"First name"<input class="t-input" bind:value=draft_first_name /></label>
+                                    <label>"Last name"<input class="t-input" bind:value=draft_last_name /></label>
+                                </div>
+                                <label>"Email"<input class="t-input" type="email" bind:value=draft_email /></label>
                                 <label>"Job title"<input class="t-input" bind:value=draft_job_title /></label>
+                                <label>"Company"
+                                    <select class="record-sort" on:change=move |event| {
+                                        let value = event.target()
+                                            .and_then(|target| target.dyn_into::<web_sys::HtmlSelectElement>().ok())
+                                            .map(|select| select.value())
+                                            .unwrap_or_default();
+                                        draft_company_id.set(value);
+                                    }>
+                                        <option value="">"No company"</option>
+                                        <For each=move || companies.get() key=|company| company["id"].as_str().unwrap_or_default().to_string() let(company)>
+                                            {
+                                                let id = company["id"].as_str().unwrap_or_default().to_string();
+                                                let name = company["name"].as_str().unwrap_or_default().to_string();
+                                                view! { <option value=id.clone() selected=move || draft_company_id.get() == id>{name}</option> }
+                                            }
+                                        </For>
+                                    </select>
+                                </label>
                                 {move || edit_error.get().map(|message| view! { <div class="record-error" role="alert">{message}</div> })}
                                 <div class="create-dialog-footer">
                                     <button type="button" class="t-button" data-variant="outline" data-color="neutral" data-size="md"
@@ -177,6 +260,79 @@ pub fn RecordShowPage() -> impl IntoView {
             </Show>
         </div>
     }
+}
+
+struct RecordDraft {
+    first_name: String,
+    last_name: String,
+    email: String,
+    job_title: String,
+    company_id: String,
+}
+
+impl RecordDraft {
+    fn from_record(record: &Value) -> Self {
+        Self {
+            first_name: record["name"]["firstName"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            last_name: record["name"]["lastName"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            email: primary_email(record),
+            job_title: record["jobTitle"].as_str().unwrap_or_default().to_string(),
+            company_id: record["companyId"]
+                .as_str()
+                .or_else(|| record["company"]["id"].as_str())
+                .unwrap_or_default()
+                .to_string(),
+        }
+    }
+}
+
+struct RecordEdit {
+    first_name: String,
+    last_name: String,
+    email: String,
+    job_title: String,
+    company_id: String,
+    company: Option<Value>,
+}
+
+fn apply_record_edit(current: &Value, updated: &Value, edit: &RecordEdit) -> Value {
+    let mut merged = current.as_object().cloned().unwrap_or_default();
+    if let Some(fields) = updated.as_object() {
+        for (field, value) in fields {
+            merged.insert(field.clone(), value.clone());
+        }
+    }
+    merged.insert(
+        String::from("name"),
+        serde_json::json!({"firstName": edit.first_name, "lastName": edit.last_name}),
+    );
+    merged.insert(
+        String::from("emails"),
+        serde_json::json!({"primaryEmail": edit.email}),
+    );
+    merged.insert(
+        String::from("jobTitle"),
+        Value::String(edit.job_title.clone()),
+    );
+    merged.insert(
+        String::from("companyId"),
+        if edit.company_id.is_empty() {
+            Value::Null
+        } else {
+            Value::String(edit.company_id.clone())
+        },
+    );
+    merged.insert(
+        String::from("company"),
+        edit.company.clone().unwrap_or(Value::Null),
+    );
+    Value::Object(merged)
 }
 
 #[component]
@@ -242,4 +398,56 @@ fn primary_email(record: &Value) -> String {
 
 fn created_at(record: &Value) -> String {
     record["createdAt"].as_str().unwrap_or_default().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_edit_preserves_identity_and_updates_the_relation() {
+        let current = serde_json::json!({
+            "id": "person-1",
+            "createdAt": "2026-11-27T09:00:00.000Z",
+            "name": {"firstName": "Ada", "lastName": "Lovelace"},
+            "emails": {"primaryEmail": "ada@example.com"},
+            "jobTitle": "Engineer",
+            "companyId": "company-1",
+            "company": {"id": "company-1", "name": "Old company"}
+        });
+        let updated = serde_json::json!({"jobTitle": "Principal Engineer"});
+        let company = serde_json::json!({"id": "company-2", "name": "New company"});
+        let edit = RecordEdit {
+            first_name: String::from("Ada"),
+            last_name: String::from("Lovelace"),
+            email: String::from("ada@new.example"),
+            job_title: String::from("Principal Engineer"),
+            company_id: String::from("company-2"),
+            company: Some(company.clone()),
+        };
+        let record = apply_record_edit(&current, &updated, &edit);
+        assert_eq!(record["id"], "person-1");
+        assert_eq!(record["createdAt"], "2026-11-27T09:00:00.000Z");
+        assert_eq!(record["name"]["firstName"], "Ada");
+        assert_eq!(record["emails"]["primaryEmail"], "ada@new.example");
+        assert_eq!(record["jobTitle"], "Principal Engineer");
+        assert_eq!(record["companyId"], "company-2");
+        assert_eq!(record["company"], company);
+    }
+
+    #[test]
+    fn record_edit_can_clear_a_relation() {
+        let current = serde_json::json!({"companyId": "company-1", "company": {"id": "company-1"}});
+        let edit = RecordEdit {
+            first_name: String::new(),
+            last_name: String::new(),
+            email: String::new(),
+            job_title: String::new(),
+            company_id: String::new(),
+            company: None,
+        };
+        let record = apply_record_edit(&current, &serde_json::json!({}), &edit);
+        assert!(record["companyId"].is_null());
+        assert!(record["company"].is_null());
+    }
 }

@@ -165,6 +165,7 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .record-details { display: grid; grid-template-columns: 140px 1fr; gap: 12px 20px; }
 .record-details dt { color: var(--t-font-color-tertiary); }
 .record-details dd { margin: 0; }
+.record-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .record-edit-form { display: grid; gap: 14px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--t-color-gray5); }
 .record-edit-form label { display: grid; gap: 6px; font-weight: 500; }
 .record-show-header .t-button { margin-left: auto; }
