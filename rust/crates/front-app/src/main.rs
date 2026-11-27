@@ -4,6 +4,7 @@ mod app;
 mod auth;
 mod layout;
 mod pages;
+mod records;
 
 use app::App;
 

@@ -71,8 +71,8 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .app-icon-button:hover { background: var(--t-background-tertiary); }
 .auth-card { width: min(400px, 100%); }
 .auth-brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 40px; }
-.auth-logo { display: inline-flex; color: var(--t-font-color-primary); }
-.auth-wordmark { font-size: 26px; font-weight: 650; letter-spacing: -1px; }
+.auth-logo { width: 132px; height: 38px; }
+.auth-logo svg { width: 100%; height: 100%; }
 .auth-heading { margin-bottom: 28px; text-align: center; }
 .auth-heading h1 { margin: 0 0 8px; font-size: var(--t-font-size-xxl); line-height: 1.2; font-weight: 600; letter-spacing: -.5px; }
 .auth-heading p { margin: 0; color: var(--t-font-color-secondary); font-size: var(--t-font-size-md); }
@@ -132,6 +132,15 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .skeleton-name { width: 45%; }
 .skeleton-date { width: 70%; }
 .record-index-footer { padding: 20px 24px; color: var(--t-font-color-tertiary); }
+.record-row-link { color: inherit; }
+.record-row-link:hover { background: var(--t-background-secondary); }
+.record-count { color: var(--t-font-color-tertiary); }
+.record-error { margin: 12px 24px; padding: 12px; border-radius: 4px; color: var(--t-font-color-danger); background: var(--t-color-red2); }
+.record-loading { padding: 48px 24px; color: var(--t-font-color-secondary); text-align: center; }
+.record-pagination { display: flex; justify-content: center; padding: 20px; }
+.record-details { display: grid; grid-template-columns: 140px 1fr; gap: 12px 20px; }
+.record-details dt { color: var(--t-font-color-tertiary); }
+.record-details dd { margin: 0; }
 
 .record-show { padding: 24px; }
 .record-show-header { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; color: var(--t-font-color-secondary); }

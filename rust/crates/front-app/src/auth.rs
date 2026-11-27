@@ -3,7 +3,6 @@ use front_core::client::Endpoint;
 use front_core::client::GraphQLClient;
 use front_core::client::RequestOptions;
 use front_ui::icons::IconSun;
-use front_ui::icons::IconUsers;
 use front_ui::tokens::Scheme;
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
@@ -11,6 +10,9 @@ use leptos_router::hooks::use_navigate;
 use crate::app::server_url;
 use crate::app::write_storage;
 use crate::app::AuthState;
+
+const LOGO_LIGHT: &str = include_str!("../assets/nudge-logo-light.svg");
+const LOGO_DARK: &str = include_str!("../assets/nudge-logo-dark.svg");
 
 #[component]
 pub fn ThemeToggle() -> impl IntoView {
@@ -35,6 +37,7 @@ pub fn ThemeToggle() -> impl IntoView {
 #[component]
 pub fn AuthPage() -> impl IntoView {
     let auth = expect_context::<AuthState>();
+    let theme = expect_context::<RwSignal<Scheme>>();
     let navigate = use_navigate();
     let email = RwSignal::new(String::new());
     let password = RwSignal::new(String::new());
@@ -77,13 +80,15 @@ pub fn AuthPage() -> impl IntoView {
     view! {
         <main class="auth-layout">
             <div class="auth-theme"><ThemeToggle /></div>
-            <section class="auth-card" aria-label="Welcome to Twenty">
+            <section class="auth-card" aria-label="Welcome to Nudge">
                 <div class="auth-brand">
-                    <span class="auth-logo"><IconUsers size=32 /></span>
-                    <span class="auth-wordmark">twenty</span>
+                    <div class="auth-logo" inner_html=move || match theme.get() {
+                        Scheme::Light => LOGO_LIGHT,
+                        Scheme::Dark => LOGO_DARK,
+                    }></div>
                 </div>
                 <div class="auth-heading">
-                    <h1>{move || match mode.get() { AuthMode::SignIn => "Welcome to Twenty", AuthMode::SignUp => "Create your workspace" }}</h1>
+                    <h1>{move || match mode.get() { AuthMode::SignIn => "Welcome to Nudge", AuthMode::SignUp => "Create your workspace" }}</h1>
                     <p>{move || match mode.get() { AuthMode::SignIn => "Sign in to your workspace", AuthMode::SignUp => "Start your 14-day free trial" }}</p>
                 </div>
                 <form class="auth-form" on:submit=move |event| {
@@ -122,7 +127,7 @@ pub fn AuthPage() -> impl IntoView {
                     </button>
                 </p>
             </section>
-            <footer class="auth-footer">Twenty CRM - Open source customer relationship management</footer>
+            <footer class="auth-footer">Nudge CRM - Open source customer relationship management</footer>
         </main>
     }
 }

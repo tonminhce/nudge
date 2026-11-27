@@ -45,7 +45,7 @@ pub fn WorkspaceLayout() -> impl IntoView {
             <div class="workspace-shell">
                 <header class="app-header">
                     <div class="header-brand">
-                        <A href="/objects/people" attr:class="header-logo">"twenty"</A>
+                        <A href="/objects/people" attr:class="header-logo">"nudge"</A>
                         <span class="header-divider"></span>
                         <button class="workspace-switcher">
                             <span class="workspace-avatar">"R"</span>
