@@ -21,6 +21,7 @@ use crate::auth::middleware::AuthContext;
 use crate::metadata::api::service::load_flat_maps;
 use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::flat::FlatWorkspaceMaps;
+use crate::metadata::flat::RelationType;
 use crate::metadata::names::camel_case;
 use crate::metadata::names::pascal_case;
 use crate::query::cursor::decode_cursor;
@@ -33,6 +34,7 @@ use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
 use crate::query::runner::group_by;
 use crate::query::runner::require_filtered_mutation;
+use crate::query::runner::run_mutation;
 use crate::query::runner::run_mutation_one;
 use crate::query::runner::ActorContext;
 use crate::query::runner::CreateArgs;
@@ -146,7 +148,7 @@ impl RestError {
     }
 
     pub fn unknown_object(name: &str) -> Self {
-        Self::bad_request(format!("object '{name}' not found")).with_code("UNKNOWN_OBJECT")
+        Self::bad_request(format!("object '{name}' not found. eg: companies"))
     }
 
     pub fn with_code(mut self, code: &'static str) -> Self {
@@ -161,7 +163,6 @@ impl RestError {
                 "statusCode": self.status.as_u16(),
                 "error": self.error,
                 "messages": self.messages,
-                "code": self.code,
             })),
         )
             .into_response()
@@ -361,9 +362,18 @@ async fn dispatch_rest(
     let object = path[0];
     let object_model = rest_object(schema, object)?;
     let object = object_model.name_singular.as_str();
-    let _depth = parse_depth(parameter(parameters, "depth"))?;
-    let mut fields = parse_fields(parameter(parameters, "fields"))?;
-    let relations = relation_names_fix(schema, object, fields.as_deref());
+    let depth = parse_depth(parameter(parameters, "depth"))?;
+    let fields = parse_fields(parameter(parameters, "fields"))?;
+    let (picked_fields, relations) =
+        resolve_rest_fields(schema, runner_schema, object, fields.as_deref(), depth)?;
+    let nested = nested_from_names(runner_schema, object, &relations);
+
+    if path.len() > 3 || (path.len() == 3 && (*method != Method::PATCH || path[2] != "restore")) {
+        return Err(RestError::bad_request(format!(
+            "Query path '/rest/{}' invalid. Valid examples: /rest/companies/id or /rest/companies or /rest/batch/companies",
+            path.join("/")
+        )));
+    }
 
     if let Some(id_or_action) = path.get(1).copied() {
         match id_or_action {
@@ -420,12 +430,43 @@ async fn dispatch_rest(
                 ));
             }
             "restore" if *method == Method::PATCH => {
-                return restore_records(state, runner_schema, object, parameters, body, actor)
-                    .await;
+                return restore_records(
+                    state,
+                    runner_schema,
+                    object,
+                    None,
+                    parameters,
+                    &body,
+                    actor,
+                    picked_fields.as_deref(),
+                    &nested,
+                )
+                .await;
             }
             id => {
-                let id = Uuid::parse_str(id)
-                    .map_err(|_| RestError::bad_request("The id path segment must be a UUID"))?;
+                if let Some(action) = path.get(2).copied() {
+                    if action == "restore" {
+                        return restore_records(
+                            state,
+                            runner_schema,
+                            object,
+                            Some(id),
+                            parameters,
+                            &body,
+                            actor,
+                            picked_fields.as_deref(),
+                            &nested,
+                        )
+                        .await;
+                    }
+
+                    return Err(RestError::bad_request(format!(
+                        "Query path '/rest/{}' invalid. Valid examples: /rest/companies/id or /rest/companies or /rest/batch/companies",
+                        path.join("/")
+                    )));
+                }
+
+                let id = parse_path_uuid(id)?;
 
                 return id_operation(
                     state,
@@ -438,8 +479,8 @@ async fn dispatch_rest(
                     actor,
                     object,
                     id,
-                    fields.take(),
-                    &relations,
+                    picked_fields,
+                    &nested,
                 )
                 .await;
             }
@@ -448,10 +489,20 @@ async fn dispatch_rest(
 
     match *method {
         Method::GET => {
+            if parameter(parameters, "starting_after").is_some()
+                && parameter(parameters, "ending_before").is_some()
+            {
+                return Err(RestError::invalid_cursor(
+                    "Cannot provide both before and after",
+                ));
+            }
+
+            let order_by = parse_order_by(parameter(parameters, "order_by"))?;
+            validate_order_by(schema, object, order_by.as_ref())?;
             let filter = coerce_filter(parameter(parameters, "filter"), object_model)?;
             let args = FindManyArgs {
                 filter,
-                order_by: parse_order_by(parameter(parameters, "order_by"))?,
+                order_by,
                 first: parse_limit(parameter(parameters, "limit"))?
                     .or(Some(DEFAULT_PAGE_SIZE))
                     .map(|value| value.min(MAX_PAGE_SIZE)),
@@ -466,7 +517,7 @@ async fn dispatch_rest(
                 object,
                 &args,
                 true,
-                &nested_from_names(runner_schema, object, &relations, fields.as_deref()),
+                &nested,
             )
             .await
             .map_err(rest_runner_error)?;
@@ -474,7 +525,7 @@ async fn dispatch_rest(
 
             for record in &mut records {
                 if let Some(record) = record.as_object_mut() {
-                    pick_fields(record, fields.as_deref());
+                    pick_fields(record, picked_fields.as_deref());
                 }
             }
 
@@ -512,13 +563,13 @@ async fn dispatch_rest(
                 object,
                 &[id],
                 false,
-                &nested_from_names(runner_schema, object, &relations, fields.as_deref()),
+                &nested_from_names(runner_schema, object, &relations),
             )
             .await?;
             let mut record = records.remove(0);
 
             if let Some(record) = record.as_object_mut() {
-                pick_fields(record, fields.as_deref());
+                pick_fields(record, picked_fields.as_deref());
             }
 
             let key = format!("create{}", pascal_case(object));
@@ -528,9 +579,11 @@ async fn dispatch_rest(
             )
                 .into_response())
         }
-        Method::PATCH => {
-            let filter = coerce_filter(parameter(parameters, "filter"), object_model)?
-                .ok_or_else(|| RestError::bad_request("A filter is mandatory for updateMany"))?;
+        Method::PATCH | Method::PUT => {
+            let filter =
+                coerce_filter(parameter(parameters, "filter"), object_model)?.ok_or_else(|| {
+                    RestError::bad_request("A non-empty filter is required for a bulk mutation")
+                })?;
             let data = body
                 .get("data")
                 .cloned()
@@ -540,7 +593,7 @@ async fn dispatch_rest(
                 runner_schema,
                 object,
                 FilteredMutationKind::Update,
-                Some(filter),
+                Some(filter.clone()),
                 Some(data),
                 Some(&actor),
                 false,
@@ -548,8 +601,6 @@ async fn dispatch_rest(
             )
             .await
             .map_err(rest_runner_error)?;
-            let filter = coerce_filter(parameter(parameters, "filter"), object_model)?
-                .ok_or_else(|| RestError::bad_request("A filter is mandatory for updateMany"))?;
             let mut records = find_many(
                 &state.core_pool,
                 runner_schema,
@@ -560,7 +611,7 @@ async fn dispatch_rest(
                     ..Default::default()
                 },
                 false,
-                &nested_from_names(runner_schema, object, &relations, fields.as_deref()),
+                &nested_from_names(runner_schema, object, &relations),
             )
             .await
             .map_err(rest_runner_error)?
@@ -568,25 +619,39 @@ async fn dispatch_rest(
 
             for record in &mut records {
                 if let Some(record) = record.as_object_mut() {
-                    pick_fields(record, fields.as_deref());
+                    pick_fields(record, picked_fields.as_deref());
                 }
             }
 
-            let key = format!("update{}", pascal_case(object));
+            let plural = object_model.name_plural.as_str();
+            let key = format!("update{}", pascal_case(plural));
             Ok(Json(json!({ "data": { key: records } })).into_response())
         }
         Method::DELETE => {
-            let filter =
-                coerce_filter(parameter(parameters, "filter"), object_model)?.ok_or_else(|| {
-                    RestError::bad_request("Filters are mandatory for bulk delete operations.")
+            let soft_delete = parse_bool(parameter(parameters, "soft_delete"))?.unwrap_or(false);
+            let filter = coerce_filter(parameter(parameters, "filter"), object_model)?
+                .ok_or_else(|| {
+                    RestError::bad_request(if soft_delete {
+                        "Filters are mandatory for bulk delete operations. Please provide at least one filter to prevent accidental deletion of all records."
+                    } else {
+                        "Filters are mandatory for bulk destroy operations. Please provide at least one filter to prevent accidental deletion of all records."
+                    })
                 })?;
-            let soft_delete = parse_bool(parameter(parameters, "soft_delete"))?.unwrap_or(true);
+
+            if filter.as_object().is_none_or(Map::is_empty) {
+                return Err(RestError::bad_request(if soft_delete {
+                    "Filters are mandatory for bulk delete operations. Please provide at least one filter to prevent accidental deletion of all records."
+                } else {
+                    "Filters are mandatory for bulk destroy operations. Please provide at least one filter to prevent accidental deletion of all records."
+                }));
+            }
+
             let kind = if soft_delete {
                 FilteredMutationKind::SoftDelete
             } else {
                 FilteredMutationKind::Destroy
             };
-            let count = require_filtered_mutation(
+            let results = run_mutation(
                 &state.core_pool,
                 runner_schema,
                 object,
@@ -599,16 +664,13 @@ async fn dispatch_rest(
             )
             .await
             .map_err(rest_runner_error)?;
-            let key = format!(
-                "{}{}",
-                if soft_delete { "delete" } else { "destroy" },
-                pascal_case(object)
-            );
+            let ids = results
+                .into_iter()
+                .filter_map(|record| record.get("id").cloned())
+                .collect::<Vec<_>>();
+            let key = format!("delete{}", pascal_case(object));
 
-            Ok(Json(json!({
-                "data": { key: Value::Array((0..count).map(|_| Value::Object(Map::new())).collect()) }
-            }))
-            .into_response())
+            Ok(Json(json!({ "data": { key: ids } })).into_response())
         }
         _ => Err(RestError::method_not_allowed()),
     }
@@ -626,8 +688,8 @@ async fn id_operation(
     actor: ActorContext,
     object: &str,
     id: Uuid,
-    fields: Option<Vec<String>>,
-    relations: &[String],
+    picked_fields: Option<Vec<String>>,
+    nested: &[NestedRelationSelection],
 ) -> Result<Response, RestError> {
     match *method {
         Method::GET => {
@@ -638,10 +700,9 @@ async fn id_operation(
                 object,
                 &FindOneArgs {
                     filter,
-                    selected_field_names: fields.clone().unwrap_or_default(),
                     ..Default::default()
                 },
-                &nested_from_names(runner_schema, object, relations, fields.as_deref()),
+                nested,
             )
             .await
             .map_err(rest_runner_error)?
@@ -649,13 +710,13 @@ async fn id_operation(
             let mut record = record;
 
             if let Some(record) = record.as_object_mut() {
-                pick_fields(record, fields.as_deref());
+                pick_fields(record, picked_fields.as_deref());
             }
 
             let key = camel_case(object);
             Ok(Json(json!({ "data": { key: record } })).into_response())
         }
-        Method::PATCH => {
+        Method::PATCH | Method::PUT => {
             let data = body
                 .get("data")
                 .cloned()
@@ -673,38 +734,24 @@ async fn id_operation(
             )
             .await
             .map_err(rest_runner_error)?;
-            let mut records = records_by_ids(
-                state,
-                runner_schema,
-                object,
-                &[id],
-                false,
-                &nested_from_names(runner_schema, object, relations, fields.as_deref()),
-            )
-            .await?;
+            let mut records =
+                records_by_ids(state, runner_schema, object, &[id], false, nested).await?;
             let mut record = records.remove(0);
 
             if let Some(record) = record.as_object_mut() {
-                pick_fields(record, fields.as_deref());
+                pick_fields(record, picked_fields.as_deref());
             }
 
             let key = format!("update{}", pascal_case(object));
             Ok(Json(json!({ "data": { key: record } })).into_response())
         }
         Method::DELETE => {
-            let soft_delete = parse_bool(parameter(parameters, "soft_delete"))?.unwrap_or(true);
-            let before = records_by_ids(
-                state,
-                runner_schema,
-                object,
-                &[id],
-                true,
-                &nested_from_names(runner_schema, object, relations, fields.as_deref()),
-            )
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(RestError::record_not_found)?;
+            let soft_delete = parse_bool(parameter(parameters, "soft_delete"))?.unwrap_or(false);
+            records_by_ids(state, runner_schema, object, &[id], true, &[])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(RestError::record_not_found)?;
             run_mutation_one(
                 &state.core_pool,
                 runner_schema,
@@ -722,12 +769,8 @@ async fn id_operation(
             )
             .await
             .map_err(rest_runner_error)?;
-            let key = format!(
-                "{}{}",
-                if soft_delete { "delete" } else { "destroy" },
-                pascal_case(object)
-            );
-            Ok(Json(json!({ "data": { key: before } })).into_response())
+            let key = format!("delete{}", pascal_case(object));
+            Ok(Json(json!({ "data": { key: { "id": id.to_string() } } })).into_response())
         }
         _ => {
             let _ = object_model;
@@ -737,16 +780,20 @@ async fn id_operation(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn restore_records(
     state: &AppState,
     runner_schema: &RunnerSchema,
     object: &str,
+    id: Option<&str>,
     parameters: &HashMap<String, String>,
-    body: Value,
+    body: &Value,
     actor: ActorContext,
+    picked_fields: Option<&[String]>,
+    nested: &[NestedRelationSelection],
 ) -> Result<Response, RestError> {
-    if let Some(id) = body.get("id").and_then(Value::as_str) {
-        let id = Uuid::parse_str(id).map_err(|_| RestError::bad_request("id must be a UUID"))?;
+    if let Some(id) = id {
+        let id = parse_path_uuid(id)?;
         run_mutation_one(
             &state.core_pool,
             runner_schema,
@@ -760,8 +807,14 @@ async fn restore_records(
         )
         .await
         .map_err(rest_runner_error)?;
-        let mut records = records_by_ids(state, runner_schema, object, &[id], false, &[]).await?;
-        let record = records.remove(0);
+        let mut records =
+            records_by_ids(state, runner_schema, object, &[id], false, nested).await?;
+        let mut record = records.remove(0);
+
+        if let Some(record) = record.as_object_mut() {
+            pick_fields(record, picked_fields);
+        }
+
         let key = format!("restore{}", pascal_case(object));
 
         return Ok(Json(json!({ "data": { key: record } })).into_response());
@@ -770,11 +823,23 @@ async fn restore_records(
     let filter = body
         .get("filter")
         .cloned()
+        .filter(|value| !value.is_null())
         .or_else(|| {
-            serde_json::from_str::<Value>(parameter(parameters, "filter").unwrap_or("null")).ok()
+            serde_json::from_str::<Value>(parameter(parameters, "filter").unwrap_or("null"))
+                .ok()
+                .filter(|value| !value.is_null())
         })
-        .ok_or_else(|| RestError::bad_request("A filter is mandatory for restoreMany"))?;
-    let count = require_filtered_mutation(
+        .ok_or_else(|| {
+            RestError::bad_request("A non-empty filter is required for a bulk mutation")
+        })?;
+
+    if filter.as_object().is_none_or(Map::is_empty) {
+        return Err(RestError::bad_request(
+            "A non-empty filter is required for a bulk mutation",
+        ));
+    }
+
+    let results = run_mutation(
         &state.core_pool,
         runner_schema,
         object,
@@ -787,12 +852,44 @@ async fn restore_records(
     )
     .await
     .map_err(rest_runner_error)?;
-    let key = format!("restore{}", pascal_case(object));
+    let ids = results
+        .into_iter()
+        .filter_map(|record| record.get("id").and_then(Value::as_str).map(str::to_string))
+        .collect::<Vec<_>>();
+    let parsed_ids = ids
+        .iter()
+        .filter_map(|id| Uuid::parse_str(id).ok())
+        .collect::<Vec<_>>();
+    let mut records = records_by_ids(state, runner_schema, object, &parsed_ids, false, nested)
+        .await
+        .unwrap_or_default();
 
-    Ok(Json(json!({
-        "data": { key: Value::Array((0..count).map(|_| Value::Object(Map::new())).collect()) }
-    }))
-    .into_response())
+    for record in &mut records {
+        if let Some(record) = record.as_object_mut() {
+            pick_fields(record, picked_fields);
+        }
+    }
+
+    let plural = plural_of(runner_schema, object);
+    let key = format!("restore{}", pascal_case(&plural));
+
+    Ok(Json(json!({ "data": { key: records } })).into_response())
+}
+
+fn plural_of(runner_schema: &RunnerSchema, object: &str) -> String {
+    runner_schema
+        .object(object)
+        .ok()
+        .map(|model| model.object.name_plural.clone())
+        .unwrap_or_else(|| object.to_string())
+}
+
+fn parse_path_uuid(raw: &str) -> Result<Uuid, RestError> {
+    let parsed = Uuid::parse_str(raw)
+        .ok()
+        .filter(|uuid| uuid.get_version_num() == 4);
+
+    parsed.ok_or_else(|| RestError::bad_request(format!("'{raw}' is not a valid UUID")))
 }
 
 fn parameter<'a>(parameters: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
@@ -940,18 +1037,101 @@ fn id_filter(id: Uuid) -> Value {
     json!({ "id": { "eq": id.to_string() } })
 }
 
+fn validate_order_by(
+    schema: &WorkspaceSchema,
+    object: &str,
+    order_by: Option<&Value>,
+) -> Result<(), RestError> {
+    let Some(entries) = order_by.and_then(Value::as_array) else {
+        return Ok(());
+    };
+
+    for entry in entries {
+        validate_order_by_value(schema, object, entry, None)?;
+    }
+
+    Ok(())
+}
+
+fn validate_order_by_value(
+    schema: &WorkspaceSchema,
+    object: &str,
+    value: &Value,
+    parent_composite: Option<FieldMetadataType>,
+) -> Result<(), RestError> {
+    let Some(entries) = value.as_object() else {
+        return Ok(());
+    };
+
+    for (key, nested) in entries {
+        if matches!(
+            nested.as_str(),
+            Some("AscNullsFirst")
+                | Some("AscNullsLast")
+                | Some("DescNullsFirst")
+                | Some("DescNullsLast")
+        ) {
+            let known = match parent_composite {
+                Some(composite) => {
+                    crate::workspace_migrations::column_defs::composite_types::composite_properties(
+                        crate::workspace_migrations::runner::ddl_field_type(composite),
+                    )
+                    .iter()
+                    .any(|property| property.name == key)
+                }
+                None => schema.fields(object).iter().any(|field| field.name == *key),
+            };
+
+            if !known {
+                return Err(RestError::invalid_order_by(format!(
+                    "Field \"{key}\" does not exist or is not sortable"
+                )));
+            }
+
+            continue;
+        }
+
+        let Some(field) = schema
+            .fields(object)
+            .iter()
+            .find(|field| field.name == *key)
+        else {
+            return Err(RestError::invalid_order_by(format!(
+                "Field \"{key}\" does not exist or is not sortable"
+            )));
+        };
+
+        if !matches!(
+            field.field_type,
+            FieldMetadataType::FullName
+                | FieldMetadataType::Links
+                | FieldMetadataType::Emails
+                | FieldMetadataType::Phones
+                | FieldMetadataType::Address
+                | FieldMetadataType::Currency
+                | FieldMetadataType::Actor
+        ) {
+            return Err(RestError::invalid_order_by(format!(
+                "Field \"{key}\" does not exist or is not sortable"
+            )));
+        }
+
+        validate_order_by_value(schema, object, nested, Some(field.field_type))?;
+    }
+
+    Ok(())
+}
+
 fn nested_from_names(
     runner_schema: &RunnerSchema,
     object: &str,
     relations: &[String],
-    fields: Option<&[String]>,
 ) -> Vec<NestedRelationSelection> {
-    let selected = fields.map(|fields| fields.to_vec());
     relations
         .iter()
         .map(|relation| NestedRelationSelection {
             relation_field_name: relation.clone(),
-            selected_field_names: selected.clone().unwrap_or_else(|| vec![String::from("id")]),
+            selected_field_names: Vec::new(),
             first: None,
         })
         .collect::<Vec<_>>()
@@ -1081,25 +1261,91 @@ fn code_static(code: &str) -> &'static str {
     }
 }
 
-fn relation_names_fix(
+fn resolve_rest_fields(
     schema: &WorkspaceSchema,
+    runner_schema: &RunnerSchema,
     object: &str,
     fields: Option<&[String]>,
-) -> Vec<String> {
-    let selected = fields.map(|fields| fields.to_vec());
+    depth: usize,
+) -> Result<(Option<Vec<String>>, Vec<String>), RestError> {
+    let Some(fields) = fields else {
+        if depth == 0 {
+            return Ok((None, Vec::new()));
+        }
 
-    schema
-        .fields(object)
-        .iter()
-        .filter(|field| {
-            matches!(
-                field.field_type,
-                FieldMetadataType::Relation | FieldMetadataType::MorphRelation
-            ) && selected
-                .as_ref()
-                .map(|selected| selected.contains(&field.name))
-                .unwrap_or(false)
-        })
-        .map(|field| field.name.clone())
-        .collect()
+        let relations = schema
+            .fields(object)
+            .iter()
+            .filter(|field| {
+                matches!(
+                    field.field_type,
+                    FieldMetadataType::Relation | FieldMetadataType::MorphRelation
+                )
+            })
+            .map(|field| field.name.clone())
+            .collect::<Vec<_>>();
+
+        return Ok((None, relations));
+    };
+
+    let metadata = schema.fields(object);
+    let model = runner_schema.object(object).map_err(rest_runner_error)?;
+    let mut invalid = Vec::new();
+    let mut to_many_without_depth = Vec::new();
+    let mut keys = Vec::new();
+    let mut relations = Vec::new();
+
+    for name in fields {
+        let Some(field) = metadata.iter().find(|field| &field.name == name) else {
+            invalid.push(name.clone());
+            continue;
+        };
+
+        if matches!(
+            field.field_type,
+            FieldMetadataType::Relation | FieldMetadataType::MorphRelation
+        ) {
+            let relation = model.shape.relation(name);
+            let is_to_many =
+                relation.is_none_or(|relation| relation.relation_type != RelationType::ManyToOne);
+
+            if is_to_many && depth == 0 {
+                to_many_without_depth.push(name.clone());
+                continue;
+            }
+
+            if let Some(join_column) =
+                relation.and_then(|relation| relation.join_column_name.clone())
+            {
+                keys.push(join_column);
+            }
+
+            if depth >= 1 {
+                keys.push(name.clone());
+                relations.push(name.clone());
+            }
+
+            continue;
+        }
+
+        keys.push(name.clone());
+    }
+
+    if !invalid.is_empty() {
+        return Err(RestError::invalid_fields(format!(
+            "'fields' parameter invalid. Unknown or unreadable fields on '{}': {}",
+            object,
+            invalid.join(", ")
+        )));
+    }
+
+    if !to_many_without_depth.is_empty() {
+        return Err(RestError::invalid_fields(format!(
+            "'fields' parameter invalid. One-to-many relation fields on '{}' require a positive depth: {}",
+            object,
+            to_many_without_depth.join(", ")
+        )));
+    }
+
+    Ok((Some(keys), relations))
 }

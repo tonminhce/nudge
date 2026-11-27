@@ -655,7 +655,7 @@ pub(crate) fn json_cell(row: &sqlx::postgres::PgRow, name: &str) -> Result<Value
             .map(|v| Value::String(v.to_string())),
         "TIMESTAMPTZ" => row
             .try_get::<chrono::DateTime<chrono::Utc>, _>(name)
-            .map(|v| Value::String(v.to_rfc3339())),
+            .map(|v| Value::String(v.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))),
         "JSON" | "JSONB" => row.try_get::<Value, _>(name),
         "BYTEA" => row.try_get::<Vec<u8>, _>(name).map(|v| {
             Value::String(
@@ -689,6 +689,10 @@ fn number(value: i64) -> Value {
 }
 
 fn number_f64(value: f64) -> Value {
+    if value.fract() == 0.0 && value.abs() < 9.007_199_254_740_992e15 {
+        return serde_json::Number::from(value as i64).into();
+    }
+
     serde_json::Number::from_f64(value)
         .unwrap_or_else(|| serde_json::Number::from(0))
         .into()

@@ -253,7 +253,11 @@ async fn execute_graphql(
             .await
             {
                 Ok(value) => data_response(&parts.headers, selected.field.response_key(), value),
-                Err(error) => error_response(&parts.headers, &[error]),
+                Err(error) => error_response_for_key(
+                    &parts.headers,
+                    Some(selected.field.response_key()),
+                    &[error],
+                ),
             }
         }
         RootClassification::Core => {
@@ -269,7 +273,11 @@ async fn execute_graphql(
 
             match core_operation(&state, workspace_id, &auth, &selected.field).await {
                 Ok(value) => data_response(&parts.headers, selected.field.response_key(), value),
-                Err(error) => error_response(&parts.headers, &[error]),
+                Err(error) => error_response_for_key(
+                    &parts.headers,
+                    Some(selected.field.response_key()),
+                    &[error],
+                ),
             }
         }
     }
@@ -311,15 +319,97 @@ fn auth_error(error: &AuthError) -> GraphQlError {
 }
 
 fn error_response(_headers: &HeaderMap, errors: &[GraphQlError]) -> Response {
+    error_response_for_key(_headers, None, errors)
+}
+
+fn error_response_for_key(
+    _headers: &HeaderMap,
+    root_key: Option<&str>,
+    errors: &[GraphQlError],
+) -> Response {
     (
         StatusCode::OK,
         [(CONTENT_TYPE, "application/json")],
         Json(json!({
             "errors": errors.iter().map(GraphQlError::to_json).collect::<Vec<_>>(),
-            "data": Value::Null,
+            "data": root_key.map(|key| json!({ key: Value::Null })).unwrap_or(Value::Null),
         })),
     )
         .into_response()
+}
+
+fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlError {
+    let message = error.message().to_string();
+    let code = error.code();
+
+    if code == "RECORD_NOT_FOUND" {
+        return friendly_graphql_error(
+            GraphQlError::not_found("Record not found"),
+            code,
+            "This record does not exist or has been deleted.",
+        );
+    }
+
+    if matches!(
+        code,
+        "ARGS_CONFLICT"
+            | "INVALID_ARGS_FIRST"
+            | "INVALID_ARGS_LAST"
+            | "INVALID_QUERY_INPUT"
+            | "INVALID_ARGS_DATA"
+            | "INVALID_ARGS_FILTER"
+            | "UPSERT_MULTIPLE_MATCHING_RECORDS_CONFLICT"
+            | "INVALID_CURSOR"
+            | "TOO_MANY_RECORDS_TO_UPDATE"
+            | "BAD_REQUEST"
+            | "TOO_COMPLEX_QUERY"
+            | "MISSING_TIMEZONE_FOR_DATE_GROUP_BY"
+            | "INVALID_TIMEZONE"
+            | "UNSUPPORTED_OPERATOR"
+            | "UNKNOWN_COLUMN"
+            | "UNKNOWN_RELATION"
+            | "UNKNOWN_SUB_FIELD"
+            | "INVALID_DIRECTION"
+    ) {
+        return friendly_graphql_error(
+            GraphQlError::user_input(message),
+            code,
+            "An error occurred.",
+        );
+    }
+
+    if code == "UNKNOWN_OBJECT" {
+        return friendly_graphql_error(
+            GraphQlError::user_input(message),
+            code,
+            "An error occurred.",
+        );
+    }
+
+    GraphQlError::internal(message).with_sub_code(code)
+}
+
+fn friendly_graphql_error(
+    mut error: GraphQlError,
+    sub_code: &str,
+    user_friendly_message: &str,
+) -> GraphQlError {
+    if let Some(object) = error.extensions.as_object_mut() {
+        object.insert(
+            String::from("userFriendlyMessage"),
+            Value::String(user_friendly_message.to_string()),
+        );
+    }
+
+    error.with_sub_code(sub_code)
+}
+
+fn record_not_found_graphql_error() -> GraphQlError {
+    friendly_graphql_error(
+        GraphQlError::not_found("Record not found"),
+        "RECORD_NOT_FOUND",
+        "This record does not exist or has been deleted.",
+    )
 }
 
 fn data_response(_headers: &HeaderMap, key: &str, value: Value) -> Response {
@@ -352,7 +442,7 @@ async fn execute_workspace(
         &maps.field_metadata_maps,
         &maps.index_metadata_maps,
     )
-    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+    .map_err(runner_graphql_error)?;
     let actor = if auth.workspace_member_id.is_some() {
         Some(ActorContext::manual(
             auth.workspace_member_id.map(|id| id.to_string()),
@@ -372,7 +462,9 @@ async fn execute_workspace(
         ResolverMethod::FindMany => {
             find_many_root(state, schema, &runner_schema, field, resolver).await
         }
-        ResolverMethod::FindOne => find_one_root(state, &runner_schema, field, resolver).await,
+        ResolverMethod::FindOne => {
+            find_one_root(state, schema, &runner_schema, field, resolver).await
+        }
         ResolverMethod::CreateOne => {
             let data = required_object(field, "data")?;
             let upsert = optional_bool_arg(field, "upsert");
@@ -386,7 +478,7 @@ async fn execute_workspace(
                 actor.as_ref(),
             )
             .await
-            .map_err(|error| GraphQlError::internal(error.to_string()))?;
+            .map_err(runner_graphql_error)?;
 
             find_record(state, schema, &runner_schema, field, resolver, id, false).await
         }
@@ -412,7 +504,7 @@ async fn execute_workspace(
                 },
             )
             .await
-            .map_err(|error| GraphQlError::internal(error.to_string()))?;
+            .map_err(runner_graphql_error)?;
             let filters = ids.iter().map(|id| id_filter(*id)).collect::<Vec<_>>();
 
             find_many(
@@ -429,7 +521,7 @@ async fn execute_workspace(
             )
             .await
             .map(|result| Value::Array(result.records))
-            .map_err(|error| GraphQlError::internal(error.to_string()))
+            .map_err(runner_graphql_error)
         }
         ResolverMethod::UpdateOne => {
             mutate_existing_record(
@@ -446,8 +538,6 @@ async fn execute_workspace(
         }
         ResolverMethod::DeleteOne => {
             let id = required_id(field)?;
-            let before =
-                find_record(state, schema, &runner_schema, field, resolver, id, true).await?;
 
             run_mutation_one(
                 &state.core_pool,
@@ -461,9 +551,9 @@ async fn execute_workspace(
                 vec![String::from("id")],
             )
             .await
-            .map_err(|error| GraphQlError::internal(error.to_string()))?;
+            .map_err(runner_graphql_error)?;
 
-            Ok(before)
+            find_record(state, schema, &runner_schema, field, resolver, id, true).await
         }
         ResolverMethod::DestroyOne => {
             let id = required_id(field)?;
@@ -482,7 +572,7 @@ async fn execute_workspace(
                 vec![String::from("id")],
             )
             .await
-            .map_err(|error| GraphQlError::internal(error.to_string()))?;
+            .map_err(runner_graphql_error)?;
 
             Ok(before)
         }
@@ -537,7 +627,7 @@ async fn find_many_root(
         &nested_relations(schema, field, resolver),
     )
     .await
-    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+    .map_err(runner_graphql_error)?;
     let object_type = pascal_case(&resolver.object_name_singular);
     let edges = result
         .records
@@ -724,6 +814,7 @@ fn project_record(record: &Value, selections: &[FieldSelection], type_name: &str
 
 async fn find_one_root(
     state: &AppState,
+    schema: &WorkspaceSchema,
     runner_schema: &RunnerSchema,
     field: &FieldSelection,
     resolver: &super::schema::RootResolver,
@@ -741,13 +832,11 @@ async fn find_one_root(
             selected_field_names: root_record_fields_schemaless(field),
             ..Default::default()
         },
-        &[],
+        &nested_relations(schema, field, resolver),
     )
     .await
-    .map_err(|error| GraphQlError::internal(error.to_string()))?
-    .ok_or_else(|| {
-        GraphQlError::not_found("Record was not found").with_sub_code("RECORD_NOT_FOUND")
-    })?;
+    .map_err(runner_graphql_error)?
+    .ok_or_else(record_not_found_graphql_error)?;
 
     Ok(project_record(
         &record,
@@ -783,7 +872,7 @@ async fn mutate_existing_record(
         selected.clone(),
     )
     .await
-    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+    .map_err(runner_graphql_error)?;
 
     find_record(
         state,
@@ -820,10 +909,12 @@ async fn find_record(
         &nested_relations(schema, field, resolver),
     )
     .await
-    .map_err(|error| GraphQlError::internal(error.to_string()))?;
-    let record = result.records.into_iter().next().ok_or_else(|| {
-        GraphQlError::not_found("Record was not found").with_sub_code("RECORD_NOT_FOUND")
-    })?;
+    .map_err(runner_graphql_error)?;
+    let record = result
+        .records
+        .into_iter()
+        .next()
+        .ok_or_else(record_not_found_graphql_error)?;
 
     Ok(project_record(
         &record,

@@ -29,6 +29,8 @@ pub struct ColumnShape {
     pub field_name: String,
     pub field_metadata_type: FieldMetadataType,
     pub composite_parent_field_name: Option<String>,
+    pub is_array: bool,
+    pub empty_string_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,6 +145,8 @@ pub fn build_workspace_table_shape(
                     field_name: field.name.clone(),
                     field_metadata_type: field.field_type,
                     composite_parent_field_name: None,
+                    is_array: false,
+                    empty_string_default: field.field_type == FieldMetadataType::Text,
                 });
             }
 
@@ -161,6 +165,15 @@ pub fn build_workspace_table_shape(
                     field_name: field.name.clone(),
                     field_metadata_type: property_type,
                     composite_parent_field_name: Some(field.name.clone()),
+                    is_array: matches!(
+                        field.field_type,
+                        FieldMetadataType::Emails
+                            | FieldMetadataType::Phones
+                            | FieldMetadataType::Links
+                    ) && property.field_type.as_str() == "RAW_JSON",
+                    empty_string_default: property.field_type.as_str() == "TEXT"
+                        && !(field.field_type == FieldMetadataType::Currency
+                            && property.name == "currencyCode"),
                 });
             }
 
@@ -173,6 +186,8 @@ pub fn build_workspace_table_shape(
             field_name: field.name.clone(),
             field_metadata_type: field.field_type,
             composite_parent_field_name: None,
+            is_array: false,
+            empty_string_default: field.field_type == FieldMetadataType::Text,
         });
     }
 

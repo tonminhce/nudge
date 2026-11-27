@@ -135,20 +135,22 @@ def fetch_reference_token():
         "availableWorkspacesForSignIn"
     ]
     login_token = workspaces[0]["loginToken"]
-    exchange = (
-        "mutation ex { getAuthTokensFromLoginToken(loginToken: \"%s\", origin: \"%s\") "
-        "{ tokens { accessOrWorkspaceAgnosticToken { token } } } }"
-        % (login_token, REFERENCE_ORIGIN)
-    )
-    status, body = request_raw(
-        NODE_BASE, "POST", "/metadata", json.dumps({"query": exchange})
-    )
-    parsed = json.loads(body)
-    if not parsed.get("data"):
-        raise RuntimeError("token exchange failed: %s" % body[:200])
-    return parsed["data"]["getAuthTokensFromLoginToken"]["tokens"][
-        "accessOrWorkspaceAgnosticToken"
-    ]["token"]
+    body = ""
+    for origin_argument in (f', origin: "{REFERENCE_ORIGIN}"', ""):
+        exchange = (
+            'mutation ex { getAuthTokensFromLoginToken(loginToken: "%s"'
+            + origin_argument
+            + ') { tokens { accessOrWorkspaceAgnosticToken { token } } } }'
+        ) % (login_token,)
+        status, body = request_raw(
+            NODE_BASE, "POST", "/metadata", json.dumps({"query": exchange})
+        )
+        parsed = json.loads(body)
+        if parsed.get("data"):
+            return parsed["data"]["getAuthTokensFromLoginToken"]["tokens"][
+                "accessOrWorkspaceAgnosticToken"
+            ]["token"]
+    raise RuntimeError("token exchange failed: %s" % body[:200])
 
 
 def graphql(base, query, token, variables=None, path="/graphql"):
