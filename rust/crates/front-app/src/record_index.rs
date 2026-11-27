@@ -57,6 +57,20 @@ pub fn virtual_range(scroll_top: usize, viewport_height: usize, total: usize) ->
     (start, end)
 }
 
+fn virtual_rows(
+    records: &[Value],
+    scroll_top: usize,
+    viewport_height: usize,
+) -> Vec<(usize, Value)> {
+    let (start, end) = virtual_range(scroll_top, viewport_height, records.len());
+    records[start..end]
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(offset, record)| (start + offset, record))
+        .collect()
+}
+
 #[component]
 pub fn RecordIndexPage() -> impl IntoView {
     let params = use_params_map();
@@ -193,9 +207,9 @@ pub fn RecordIndexPage() -> impl IntoView {
             .await;
             match result {
                 Ok(response) => {
-                    let mut next = records.get();
-                    next.extend(records_from_response(&response, &object.name_plural));
-                    records.set(next);
+                    records.update(|records| {
+                        records.extend(records_from_response(&response, &object.name_plural));
+                    });
                     cursor.set(end_cursor(&response, &object.name_plural));
                     loading.set(false);
                 }
@@ -335,14 +349,7 @@ pub fn RecordIndexPage() -> impl IntoView {
         }
     };
     let rows = move || {
-        let all = records.get();
-        let (start, end) = virtual_range(scroll_top.get(), viewport_height.get(), all.len());
-        all[start..end]
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(offset, record)| (start + offset, record))
-            .collect::<Vec<_>>()
+        records.with(|records| virtual_rows(records, scroll_top.get(), viewport_height.get()))
     };
 
     view! {
@@ -416,7 +423,7 @@ pub fn RecordIndexPage() -> impl IntoView {
             </div>
             {move || error.get().map(|message| view! { <div class="record-error" role="alert">{message}</div> })}
             <Show
-                when=move || !loading.get() && !records.get().is_empty()
+                when=move || !loading.get() && !records.with(|records| records.is_empty())
                 fallback=move || view! {
                     <div class="record-loading">
                         {move || if loading.get() { "Loading records..." } else { "No records found" }}
@@ -429,7 +436,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                         <span class="cell-checkbox"></span><span>"Name"</span><span>"Company"</span><span>"Emails"</span><span>"Created at"</span><span></span>
                     </div>
                     <div class="record-table-body" role="rowgroup"
-                        style=move || format!("height: {}px", records.get().len() * ROW_HEIGHT)
+                        style=move || format!("height: {}px", records.with(|records| records.len()) * ROW_HEIGHT)
                         on:scroll=move |event| {
                             let Some(target) = event.target().and_then(|target| target.dyn_into::<web_sys::Element>().ok()) else {
                                 return;
@@ -460,7 +467,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                     </div>
                 </div>
                 <div class="record-pagination">
-                    <span>{move || format!("Showing {} of {}", records.get().len(), total_count.get())}</span>
+                    <span>{move || format!("Showing {} of {}", records.with(|records| records.len()), total_count.get())}</span>
                     <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
                         disabled=move || loading.get() || cursor.get().is_none() on:click=move |_| load_more()>
                         {move || if loading.get() { "Loading..." } else { "Load more" }}
@@ -616,6 +623,21 @@ mod tests {
         let (start, end) = virtual_range(319_968, 600, 10_000);
         assert_eq!(start, 9_839);
         assert_eq!(end, 10_000);
+    }
+
+    #[test]
+    fn virtual_rows_preserve_the_visible_slice_and_original_indices() {
+        let records = (0..10_000)
+            .map(|index| serde_json::json!({"id": index}))
+            .collect::<Vec<_>>();
+        let rows = virtual_rows(&records, 300 * ROW_HEIGHT, 600);
+
+        assert_eq!(rows.len(), ROW_SLOT_COUNT);
+        for (offset, (index, record)) in rows.iter().enumerate() {
+            let expected_index = 140 + offset;
+            assert_eq!(*index, expected_index);
+            assert_eq!(record, &records[expected_index]);
+        }
     }
 
     #[test]

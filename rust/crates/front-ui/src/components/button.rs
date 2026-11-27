@@ -1,3 +1,4 @@
+use leptos::callback::Callable;
 use leptos::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -175,6 +176,7 @@ pub fn Button(
     #[prop(optional)] loading: bool,
     #[prop(optional)] elevated: bool,
     #[prop(optional)] disabled: bool,
+    #[prop(optional, into)] on_click: Option<Callback<leptos::web_sys::MouseEvent>>,
     #[prop(optional)] start_icon: Option<AnyView>,
     #[prop(optional)] end_icon: Option<AnyView>,
     #[prop(optional)] class: &'static str,
@@ -213,6 +215,13 @@ pub fn Button(
             data-elevated=state.elevated.then_some("")
             disabled=effective_disabled
             aria-busy=loading.then_some("true")
+            on:click=move |event| {
+                if !effective_disabled {
+                    if let Some(on_click) = on_click {
+                        on_click.run(event);
+                    }
+                }
+            }
         >
             <span class=content_class>
                 {start.map(|node| view! { <span class=BUTTON_ICON_CLASS aria-hidden="true">{node}</span> })}
@@ -263,6 +272,33 @@ mod tests {
         assert!(html.contains(">Save<"), "{html}");
         assert!(!html.contains("data-full-width"), "{html}");
         assert!(!html.contains("data-loading"), "{html}");
+        assert!(!html.contains("disabled"), "{html}");
+    }
+
+    #[test]
+    fn click_callback_compiles_and_disabled_renders_natively() {
+        let html = (view! {
+            <Button disabled=true on_click=move |_: leptos::web_sys::MouseEvent| {}>
+                "Save"
+            </Button>
+        })
+        .into_view()
+        .to_html();
+        assert!(html.contains("type=\"button\""), "{html}");
+        assert!(html.contains("disabled"), "{html}");
+        assert!(html.contains(">Save<"), "{html}");
+    }
+
+    #[test]
+    fn props_builder_accepts_click_callback() {
+        let props = ButtonProps::builder()
+            .children(ToChildren::to_children(|| "Save"))
+            .on_click(|_: leptos::web_sys::MouseEvent| {})
+            .disabled(true)
+            .build();
+        let html = Button(props).into_view().to_html();
+        assert!(html.contains("disabled"), "{html}");
+        assert!(html.contains(">Save<"), "{html}");
     }
 
     #[test]

@@ -1,5 +1,8 @@
+use front_ui::gallery::gallery_page;
 use front_ui::tokens::Scheme;
 use leptos::prelude::*;
+use leptos_meta::provide_meta_context;
+use leptos_meta::Title;
 use leptos_router::components::ParentRoute;
 use leptos_router::components::Redirect;
 use leptos_router::components::Route;
@@ -75,7 +78,7 @@ pub fn remove_storage(key: &str) {
 }
 
 pub fn server_url() -> String {
-    read_storage("nudge.serverUrl").unwrap_or_else(|| "http://127.0.0.1:3001".to_string())
+    read_storage("nudge.serverUrl").unwrap_or_else(|| "http://127.0.0.1:3000".to_string())
 }
 
 #[component]
@@ -92,6 +95,7 @@ pub fn App() -> impl IntoView {
             })
             .unwrap_or(Scheme::Light),
     );
+    provide_meta_context();
     provide_context(auth.clone());
     provide_context(theme);
     provide_context(RwSignal::new(false));
@@ -123,6 +127,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/book-call") view=|| view! { <StubPage title="Book a call" /> } />
                 <Route path=path!("/plan-required") view=|| view! { <StubPage title="Plan required" /> } />
                 <Route path=path!("/authorize") view=|| view! { <StubPage title="Authorize" /> } />
+                <Route path=path!("/gallery") view=GalleryPage />
                 <ParentRoute path=path!("") view=WorkspaceLayout>
                     <Route path=path!("") view=IndexRedirect />
                     <Route path=path!("/objects/:plural") view=RecordIndexPage />
@@ -148,6 +153,40 @@ pub fn App() -> impl IntoView {
 }
 
 #[component]
+fn GalleryPage() -> impl IntoView {
+    view! {
+        <>
+            <Title text="Nudge front-ui gallery" />
+            <header class="record-index-header">
+                <div class="record-title">
+                    <h1>{"Nudge front-ui gallery"}</h1>
+                </div>
+                <div class="record-actions">
+                    <a href="/" class="t-button">{"Back to app"}</a>
+                </div>
+            </header>
+            {gallery_page()}
+        </>
+    }
+}
+
+#[component]
 fn IndexRedirect() -> impl IntoView {
     view! { <Redirect path="/objects/people" /> }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gallery_route_renders_title_link_and_both_themes() {
+        let html = GalleryPage().into_view().to_html();
+        assert!(html.contains("<h1>Nudge front-ui gallery</h1>"));
+        assert!(html.contains("href=\"/\""));
+        assert!(html.contains(">Back to app<"));
+        assert!(html.contains("class=\"light gallery\""));
+        assert!(html.contains("class=\"dark gallery\""));
+        assert!(html.contains(">Accent solid<"));
+    }
 }
