@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <strong>Thesuper lightweight CRM that feels instant.</strong><br>
+  <strong>The super lightweight CRM that feels instant.</strong><br>
   High performance. User friendly. Yours to host.
 </p>
 
