@@ -56,8 +56,21 @@ pub async fn fetch_client_config(base_url: &str) -> Result<ClientConfig, ClientE
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn fetch_client_config(_base_url: &str) -> Result<ClientConfig, ClientError> {
-    Err(ClientError::UnsupportedOnWasm)
+pub async fn fetch_client_config(base_url: &str) -> Result<ClientConfig, ClientError> {
+    let url = format!("{}/client-config", base_url.trim_end_matches('/'));
+    let response = gloo_net::http::Request::get(&url)
+        .send()
+        .await
+        .map_err(|error| ClientError::Transport(error.to_string()))?;
+    let status = response.status();
+    if !(200..300).contains(&status) {
+        return Err(ClientError::Transport(format!("HTTP {status}")));
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|error| ClientError::Transport(error.to_string()))?;
+    ClientConfig::from_bytes(text.as_bytes())
 }
 
 #[cfg(test)]

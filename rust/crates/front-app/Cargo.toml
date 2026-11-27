@@ -1,0 +1,21 @@
+[package]
+name = "nudge-front-app"
+version = "0.1.0"
+description = "Nudge Leptos CSR application: auth, workspace shell and routed product surfaces."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "nudge-front-app"
+path = "src/main.rs"
+
+[dependencies]
+leptos = { version = "0.8.23", features = ["csr"] }
+leptos_meta = "0.8"
+leptos_router = "0.8"
+nudge-front-core = { path = "../front-core" }
+nudge-front-ui = { path = "../front-ui" }
+serde_json = { workspace = true }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlElement", "Storage", "Window"] }

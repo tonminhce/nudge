@@ -1,0 +1,9 @@
+[build]
+target = "index.html"
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8080
+
+[tools.wasm-bindgen]
+version = "0.2.130"
