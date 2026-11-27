@@ -67,10 +67,55 @@ R-002 (verify auth behaviour against upstream, never guess).
     `30s * 2^n` retry backoff, FAILED at `MAX_ATTEMPTS=3`, stale recovery,
     non-transactional execution for `CREATE INDEX CONCURRENTLY`;
     `workspace_migrations::worker::spawn_deferred_worker` runs from `main.rs`.
-  - Next: merge `wave3/u9` (metadata GraphQL API) and `wave3/u10` (update/delete matrix,
-    includes the `targetTableName='DEPRECATED'` parity fix), then wave 4 (record query
-    layer — spec in `research/query-layer.md`) and wave 5 (Leptos front — spec in
-    `research/frontend-architecture.md`).
+- **Wave 4 started** (spec `research/query-layer.md`):
+  - U1 merged: pure `query::filter` / `query::order` / `query::cursor` / `query::compile`
+    (the `:name -> $n` rewrite reused by U2's statement compilation).
+  - U2 `query::repository` (branch `wave4/u2`): `table_shape.rs` ports
+    `buildWorkspaceTableShape` (`twenty-server/src/engine/twenty-orm/table-shape/utils/
+    build-workspace-table-shape.util.ts:25-128` @ `twenty/v2.61.0`) over the wave-3 flat maps:
+    composite fields expand to `<field><PascalCase(property)>` columns via the shared
+    `column_defs::composite_types` definitions (`computeCompositeColumnName`,
+    `metadata-modules/field-metadata/utils/compute-column-name.util.ts:42-62`), MANY_TO_ONE
+    relations add the `<field>Id` join column
+    (`compute-morph-or-relation-field-join-column-name.util.ts:5-9`), morph heads
+    (`universalIdentifier == morphId`, `twenty-shared/src/utils/fieldMetadata/
+    isMorphRelationHead.ts:12-22`) are skipped, to-many relations get a shape without a join
+    column, and `tableName` follows `computeObjectTargetTable`
+    (`engine/utils/compute-object-target-table.util.ts:6-17`). The upstream per-context
+    `WeakMap` shape cache (`engine/twenty-orm/datasource/workspace-data-source.ts:33-36,
+    298-334`) is mirrored as the bounded LRU `TableShapeCache` keyed
+    `(workspaceId, metadataVersion, objectId)` (deviation D6, §11). `sql.rs` ports
+    `buildInsertStatement` (`engine/twenty-orm/sql/utils/build-insert-statement.util.ts:32-65`,
+    incl. `DEFAULT` for omitted row columns) and `buildMutationStatement`
+    (`build-mutation-statement.util.ts:81-112`) driven by the builder semantics of
+    `workspace-mutation-query-builder.ts:139-223`: soft delete stamps
+    `deletedAt + updatedAt = CURRENT_TIMESTAMP` and appends the `"alias"."deletedAt" IS NULL`
+    live-row predicate outside the guarded expression (:65-79), restore sets `deletedAt = NULL`,
+    update appends `updatedAt` maintenance unless the caller set it (:188-195), a missing
+    `deletedAt` column raises `UNSUPPORTED_OPERATION` (:216-223), the `rowAccessConditions`
+    render outside the user OR chain (:558-586), and the result aliases are the 63-byte
+    `alias_column` names, sha256-hashed when longer
+    (`workspace-query-executor/utils/build-postgres-safe-alias.util.ts:4-16`).
+    `QUERY_MAX_RECORDS = 200` (`twenty-shared/src/constants/QueryMaxRecords.ts:1`) with
+    `updateMany` overflow -> `TOO_MANY_RECORDS_TO_UPDATE`
+    (`engine/twenty-orm/repository/workspace-repository.ts:636-646` @ the tag). Accepted
+    statements are byte-equal to the upstream jest fixtures
+    (`sql/utils/__tests__/build-insert-statement.util.spec.ts:45-49`,
+    `query-builder/__tests__/workspace-mutation-query-builder.spec.ts:108-114, 147-152,
+    204-210`); the DB-gated test seeds a real workspace via `seed_standard_objects`, proves
+    every person/company shape column against `pg_attribute` (composite sub-columns, join
+    columns, `searchVector`; the enrichment pair excluded because it is not a metadata field),
+    executes the emitted insert/soft-delete/restore/update/destroy SQL, and proves the
+    `deletedAt IS NULL` skip on an already-trashed row.
+  - Loader fix U2 required: `metadata/flat/rows.rs` now populates the object's
+    `application_universal_identifier` (subquery join to `core.application`); without it
+    `computeObjectTargetTable` classified every standard object as custom (`_person`).
+    Upstream's flat maps always carry it
+    (`engine/metadata-modules/flat-object-metadata/types/flat-object-metadata.type.ts` @ the tag).
+    Field/index/option/search-field identifiers stay empty on load (deferred; nothing in the
+    record path reads them yet — listed under known gaps).
+  - Next: U3 (`find_many`/`find_one` + relation joins) builds on these shapes and statements;
+    wave 5 (Leptos front) spec `research/frontend-architecture.md`.
 
 ## How to run everything
 ```
@@ -207,6 +252,13 @@ on the subdomain origin and activates). Do not re-run it against the already-see
 - Rate limiting beyond the upstream-specific throttles lands in wave 6.
 - Workspace-level impersonation needs the IMPERSONATE permission flag, which lands with the
   query runner enforcement (wave 4).
+- Wave 4 U2 loader gap: `metadata/flat/rows.rs` populates the object's
+  `application_universal_identifier` (required by `query::repository::table_shape` for
+  `computeObjectTargetTable`), but the field/index/option/search-field flat maps still load
+  `application_universal_identifier` empty. Nothing on the record path reads those yet (the
+  field-level delete guard in `metadata/api/handlers.rs` uses `is_system` +
+  `is_system_side_effect` as its live conditions); populate the remaining maps with the same
+  subquery pattern when a consumer needs them.
 
 ## Known traps
 - A failed sqlx migration is recorded and blocks reruns while developing; reset with

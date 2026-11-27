@@ -30,6 +30,8 @@ pub struct ObjectMetadataRow {
     pub universal_identifier: Uuid,
     #[sqlx(rename = "applicationId")]
     pub application_id: Uuid,
+    #[sqlx(rename = "applicationUniversalIdentifier")]
+    pub application_universal_identifier: Option<Uuid>,
     #[sqlx(rename = "workspaceId")]
     pub workspace_id: Uuid,
     #[sqlx(rename = "nameSingular")]
@@ -320,7 +322,10 @@ pub fn assemble_workspace_maps(rows: WorkspaceMetadataRows) -> MetadataResult<Fl
             page_layout_ids: Vec::new(),
             created_at: row.created_at,
             updated_at: row.updated_at,
-            application_universal_identifier: String::new(),
+            application_universal_identifier: row
+                .application_universal_identifier
+                .map(|identifier| identifier.to_string())
+                .unwrap_or_default(),
             field_universal_identifiers: Vec::new(),
             object_permission_universal_identifiers: Vec::new(),
             field_permission_universal_identifiers: Vec::new(),
@@ -811,7 +816,9 @@ async fn load_object_metadata_rows(
          \"isLabelSyncedWithName\", \"openRecordIn\"::text AS \"openRecordIn\", \
          \"disabledObjectPermissionActions\", \"duplicateCriteria\", \"shortcut\", \"overrides\", \
          \"labelIdentifierFieldMetadataId\", \"imageIdentifierFieldMetadataId\", \
-         \"createdAt\", \"updatedAt\" \
+         \"createdAt\", \"updatedAt\", \
+         (SELECT standard_app.\"universalIdentifier\" FROM core.\"application\" standard_app \
+          WHERE standard_app.\"id\" = \"objectMetadata\".\"applicationId\") AS \"applicationUniversalIdentifier\" \
          FROM core.\"objectMetadata\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
