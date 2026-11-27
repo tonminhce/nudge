@@ -645,12 +645,16 @@ async fn find_many_root(
         args.first = Some(crate::query::runner::DEFAULT_PAGE_SIZE);
     }
 
+    let include_total_count = field
+        .selection
+        .iter()
+        .any(|selection| selection.name == "totalCount");
     let result = find_many(
         &state.core_pool,
         runner_schema,
         &resolver.object_name_singular,
         &args,
-        true,
+        include_total_count,
         &nested_relations(schema, field, resolver),
     )
     .await
