@@ -11,10 +11,10 @@ use serde_json::Value;
 use crate::auth::AuthPage;
 use crate::layout::WorkspaceLayout;
 use crate::pages::NotFoundPage;
-use crate::pages::RecordIndexPage;
 use crate::pages::RecordShowPage;
 use crate::pages::SettingsPage;
 use crate::pages::StubPage;
+use crate::record_index::RecordIndexPage;
 
 #[derive(Clone)]
 pub struct AuthState {

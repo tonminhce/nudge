@@ -4,6 +4,7 @@ mod app;
 mod auth;
 mod layout;
 mod pages;
+mod record_index;
 mod records;
 
 use app::App;

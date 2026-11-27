@@ -27,12 +27,18 @@ pub async fn load_records(
     token: &str,
     object: &ObjectMetadata,
     after: Option<String>,
+    filter: Option<Value>,
+    order_by: Option<Value>,
+    depth: usize,
 ) -> Result<Value, String> {
     let document = find_many_query(
         object,
         FindManyArgs {
             first: Some(60),
             after,
+            filter,
+            order_by,
+            depth,
             ..Default::default()
         },
     )
