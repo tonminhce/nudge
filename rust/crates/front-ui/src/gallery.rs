@@ -1,10 +1,11 @@
 use leptos::prelude::*;
 
 use crate::components::{
-    AppHeader, Avatar, AvatarSize, AvatarVariant, Button, ButtonColor, ButtonSize, ButtonVariant,
-    Chip, ChipColor, ChipShape, ChipSize, ChipVariant, IconButton, Input, InputSize, Menu,
-    MenuItemDef, Modal, ModalSize, NavigationDrawer, RecordTable, Select, SelectItem, SidePanel,
-    TabItem, TabList, TabPanel, TableColumn, Tag, TagVariant, ThemeScope, Tooltip, TooltipSide,
+    AppHeader, Avatar, AvatarSize, AvatarVariant, Badge, BadgeTone, BadgeVariant, Button,
+    ButtonColor, ButtonSize, ButtonVariant, Checkbox, Chip, ChipColor, ChipShape, ChipSize,
+    ChipVariant, IconButton, Input, InputSize, Menu, MenuItemDef, Modal, ModalSize,
+    NavigationDrawer, RecordTable, Select, SelectItem, Separator, SidePanel, Switch, TabItem,
+    TabList, TabPanel, TableColumn, Tag, TagVariant, Textarea, ThemeScope, Tooltip, TooltipSide,
 };
 use crate::icons::{Icon, IconStroke};
 use crate::tokens::Scheme;
@@ -99,6 +100,18 @@ pub fn gallery_section(scheme: Scheme) -> impl IntoView {
                     </div>
                 </section>
                 <section class="gallery-cell">
+                    <h3>{"Forms & status"}</h3>
+                    <div class="gallery-row">
+                        <Textarea value="Notes" placeholder="Add notes" rows=3/>
+                        <Checkbox checked=true label="Subscribe"/>
+                        <Switch checked=true label="Notifications"/>
+                        <Badge label="New" tone=BadgeTone::Accent variant=BadgeVariant::Soft/>
+                        <Badge label="Open" tone=BadgeTone::Success variant=BadgeVariant::Outline/>
+                        <Badge label="Review" tone=BadgeTone::Warning variant=BadgeVariant::Solid/>
+                        <Separator/>
+                    </div>
+                </section>
+                <section class="gallery-cell">
                     <h3>{"Tabs"}</h3>
                     <div class="gallery-row">
                         <TabList tabs=vec![TabItem::new("table","Table"), TabItem::new("kanban","Kanban"), TabItem::new("calendar","Calendar")] value="table"/>
@@ -174,6 +187,14 @@ mod tests {
         assert!(html.contains(">Soft chip<"), "chip");
         assert!(html.contains(">Blue tag<"), "tag");
         assert!(html.contains("Pick a status"), "select");
+        assert!(html.contains(">Notes</textarea>"), "textarea");
+        assert!(html.contains(">Subscribe<"), "checkbox");
+        assert!(html.contains("role=\"switch\""), "switch");
+        assert!(html.contains(">New<"), "badge");
+        assert!(
+            html.contains("data-orientation=\"horizontal\""),
+            "separator"
+        );
         assert!(html.contains(">Table panel<"), "tab panel");
         assert!(html.contains("t-avatar-fallback\">T<"), "avatar initial");
         assert!(html.contains(">Duplicate<"), "menu item");
