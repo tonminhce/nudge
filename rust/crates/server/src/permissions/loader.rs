@@ -13,6 +13,9 @@ use super::kernel::compute_role_records_permissions;
 use super::model::FieldPermissionDefinition;
 use super::model::ObjectPermissionDefinition;
 use super::model::RoleDefinition;
+use super::model::RowLevelPermissionPredicateDefinition;
+use super::model::RowLevelPermissionPredicateGroupDefinition;
+use super::model::RowLevelPermissionRuleDefinition;
 use super::model::WorkspacePermissionSet;
 use super::settings::effective_permission_flags;
 use super::PermissionCache;
@@ -66,6 +69,81 @@ struct FieldPermissionRow {
     can_read_field_value: Option<bool>,
     #[sqlx(rename = "canUpdateFieldValue")]
     can_update_field_value: Option<bool>,
+    #[sqlx(rename = "rowLevelPermissionRuleId")]
+    row_level_permission_rule_id: Option<Uuid>,
+}
+
+#[derive(Debug, FromRow)]
+struct RowLevelPermissionRuleRow {
+    id: Uuid,
+    #[sqlx(rename = "roleId")]
+    role_id: Uuid,
+    #[sqlx(rename = "objectMetadataId")]
+    object_metadata_id: Uuid,
+    #[sqlx(rename = "canReadRecords")]
+    can_read_records: bool,
+    #[sqlx(rename = "canCreateRecords")]
+    can_create_records: bool,
+    #[sqlx(rename = "canUpdateRecords")]
+    can_update_records: bool,
+    #[sqlx(rename = "canSoftDeleteRecords")]
+    can_soft_delete_records: bool,
+    #[sqlx(rename = "canDestroyRecords")]
+    can_destroy_records: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct RowLevelPermissionPredicateRow {
+    id: Uuid,
+    #[sqlx(rename = "fieldMetadataId")]
+    field_metadata_id: Uuid,
+    #[sqlx(rename = "relationFieldMetadataId")]
+    relation_field_metadata_id: Option<Uuid>,
+    #[sqlx(rename = "objectMetadataId")]
+    object_metadata_id: Uuid,
+    operand: String,
+    #[sqlx(rename = "subFieldName")]
+    sub_field_name: Option<String>,
+    #[sqlx(rename = "workspaceMemberFieldMetadataId")]
+    workspace_member_field_metadata_id: Option<Uuid>,
+    #[sqlx(rename = "workspaceMemberSubFieldName")]
+    workspace_member_sub_field_name: Option<String>,
+    #[sqlx(rename = "workspaceMemberRelationFieldMetadataId")]
+    workspace_member_relation_field_metadata_id: Option<Uuid>,
+    #[sqlx(rename = "rowLevelPermissionPredicateGroupId")]
+    row_level_permission_predicate_group_id: Option<Uuid>,
+    #[sqlx(rename = "positionInRowLevelPermissionPredicateGroup")]
+    position_in_row_level_permission_predicate_group: Option<f64>,
+    #[sqlx(rename = "roleId")]
+    role_id: Uuid,
+    value: Option<serde_json::Value>,
+    #[sqlx(rename = "rowLevelPermissionRuleId")]
+    row_level_permission_rule_id: Option<Uuid>,
+}
+
+#[derive(Debug, FromRow)]
+struct RowLevelPermissionPredicateGroupRow {
+    id: Uuid,
+    #[sqlx(rename = "parentRowLevelPermissionPredicateGroupId")]
+    parent_row_level_permission_predicate_group_id: Option<Uuid>,
+    #[sqlx(rename = "logicalOperator")]
+    logical_operator: String,
+    #[sqlx(rename = "positionInRowLevelPermissionPredicateGroup")]
+    position_in_row_level_permission_predicate_group: Option<f64>,
+    #[sqlx(rename = "canReadRecords")]
+    can_read_records: bool,
+    #[sqlx(rename = "canUpdateRecords")]
+    can_update_records: bool,
+    #[sqlx(rename = "canSoftDeleteRecords")]
+    can_soft_delete_records: bool,
+    #[sqlx(rename = "canDestroyRecords")]
+    can_destroy_records: bool,
+    #[sqlx(rename = "roleId")]
+    role_id: Uuid,
+    #[sqlx(rename = "objectMetadataId")]
+    object_metadata_id: Uuid,
+    #[sqlx(rename = "rowLevelPermissionRuleId")]
+    row_level_permission_rule_id: Option<Uuid>,
 }
 
 #[derive(Debug, FromRow)]
@@ -161,11 +239,11 @@ async fn load_permission_set(
 
     let field_rows: Vec<FieldPermissionRow> = sqlx::query_as(
         "SELECT \"roleId\", \"objectMetadataId\", \"fieldMetadataId\", \
-         \"canReadFieldValue\", \"canUpdateFieldValue\" \
+         \"canReadFieldValue\", \"canUpdateFieldValue\", \"rowLevelPermissionRuleId\" \
          FROM core.\"fieldPermission\" \
          WHERE \"workspaceId\" = $1 \
-         AND \"rowLevelPermissionRuleId\" IS NULL \
-         AND \"rowLevelPermissionPredicateGroupId\" IS NULL",
+         AND (\"rowLevelPermissionRuleId\" IS NOT NULL \
+              OR \"rowLevelPermissionPredicateGroupId\" IS NULL)",
     )
     .bind(workspace_id)
     .fetch_all(pool)
@@ -178,8 +256,109 @@ async fn load_permission_set(
                 field_metadata_id: row.field_metadata_id,
                 can_read_field_value: row.can_read_field_value,
                 can_update_field_value: row.can_update_field_value,
-                row_level_permission_rule_id: None,
+                row_level_permission_rule_id: row.row_level_permission_rule_id,
             });
+        }
+    }
+
+    let rule_rows: Vec<RowLevelPermissionRuleRow> = sqlx::query_as(
+        "SELECT id, \"roleId\", \"objectMetadataId\", \"canReadRecords\", \
+         \"canCreateRecords\", \"canUpdateRecords\", \"canSoftDeleteRecords\", \
+         \"canDestroyRecords\" \
+         FROM core.\"rowLevelPermissionRule\" WHERE \"workspaceId\" = $1",
+    )
+    .bind(workspace_id)
+    .fetch_all(pool)
+    .await
+    .map_err(database_error)?;
+    for row in rule_rows {
+        if let Some(role) = roles.get_mut(&row.role_id) {
+            role.row_level_permission_rules
+                .push(RowLevelPermissionRuleDefinition {
+                    id: row.id,
+                    object_metadata_id: row.object_metadata_id,
+                    can_create_records: row.can_create_records,
+                    can_read_records: row.can_read_records,
+                    can_update_records: row.can_update_records,
+                    can_soft_delete_records: row.can_soft_delete_records,
+                    can_destroy_records: row.can_destroy_records,
+                });
+        }
+    }
+
+    let predicate_rows: Vec<RowLevelPermissionPredicateRow> = sqlx::query_as(
+        "SELECT id, \"fieldMetadataId\", \"relationFieldMetadataId\", \
+         \"objectMetadataId\", operand::text AS operand, \"subFieldName\", \
+         \"workspaceMemberFieldMetadataId\", \"workspaceMemberSubFieldName\", \
+         \"workspaceMemberRelationFieldMetadataId\", \
+         \"rowLevelPermissionPredicateGroupId\", \
+         \"positionInRowLevelPermissionPredicateGroup\", \"roleId\", value, \
+         \"rowLevelPermissionRuleId\" \
+         FROM core.\"rowLevelPermissionPredicate\" \
+         WHERE \"workspaceId\" = $1 AND \"deletedAt\" IS NULL",
+    )
+    .bind(workspace_id)
+    .fetch_all(pool)
+    .await
+    .map_err(database_error)?;
+    for row in predicate_rows {
+        if let Some(role) = roles.get_mut(&row.role_id) {
+            role.row_level_permission_predicates
+                .push(RowLevelPermissionPredicateDefinition {
+                    id: row.id,
+                    field_metadata_id: row.field_metadata_id,
+                    relation_field_metadata_id: row.relation_field_metadata_id,
+                    object_metadata_id: row.object_metadata_id,
+                    operand: row.operand,
+                    sub_field_name: row.sub_field_name,
+                    workspace_member_field_metadata_id: row.workspace_member_field_metadata_id,
+                    workspace_member_sub_field_name: row.workspace_member_sub_field_name,
+                    workspace_member_relation_field_metadata_id: row
+                        .workspace_member_relation_field_metadata_id,
+                    row_level_permission_predicate_group_id: row
+                        .row_level_permission_predicate_group_id,
+                    position_in_row_level_permission_predicate_group: row
+                        .position_in_row_level_permission_predicate_group,
+                    role_id: row.role_id,
+                    value: row.value,
+                    row_level_permission_rule_id: row.row_level_permission_rule_id,
+                });
+        }
+    }
+
+    let predicate_group_rows: Vec<RowLevelPermissionPredicateGroupRow> = sqlx::query_as(
+        "SELECT id, \"parentRowLevelPermissionPredicateGroupId\", \
+         \"logicalOperator\"::text AS \"logicalOperator\", \
+         \"positionInRowLevelPermissionPredicateGroup\", \
+         \"canReadRecords\", \"canUpdateRecords\", \"canSoftDeleteRecords\", \
+         \"canDestroyRecords\", \"roleId\", \"objectMetadataId\", \
+         \"rowLevelPermissionRuleId\" \
+         FROM core.\"rowLevelPermissionPredicateGroup\" \
+         WHERE \"workspaceId\" = $1 AND \"deletedAt\" IS NULL",
+    )
+    .bind(workspace_id)
+    .fetch_all(pool)
+    .await
+    .map_err(database_error)?;
+    for row in predicate_group_rows {
+        if let Some(role) = roles.get_mut(&row.role_id) {
+            role.row_level_permission_predicate_groups.push(
+                RowLevelPermissionPredicateGroupDefinition {
+                    id: row.id,
+                    parent_row_level_permission_predicate_group_id: row
+                        .parent_row_level_permission_predicate_group_id,
+                    logical_operator: row.logical_operator,
+                    position_in_row_level_permission_predicate_group: row
+                        .position_in_row_level_permission_predicate_group,
+                    can_read_records: row.can_read_records,
+                    can_update_records: row.can_update_records,
+                    can_soft_delete_records: row.can_soft_delete_records,
+                    can_destroy_records: row.can_destroy_records,
+                    role_id: row.role_id,
+                    object_metadata_id: row.object_metadata_id,
+                    row_level_permission_rule_id: row.row_level_permission_rule_id,
+                },
+            );
         }
     }
 

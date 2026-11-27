@@ -16,6 +16,7 @@ use super::base::resolve_where_clauses;
 use super::base::RunnerSchema;
 use super::permissions::validate_filter_read;
 use super::permissions::validate_write;
+use super::rls::row_access_filter;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +116,21 @@ pub async fn run_mutation(
         &data,
         &returning_columns,
     )?;
+    let mut row_access_conditions = Vec::new();
+    if let Some(access) = row_access_filter(
+        pool,
+        schema,
+        object_name_singular,
+        kind.permission_operation(),
+        &mut suffixes,
+    )
+    .await?
+    {
+        let condition =
+            resolve_where_clauses(schema, object_name_singular, alias, &access.clauses)?;
+        row_access_conditions.push(condition);
+        parameter_map.extend(access.params);
+    }
     let state = MutationStatementState {
         alias,
         shape: &model.shape,
@@ -122,7 +138,7 @@ pub async fn run_mutation(
         set_columns: set_columns.into_iter().collect(),
         where_clauses,
         where_parameters: parameter_map.clone(),
-        row_access_conditions: Vec::new(),
+        row_access_conditions,
         include_deleted: with_deleted,
         returning_columns,
     };

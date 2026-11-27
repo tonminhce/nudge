@@ -3,17 +3,20 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::query::compile::compile_named_parameters;
+use crate::query::filter::Suffixes;
 use crate::query::repository::quote_identifier;
 
 use super::base::column_result_alias;
 use super::base::execute_json_rows;
 use super::base::render_select_list;
+use super::base::resolve_where_clauses;
 use super::base::RunnerSchema;
 use super::base::Selection;
 use super::base::QUERY_MAX_RECORDS_FROM_RELATION;
 use super::find_many::NestedRelationSelection;
 use super::format_result_rows;
 use super::permissions::validate_read;
+use super::rls::row_access_filter;
 use super::RunnerError;
 
 pub async fn load_nested_relations(
@@ -38,6 +41,27 @@ pub async fn load_nested_relations(
             })
             .collect::<Vec<_>>();
         let select_sql = render_select_list(&child_alias, &mapped_columns, &[])?;
+        let mut suffixes = Suffixes::new();
+        let access = row_access_filter(
+            pool,
+            schema,
+            &child.object.name_singular,
+            crate::permissions::ObjectRecordsOperationType::Read,
+            &mut suffixes,
+        )
+        .await?;
+        let access_sql = access
+            .as_ref()
+            .map(|access| {
+                resolve_where_clauses(
+                    schema,
+                    &child.object.name_singular,
+                    &child_alias,
+                    &access.clauses,
+                )
+            })
+            .transpose()?;
+        let access_params = access.map(|access| access.params).unwrap_or_default();
 
         if let Some(parent_join_column) = relation.join_column_name.as_deref() {
             let mut parent_ids = Vec::new();
@@ -60,8 +84,13 @@ pub async fn load_nested_relations(
             let parameters = serde_json::Map::new();
             let mut map = parameters;
             map.insert(String::from("ids"), Value::Array(parent_ids));
+            map.extend(access_params);
+            let access_sql = access_sql
+                .as_ref()
+                .map(|access_sql| format!(" AND ({access_sql})"))
+                .unwrap_or_default();
             let where_sql = format!(
-                "WHERE {}.id = ANY(ARRAY[:...ids]::uuid[])",
+                "WHERE {}.id = ANY(ARRAY[:...ids]::uuid[]){access_sql}",
                 quote_identifier(&child_alias)?
             );
             let sql = format!(
@@ -118,6 +147,11 @@ pub async fn load_nested_relations(
 
         let mut map = serde_json::Map::new();
         map.insert(String::from("ids"), Value::Array(parent_ids));
+        map.extend(access_params);
+        let access_sql = access_sql
+            .as_ref()
+            .map(|access_sql| format!(" AND ({access_sql})"))
+            .unwrap_or_default();
         let live_predicate = if child.shape.has_deleted_at_column {
             format!(
                 "{}.{} IS NULL",
@@ -128,7 +162,7 @@ pub async fn load_nested_relations(
             String::from("TRUE")
         };
         let where_sql = format!(
-            "WHERE {}.{} = ANY(ARRAY[:...ids]::uuid[]) AND {live_predicate}",
+            "WHERE {}.{} = ANY(ARRAY[:...ids]::uuid[]) AND {live_predicate}{access_sql}",
             quote_identifier(&child_alias)?,
             quote_identifier(&child_join_column)?
         );

@@ -36,6 +36,7 @@ use super::format_result_rows;
 use super::permissions::validate_filter_read;
 use super::permissions::validate_order_read;
 use super::permissions::validate_read;
+use super::rls::row_access_filter;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Default)]
@@ -118,6 +119,18 @@ pub async fn find_many(
         parameter_map.extend(filter.params);
     } else {
         clauses = Vec::new();
+    }
+    if let Some(access) = row_access_filter(
+        pool,
+        schema,
+        object_name_singular,
+        crate::permissions::ObjectRecordsOperationType::Read,
+        &mut suffixes,
+    )
+    .await?
+    {
+        clauses.extend(access.clauses);
+        parameter_map.extend(access.params);
     }
     let total_filter_expression =
         resolve_where_clauses(schema, object_name_singular, alias, &clauses)?;

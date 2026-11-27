@@ -105,6 +105,52 @@ pub struct FieldPermissionDefinition {
 }
 
 #[derive(Debug, Clone)]
+pub struct RowLevelPermissionRuleDefinition {
+    pub id: Uuid,
+    pub object_metadata_id: Uuid,
+    pub can_create_records: bool,
+    pub can_read_records: bool,
+    pub can_update_records: bool,
+    pub can_soft_delete_records: bool,
+    pub can_destroy_records: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowLevelPermissionPredicateDefinition {
+    pub id: Uuid,
+    pub field_metadata_id: Uuid,
+    pub relation_field_metadata_id: Option<Uuid>,
+    pub object_metadata_id: Uuid,
+    pub operand: String,
+    pub sub_field_name: Option<String>,
+    pub workspace_member_field_metadata_id: Option<Uuid>,
+    pub workspace_member_sub_field_name: Option<String>,
+    pub workspace_member_relation_field_metadata_id: Option<Uuid>,
+    pub row_level_permission_predicate_group_id: Option<Uuid>,
+    pub position_in_row_level_permission_predicate_group: Option<f64>,
+    pub role_id: Uuid,
+    pub value: Option<serde_json::Value>,
+    pub row_level_permission_rule_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowLevelPermissionPredicateGroupDefinition {
+    pub id: Uuid,
+    pub parent_row_level_permission_predicate_group_id: Option<Uuid>,
+    pub logical_operator: String,
+    pub position_in_row_level_permission_predicate_group: Option<f64>,
+    pub can_read_records: bool,
+    pub can_update_records: bool,
+    pub can_soft_delete_records: bool,
+    pub can_destroy_records: bool,
+    pub role_id: Uuid,
+    pub object_metadata_id: Uuid,
+    pub row_level_permission_rule_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone)]
 pub struct RoleDefinition {
     pub id: Uuid,
     pub can_update_all_settings: bool,
@@ -117,6 +163,9 @@ pub struct RoleDefinition {
     pub permission_flags: HashSet<String>,
     pub object_permissions: HashMap<Uuid, ObjectPermissionDefinition>,
     pub field_permissions: Vec<FieldPermissionDefinition>,
+    pub row_level_permission_rules: Vec<RowLevelPermissionRuleDefinition>,
+    pub row_level_permission_predicates: Vec<RowLevelPermissionPredicateDefinition>,
+    pub row_level_permission_predicate_groups: Vec<RowLevelPermissionPredicateGroupDefinition>,
 }
 
 impl RoleDefinition {
@@ -133,6 +182,9 @@ impl RoleDefinition {
             permission_flags: HashSet::new(),
             object_permissions: HashMap::new(),
             field_permissions: Vec::new(),
+            row_level_permission_rules: Vec::new(),
+            row_level_permission_predicates: Vec::new(),
+            row_level_permission_predicate_groups: Vec::new(),
         }
     }
 }

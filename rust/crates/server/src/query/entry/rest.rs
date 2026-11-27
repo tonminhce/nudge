@@ -248,6 +248,7 @@ async fn rest_endpoint(
             &maps.field_metadata_maps,
             &maps.index_metadata_maps,
             permissions,
+            auth.workspace_member_id,
         ) {
             Ok(schema) => schema,
             Err(error) => return RestError::internal(error.message().to_string()).response(),
@@ -1249,6 +1250,13 @@ fn rest_runner_error(error: crate::query::runner::RunnerError) -> RestError {
             error.message(),
         ),
         "UNKNOWN_OBJECT" => RestError::unknown_object(error.message()),
+        "RECORD_DOES_NOT_SATISFY_RLS" => RestError::new(
+            StatusCode::BAD_REQUEST,
+            "Error",
+            "RLS_VALIDATION_FAILED",
+            error.message(),
+        )
+        .with_response_code(),
         code if matches!(
             code,
             "ARGS_CONFLICT"

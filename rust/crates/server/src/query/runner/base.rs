@@ -60,8 +60,10 @@ pub struct ObjectModel {
 pub struct RunnerSchema {
     objects_by_name: HashMap<String, ObjectModel>,
     objects_by_id: HashMap<Uuid, ObjectModel>,
+    fields_by_id: HashMap<Uuid, FlatFieldMetadata>,
     records_permissions: Option<crate::permissions::RoleRecordsPermissions>,
     mask_unreadable_fields: bool,
+    workspace_member_id: Option<Uuid>,
 }
 
 impl RunnerSchema {
@@ -71,7 +73,7 @@ impl RunnerSchema {
         fields: &FlatEntityMaps<FlatFieldMetadata>,
         indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
     ) -> Result<Self, RunnerError> {
-        Self::build_inner(workspace_id, objects, fields, indexes, None, false)
+        Self::build_inner(workspace_id, objects, fields, indexes, None, false, None)
     }
 
     pub fn build_with_permissions(
@@ -80,6 +82,7 @@ impl RunnerSchema {
         fields: &FlatEntityMaps<FlatFieldMetadata>,
         indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
         permissions: crate::permissions::RoleRecordsPermissions,
+        workspace_member_id: Option<Uuid>,
     ) -> Result<Self, RunnerError> {
         Self::build_inner(
             workspace_id,
@@ -88,6 +91,7 @@ impl RunnerSchema {
             indexes,
             Some(permissions),
             false,
+            workspace_member_id,
         )
     }
 
@@ -97,6 +101,7 @@ impl RunnerSchema {
         fields: &FlatEntityMaps<FlatFieldMetadata>,
         indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
         permissions: crate::permissions::RoleRecordsPermissions,
+        workspace_member_id: Option<Uuid>,
     ) -> Result<Self, RunnerError> {
         Self::build_inner(
             workspace_id,
@@ -105,6 +110,7 @@ impl RunnerSchema {
             indexes,
             Some(permissions),
             true,
+            workspace_member_id,
         )
     }
 
@@ -115,9 +121,11 @@ impl RunnerSchema {
         indexes: &FlatEntityMaps<crate::metadata::flat::FlatIndexMetadata>,
         records_permissions: Option<crate::permissions::RoleRecordsPermissions>,
         mask_unreadable_fields: bool,
+        workspace_member_id: Option<Uuid>,
     ) -> Result<Self, RunnerError> {
         let mut objects_by_name = HashMap::new();
         let mut objects_by_id = HashMap::new();
+        let mut fields_by_id = HashMap::new();
         let mut unique_groups_by_object: HashMap<Uuid, Vec<Vec<UniqueField>>> = HashMap::new();
 
         for index in indexes.by_universal_identifier.values() {
@@ -179,6 +187,7 @@ impl RunnerSchema {
             for field_id in &object.field_ids {
                 if let Some(field) = fields.find_by_id(field_id) {
                     fields_by_name.insert(field.name.clone(), field.clone());
+                    fields_by_id.insert(field.id, field.clone());
                 }
             }
 
@@ -198,8 +207,10 @@ impl RunnerSchema {
         Ok(Self {
             objects_by_name,
             objects_by_id,
+            fields_by_id,
             records_permissions,
             mask_unreadable_fields,
+            workspace_member_id,
         })
     }
 
@@ -209,6 +220,14 @@ impl RunnerSchema {
 
     pub fn masks_unreadable_fields(&self) -> bool {
         self.mask_unreadable_fields
+    }
+
+    pub fn workspace_member_id(&self) -> Option<Uuid> {
+        self.workspace_member_id
+    }
+
+    pub fn field_metadata(&self, field_metadata_id: Uuid) -> Option<&FlatFieldMetadata> {
+        self.fields_by_id.get(&field_metadata_id)
     }
 
     pub fn is_field_unreadable(&self, object_metadata_id: Uuid, field_metadata_id: Uuid) -> bool {

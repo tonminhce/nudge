@@ -13,6 +13,7 @@ use super::find_many::from_with_joins;
 use super::find_many::RelationJoins;
 use super::permissions::validate_filter_read;
 use super::permissions::validate_named_read;
+use super::rls::row_access_filter;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,13 +114,25 @@ pub async fn aggregate(
     let compiled_filter =
         compile_runner_filter(schema, object_name_singular, filter, &mut suffixes)?;
     let mut parameter_map = serde_json::Map::new();
-    let clauses;
+    let mut clauses;
 
     if let Some(compiled_filter) = compiled_filter {
         clauses = compiled_filter.clauses;
         parameter_map.extend(compiled_filter.params);
     } else {
         clauses = Vec::new();
+    }
+    if let Some(access) = row_access_filter(
+        pool,
+        schema,
+        object_name_singular,
+        crate::permissions::ObjectRecordsOperationType::Read,
+        &mut suffixes,
+    )
+    .await?
+    {
+        clauses.extend(access.clauses);
+        parameter_map.extend(access.params);
     }
 
     let mut joins = RelationJoins::default();

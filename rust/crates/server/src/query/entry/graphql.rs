@@ -345,11 +345,15 @@ fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlErro
     let code = error.code();
 
     if code == "RECORD_NOT_FOUND" {
-        return friendly_graphql_error(
-            GraphQlError::not_found("Record not found"),
-            code,
-            "This record does not exist or has been deleted.",
-        );
+        return record_not_found_graphql_error();
+    }
+
+    if code == "RECORD_DOES_NOT_SATISFY_RLS" {
+        let mut error = GraphQlError::user_input(message);
+        error.extensions = json!({
+            "userFriendlyMessage": "Record does not satisfy security constraints."
+        });
+        return error;
     }
 
     if matches!(code, "PERMISSION_DENIED" | "RECORD_NOT_EDITABLE") {
@@ -415,11 +419,10 @@ fn friendly_graphql_error(
 }
 
 fn record_not_found_graphql_error() -> GraphQlError {
-    friendly_graphql_error(
-        GraphQlError::not_found("Record not found"),
-        "RECORD_NOT_FOUND",
-        "This record does not exist or has been deleted.",
-    )
+    GraphQlError::not_found("Record not found").with_extensions(json!({
+        "subCode": "RECORD_NOT_FOUND",
+        "userFriendlyMessage": "This record does not exist or has been deleted.",
+    }))
 }
 
 fn data_response(_headers: &HeaderMap, key: &str, value: Value) -> Response {
@@ -456,6 +459,7 @@ async fn execute_workspace(
             &maps.field_metadata_maps,
             &maps.index_metadata_maps,
             permissions,
+            auth.workspace_member_id,
         )
         .map_err(runner_graphql_error)?,
         None => RunnerSchema::build(

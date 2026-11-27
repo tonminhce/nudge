@@ -1,5 +1,6 @@
 use serde_json::Map;
 use serde_json::Value;
+use sqlx::Executor;
 use uuid::Uuid;
 
 use crate::metadata::flat::FieldMetadataType;
@@ -20,6 +21,8 @@ use super::base::ObjectModel;
 use super::base::RunnerSchema;
 use super::permissions::validate_write;
 use super::position::override_position_on_records;
+use super::rls::requires_row_access;
+use super::rls::validate_created_rows;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Default)]
@@ -75,24 +78,67 @@ pub async fn create_many(
     )
     .await?;
 
+    let validate_rls = requires_row_access(
+        schema,
+        object_name_singular,
+        crate::permissions::ObjectRecordsOperationType::Create,
+    )?;
     if args.upsert {
-        let mut ids = Vec::new();
+        let mut ids = vec![None; records.len()];
+        let mut pending = Vec::new();
 
-        for record in records {
+        for (index, record) in records.into_iter().enumerate() {
             if let Some(existing_id) =
                 upsert_existing_record(pool, schema, model, alias, &record, args.actor.as_ref())
                     .await?
             {
-                ids.push(existing_id);
+                ids[index] = Some(existing_id);
             } else {
-                ids.extend(insert_records(pool, &model.shape, &[record]).await?);
+                pending.push((index, record));
             }
         }
 
-        return Ok(ids);
+        if !pending.is_empty() {
+            let records = pending
+                .iter()
+                .map(|(_, record)| record.clone())
+                .collect::<Vec<_>>();
+            let inserted = if validate_rls {
+                let mut transaction = pool.begin().await.map_err(RunnerError::database)?;
+                let inserted = insert_records(&mut *transaction, &model.shape, &records).await?;
+                validate_created_rows(
+                    &mut *transaction,
+                    pool,
+                    schema,
+                    object_name_singular,
+                    &inserted,
+                )
+                .await?;
+                transaction.commit().await.map_err(RunnerError::database)?;
+                inserted
+            } else {
+                insert_records(pool, &model.shape, &records).await?
+            };
+            for ((index, _), id) in pending.into_iter().zip(inserted) {
+                ids[index] = Some(id);
+            }
+        }
+
+        return ids
+            .into_iter()
+            .map(|id| id.ok_or_else(RunnerError::record_not_found))
+            .collect();
     }
 
-    insert_records(pool, &model.shape, &records).await
+    if validate_rls {
+        let mut transaction = pool.begin().await.map_err(RunnerError::database)?;
+        let ids = insert_records(&mut *transaction, &model.shape, &records).await?;
+        validate_created_rows(&mut *transaction, pool, schema, object_name_singular, &ids).await?;
+        transaction.commit().await.map_err(RunnerError::database)?;
+        Ok(ids)
+    } else {
+        insert_records(pool, &model.shape, &records).await
+    }
 }
 
 pub async fn create_one(
@@ -118,11 +164,14 @@ pub async fn create_one(
         .ok_or_else(RunnerError::record_not_found)
 }
 
-async fn insert_records(
-    pool: &sqlx::PgPool,
+async fn insert_records<'e, E>(
+    executor: E,
     shape: &TableShape,
     records: &[Map<String, Value>],
-) -> Result<Vec<Uuid>, RunnerError> {
+) -> Result<Vec<Uuid>, RunnerError>
+where
+    E: Executor<'e, Database = sqlx::Postgres>,
+{
     let rows = build_insert_rows(shape, records).map_err(RunnerError::from_repository)?;
     let sql = build_insert_statement(
         shape,
@@ -170,7 +219,10 @@ async fn insert_records(
         query = bind_insert_value(query, shape, column_name, value)?;
     }
 
-    query.fetch_all(pool).await.map_err(RunnerError::database)
+    query
+        .fetch_all(executor)
+        .await
+        .map_err(RunnerError::database)
 }
 
 fn bind_insert_value<'q>(

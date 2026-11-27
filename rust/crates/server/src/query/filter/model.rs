@@ -896,6 +896,13 @@ fn compile_composite_filter(
         assert_array_operator_value_is_non_empty_array(operator, operand, sub_field_key)?;
 
         let full_field_name = format!("{}{}", field_name, capitalize(sub_field_key));
+        let uuid_sub_field =
+            field_type == FieldMetadataType::Actor && sub_field_key == "workspaceMemberId";
+        let sub_field_type = if uuid_sub_field {
+            FieldMetadataType::Uuid
+        } else {
+            field_type
+        };
 
         let parts =
             compute_where_condition_parts(&crate::query::filter::sql::WhereConditionInput {
@@ -904,11 +911,11 @@ fn compile_composite_filter(
                 key: &full_field_name,
                 sub_field_key: Some(sub_field_key),
                 value: operand,
-                field_metadata_type: field_type,
+                field_metadata_type: sub_field_type,
                 param_suffix: &suffixes.take(),
                 second_param_suffix: &suffixes.take(),
                 use_direct_table_reference,
-                cast_uuid_parameters: false,
+                cast_uuid_parameters: uuid_sub_field,
             })?;
 
         let sql = parts.sql.clone();

@@ -17,6 +17,7 @@ pub mod mutation;
 pub mod nested;
 pub mod permissions;
 pub mod position;
+pub mod rls;
 #[cfg(test)]
 pub(crate) mod test_support;
 
