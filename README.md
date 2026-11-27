@@ -17,13 +17,7 @@
 </p>
 
 <p align="center">
-  The super lightweight CRM.
-</p>
-
-<h1 align="center">Nudge</h1>
-
-<p align="center">
-  <strong>The open-source CRM that feels instant.</strong><br>
+  <strong>Thesuper lightweight CRM that feels instant.</strong><br>
   High performance. User friendly. Yours to host.
 </p>
 
