@@ -6,6 +6,10 @@ rust/trunk
 rust/dist
 rust/.local-storage
 rust/.env
+*.env
+.env.*
+provider_config.json
+credentials.json
 *.md
 LICENSE
 nudge.png
