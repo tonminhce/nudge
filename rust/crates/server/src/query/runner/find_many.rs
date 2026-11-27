@@ -61,6 +61,7 @@ pub struct FindManyResult {
     pub records: Vec<Value>,
     pub page_info: PageInfo,
     pub total_count: Option<i64>,
+    pub cursors: std::collections::HashMap<String, String>,
 }
 
 pub async fn find_many(
@@ -264,6 +265,10 @@ pub async fn find_many(
         records,
         page_info,
         total_count,
+        cursors: cursor_values_by_id
+            .into_iter()
+            .map(|(id, cursor)| (id, crate::query::cursor::encode_cursor_data(&cursor)))
+            .collect(),
     };
 
     if !nested.is_empty() {
