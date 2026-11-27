@@ -507,6 +507,7 @@ async fn execute_workspace(
             schema.objects(),
             &parse_search_args(field)?,
             state.config.search_ilike_fallback_timeout_ms,
+            state.config.allow_requests_to_twenty_icons,
         )
         .await
         .map_err(runner_graphql_error)?;

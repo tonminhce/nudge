@@ -53,6 +53,7 @@ pub struct Config {
     pub is_cloudflare_geolocation_enabled: bool,
     pub workspace_schema_ddl_locked: bool,
     pub search_ilike_fallback_timeout_ms: u64,
+    pub allow_requests_to_twenty_icons: bool,
 }
 
 impl Config {
@@ -107,6 +108,7 @@ impl Config {
                 "SEARCH_ILIKE_FALLBACK_TIMEOUT_MS",
                 2000,
             )?,
+            allow_requests_to_twenty_icons: parse_bool_or("ALLOW_REQUESTS_TO_TWENTY_ICONS", true)?,
         })
     }
 }

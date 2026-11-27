@@ -108,6 +108,7 @@ pub async fn search(
     objects: &[FlatObjectMetadata],
     args: &SearchArgs,
     ilike_fallback_timeout_ms: u64,
+    allow_requests_to_twenty_icons: bool,
 ) -> Result<Value, RunnerError> {
     if args.limit > 100 {
         return Err(RunnerError::new(
@@ -144,6 +145,7 @@ pub async fn search(
                         &args,
                         cursor.as_ref(),
                         ilike_fallback_timeout_ms,
+                        allow_requests_to_twenty_icons,
                     )
                     .await,
                 )
@@ -237,20 +239,42 @@ async fn search_object(
     args: &SearchArgs,
     cursor: Option<&SearchCursor>,
     ilike_fallback_timeout_ms: u64,
+    allow_requests_to_twenty_icons: bool,
 ) -> Result<Vec<SearchRecord>, RunnerError> {
     let model = schema.object(&object.name_singular)?;
     validate_filter_read(&schema, model, args.filter.as_ref())?;
     let label_columns = label_identifier_columns(object, &schema)?;
-    let label_shapes = label_columns
+    let image_identifier = image_identifier_column(object, &schema);
+    let mut selected_columns = label_columns.clone();
+    if let Some((column, _)) = &image_identifier {
+        selected_columns.push(column.clone());
+    }
+    selected_columns.dedup();
+    let selected_shapes = selected_columns
         .iter()
         .filter_map(|name| model.shape.column(name).cloned())
         .collect::<Vec<_>>();
-    validate_read(&schema, model, &label_shapes)?;
-    let mut records = search_vector_records(pool, &schema, object, args, cursor).await?;
+    validate_read(&schema, model, &selected_shapes)?;
+    let mut records = search_vector_records(
+        pool,
+        &schema,
+        object,
+        args,
+        cursor,
+        allow_requests_to_twenty_icons,
+    )
+    .await?;
 
     if records.is_empty() && cursor.is_none() && has_cjk_characters(&args.search_input) {
-        records =
-            ilike_fallback_records(pool, &schema, object, args, ilike_fallback_timeout_ms).await?;
+        records = ilike_fallback_records(
+            pool,
+            &schema,
+            object,
+            args,
+            ilike_fallback_timeout_ms,
+            allow_requests_to_twenty_icons,
+        )
+        .await?;
     }
 
     Ok(records
@@ -268,6 +292,7 @@ async fn search_vector_records(
     object: &FlatObjectMetadata,
     args: &SearchArgs,
     cursor: Option<&SearchCursor>,
+    allow_requests_to_twenty_icons: bool,
 ) -> Result<Vec<SearchRecord>, RunnerError> {
     let model = schema.object(&object.name_singular)?;
     let alias = object.name_singular.as_str();
@@ -329,7 +354,9 @@ async fn search_vector_records(
         .map_err(|error| RunnerError::new(error.code(), error.message()))?;
     let rows = execute_json_rows(pool, &compiled.text, &compiled.values).await?;
     rows.into_iter()
-        .map(|row| search_record_from_row(object, row, true))
+        .map(|row| {
+            search_record_from_row(object, schema, row, true, allow_requests_to_twenty_icons)
+        })
         .collect()
 }
 
@@ -339,6 +366,7 @@ async fn ilike_fallback_records(
     object: &FlatObjectMetadata,
     args: &SearchArgs,
     timeout_ms: u64,
+    allow_requests_to_twenty_icons: bool,
 ) -> Result<Vec<SearchRecord>, RunnerError> {
     let model = schema.object(&object.name_singular)?;
     let alias = object.name_singular.as_str();
@@ -408,7 +436,9 @@ async fn ilike_fallback_records(
         .map(row_to_json)
         .collect::<Result<Vec<_>, RunnerError>>()?
         .into_iter()
-        .map(|row| search_record_from_row(object, row, false))
+        .map(|row| {
+            search_record_from_row(object, schema, row, false, allow_requests_to_twenty_icons)
+        })
         .collect()
 }
 
@@ -512,6 +542,9 @@ fn search_select_list(
     let label_columns = label_identifier_columns(object, schema)?;
     let mut columns = vec![String::from("id")];
     columns.extend(label_columns);
+    if let Some((column, _)) = image_identifier_column(object, schema) {
+        columns.push(column);
+    }
     columns.dedup();
     let mut selections = columns
         .iter()
@@ -567,10 +600,31 @@ fn label_identifier_columns(
     Ok(vec![field.name.clone()])
 }
 
+fn image_identifier_column(
+    object: &FlatObjectMetadata,
+    schema: &RunnerSchema,
+) -> Option<(String, FieldMetadataType)> {
+    if object.name_singular == "workspaceMember" {
+        return Some((String::from("avatarUrl"), FieldMetadataType::Text));
+    }
+    let field_id = object.image_identifier_field_metadata_id?;
+    let field = schema.field_metadata(field_id)?;
+    match field.field_type {
+        FieldMetadataType::Links => Some((
+            compute_composite_column_name(&field.name, "primaryLinkUrl"),
+            field.field_type,
+        )),
+        FieldMetadataType::Files => Some((field.name.clone(), field.field_type)),
+        _ => None,
+    }
+}
+
 fn search_record_from_row(
     object: &FlatObjectMetadata,
+    schema: &RunnerSchema,
     row: Map<String, Value>,
     with_rank: bool,
+    allow_requests_to_twenty_icons: bool,
 ) -> Result<SearchRecord, RunnerError> {
     let record_id = row
         .get("id")
@@ -582,20 +636,33 @@ fn search_record_from_row(
             )
         })?
         .to_string();
+    let image_identifier = image_identifier_column(object, schema);
+    let image_column = image_identifier.as_ref().map(|(column, _)| column.as_str());
     let label = row
         .iter()
         .filter(|(name, _)| {
-            name.as_str() != "id" && name.as_str() != "tsRankCD" && name.as_str() != "tsRank"
+            name.as_str() != "id"
+                && name.as_str() != "tsRankCD"
+                && name.as_str() != "tsRank"
+                && image_column != Some(name.as_str())
         })
         .map(|(_, value)| label_value(value))
         .collect::<Vec<_>>()
         .join(" ");
+    let image_url = match image_identifier {
+        Some((column, FieldMetadataType::Links)) if allow_requests_to_twenty_icons => row
+            .get(&column)
+            .and_then(Value::as_str)
+            .and_then(link_favicon_url)
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
     Ok(SearchRecord {
         record_id,
         object_name_singular: object.name_singular.clone(),
         object_label_singular: object.label_singular.clone(),
         label,
-        image_url: String::new(),
+        image_url,
         ts_rank_cd: if with_rank {
             normalize_rank(row.get("tsRankCD").and_then(Value::as_f64).unwrap_or(0.0))
         } else {
@@ -628,6 +695,22 @@ fn label_value(value: &Value) -> String {
         Value::Number(value) => value.to_string(),
         _ => value.to_string(),
     }
+}
+
+fn link_favicon_url(link: &str) -> Option<String> {
+    let trimmed = link.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = if trimmed.contains("://") || reqwest::Url::parse(trimmed).is_ok() {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let url = reqwest::Url::parse(&normalized).ok()?;
+    let hostname = url.host_str()?;
+    let domain = hostname.strip_prefix("www.").unwrap_or(hostname);
+    Some(format!("https://twenty-icons.com/{domain}"))
 }
 
 fn decode_search_cursor(raw: &str) -> Result<SearchCursor, RunnerError> {
@@ -814,6 +897,7 @@ mod db_tests {
             std::slice::from_ref(&object),
             &args,
             2000,
+            true,
         )
         .await
         .expect("first search page");
@@ -832,6 +916,7 @@ mod db_tests {
                 ..args
             },
             2000,
+            true,
         )
         .await
         .expect("second search page");
@@ -963,6 +1048,20 @@ mod tests {
         assert!(has_cjk_characters("𠮷 神 ﾒ ぁ ᄀ"));
         assert!(!has_cjk_characters("plain ASCII"));
         assert_eq!(escape_for_ilike("50%_\\"), "50\\%\\_\\\\");
+    }
+
+    #[test]
+    fn link_favicon_url_matches_the_upstream_hostname_lookup() {
+        assert_eq!(
+            link_favicon_url("https://www.example.com/path").as_deref(),
+            Some("https://twenty-icons.com/example.com")
+        );
+        assert_eq!(
+            link_favicon_url("example.com/").as_deref(),
+            Some("https://twenty-icons.com/example.com")
+        );
+        assert_eq!(link_favicon_url("   "), None);
+        assert_eq!(link_favicon_url("https://"), None);
     }
 
     #[test]

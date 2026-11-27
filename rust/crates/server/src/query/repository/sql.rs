@@ -1158,6 +1158,7 @@ mod db_tests {
             is_cloudflare_geolocation_enabled: false,
             workspace_schema_ddl_locked: false,
             search_ilike_fallback_timeout_ms: 2000,
+            allow_requests_to_twenty_icons: true,
         }
     }
 
