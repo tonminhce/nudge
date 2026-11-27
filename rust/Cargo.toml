@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/server"]
+members = ["crates/core", "crates/server", "crates/front-ui"]
 # crates/ui (Leptos, wasm32) and crates/desktop (Tauri) are built with trunk / cargo-tauri
 # and join the workspace once their toolchains are installed.
 

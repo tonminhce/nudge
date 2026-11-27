@@ -1,0 +1,21 @@
+[package]
+name = "nudge-front-ui"
+version = "0.1.0"
+description = "Nudge front design system: generated theme tokens, Leptos component primitives and the icon set ported from Twenty 2.61.0 twenty-ui."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "front_ui"
+doctest = false
+
+[[bin]]
+name = "gen-tokens"
+path = "src/bin/gen-tokens.rs"
+
+[dependencies]
+leptos = "0.8.23"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+leptos = { version = "0.8.23", features = ["ssr"] }
