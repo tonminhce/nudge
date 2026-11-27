@@ -194,6 +194,7 @@ pub fn metadata_version_key(workspace_id: &Uuid) -> String {
 
 pub async fn invalidate_workspace_maps(state: &crate::state::AppState, workspace_id: Uuid) {
     state.metadata_cache.invalidate(&workspace_id);
+    state.permission_cache.invalidate_workspace(workspace_id);
 
     let Ok(mut connection) = state.redis.get_multiplexed_async_connection().await else {
         return;

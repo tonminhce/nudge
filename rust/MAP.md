@@ -27,10 +27,10 @@ Pinned to Twenty **2.61.0** (`srv/src/engine/core-modules/upgrade/constants/twen
 |------|---------|-------|
 | 0 | Grilling, ADRs, research (data model, API, auth, workers, UI) | **done** — 5 research docs in `research/` |
 | 1 | Server foundation: config, Postgres/Redis, core-schema migrations, health | **done** — schema parity verified against the live 2.61.0 reference |
-| 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **done** — passwords, tokens, sessions, CSRF, API keys, 2FA, invitations, email verification, password reset, workspace lifecycle, impersonation, SSO (SAML signature verification flag-gated, ADR-013); permission *enforcement* moves to wave 4 with the query runner |
+| 2 | Auth: sign-up/in, JWT (ES256), workspaces, members, roles/permissions, API keys | **done** — passwords, tokens, sessions, CSRF, API keys, 2FA, invitations, email verification, password reset, workspace lifecycle, impersonation, SSO (SAML signature verification flag-gated, ADR-013); P1+P2 permission model/context/kernel and currentUserWorkspace payload now match the live reference, while query-path enforcement remains P3–P5 |
 | 3 | Metadata engine: standard objects seeding, workspace schema creation | **mostly done** — U1–U6 + U8 merged (runner, seeding, deferred worker, DB parity vs live reference, 312 unit tests, both e2e gates green); U9 metadata API and U10 update/delete matrix in progress on their branches |
 | 4 | Workspace GraphQL (dynamic schema) + REST + query runner (filter/sort/paginate/groupBy/aggregate) | **done** — U3–U7 merged plus the same-database parity pass; 18/18 record captures and 18/18 REST error/shape probes match the live reference |
-| 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open — U1 design system landed; U2 front-core and the U1 completion audit in progress on `wave5/u2` / `wave5/u1b` |
+| 5 | Leptos UI shell + auth + record table/kanban/show page + settings, wrapped in Tauri | open — U1–U4b landed (design system, front-core, auth/shell, record table, List/Kanban/Calendar, create/edit, command menu and record side panel); U1 primitive/gallery completion, U5 settings and U6 Tauri/serving remain |
 | 6 | Webhooks, files, email (SMTP), search, import/export, timeline, favorites, notes/tasks | open |
 | 7 | Workers/queues (own queue, not BullMQ — ADR-007), workflows, messaging + calendar sync, AI agents, MCP, billing | open |
 

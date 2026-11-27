@@ -40,6 +40,7 @@ use crate::metadata::flat::UniversalFlatFieldMetadata;
 use crate::metadata::flat::UniversalFlatIndexFieldMetadata;
 use crate::metadata::flat::UniversalFlatIndexMetadata;
 use crate::metadata::flat::UniversalFlatObjectMetadata;
+use crate::permissions::current_user_workspace_permissions_for_auth;
 use crate::workspace_migrations::runner::run_workspace_migration;
 use crate::workspace_migrations::runner::RunnerInput;
 
@@ -93,6 +94,7 @@ pub async fn dispatch(ctx: &OperationContext<'_>) -> ResponsePayload {
         "fields" if ctx.is_query => list_fields(ctx).await,
         "object" if ctx.is_query => get_object(ctx).await,
         "field" if ctx.is_query => get_field(ctx).await,
+        "currentUser" if ctx.is_query => current_user(ctx).await,
         _ => Err(GraphQlError::validation(format!(
             "Cannot query field \"{operation_name}\" on type."
         ))),
@@ -984,6 +986,38 @@ async fn delete_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
     .await?;
 
     Ok(index_dto(index))
+}
+
+async fn current_user(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let auth = ctx
+        .auth
+        .ok_or_else(|| GraphQlError::unauthenticated("Authentication required"))?;
+    let user_id = auth
+        .user_id
+        .ok_or_else(|| GraphQlError::unauthenticated("Authentication required"))?;
+    let row = sqlx::query_as::<_, (Uuid, String, String, Option<String>, bool)>(
+        "SELECT id, email, \"firstName\", \"lastName\", \"isEmailVerified\" \
+         FROM core.\"user\" WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&ctx.state.core_pool)
+    .await
+    .map_err(|error| GraphQlError::internal(error.to_string()))?
+    .ok_or_else(|| GraphQlError::not_found("User was not found"))?;
+    let workspace = current_user_workspace_permissions_for_auth(ctx.state, auth)
+        .await
+        .map_err(GraphQlError::from)?;
+    let mut record = json!({
+        "id": row.0,
+        "email": row.1,
+        "firstName": row.2,
+        "lastName": row.3,
+        "isEmailVerified": row.4,
+    });
+    if let Some(workspace) = workspace {
+        record["currentUserWorkspace"] = workspace;
+    }
+    Ok(record)
 }
 
 async fn list_objects(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {

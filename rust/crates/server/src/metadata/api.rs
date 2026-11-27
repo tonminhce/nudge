@@ -142,6 +142,7 @@ async fn graphql_endpoint(State(state): State<AppState>, request: Request) -> Re
     let ctx = OperationContext {
         state: &state,
         workspace_id,
+        auth: Some(&auth),
         selection: &selected.field,
         variables: &execution_request.variables,
         is_query: selected.kind == OperationKind::Query,

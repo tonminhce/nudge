@@ -30,6 +30,7 @@ use crate::metadata::api::service::load_flat_maps;
 use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::names::camel_case;
 use crate::metadata::names::pascal_case;
+use crate::permissions::current_user_workspace_permissions_for_auth;
 use crate::query::cursor::encode_cursor_data;
 use crate::query::runner::create_many;
 use crate::query::runner::create_one;
@@ -1099,7 +1100,7 @@ async fn current_user(
         GraphQlError::unauthenticated("Authentication required").with_sub_code("UNAUTHENTICATED")
     })?;
     let row = sqlx::query_as::<_, (Uuid, String, String, Option<String>, bool)>(
-        "SELECT id, email, \"firstName\", \"lastName\", \"emailVerified\" \
+        "SELECT id, email, \"firstName\", \"lastName\", \"isEmailVerified\" \
          FROM core.\"user\" WHERE id = $1",
     )
     .bind(user_id)
@@ -1107,14 +1108,20 @@ async fn current_user(
     .await
     .map_err(|error| GraphQlError::internal(error.to_string()))?
     .ok_or_else(|| GraphQlError::not_found("User was not found").with_sub_code("USER_NOT_FOUND"))?;
-    let record = json!({
+    let current_user_workspace = current_user_workspace_permissions_for_auth(state, auth)
+        .await
+        .map_err(GraphQlError::from)?;
+    let mut record = json!({
         "id": row.0,
         "email": row.1,
         "firstName": row.2,
         "lastName": row.3,
-        "emailVerified": row.4,
+        "isEmailVerified": row.4,
         "__typename": "User",
     });
+    if let Some(workspace) = current_user_workspace {
+        record["currentUserWorkspace"] = workspace;
+    }
 
     Ok(project_record(&record, selection, "User"))
 }
@@ -1203,7 +1210,10 @@ fn schema_type_specs(schema: &WorkspaceSchema) -> Vec<Value> {
         ],
     }));
 
-    let mut query_fields = Vec::new();
+    let mut query_fields = vec![
+        field_entry("currentUser", non_null(named_type("User"))),
+        field_entry("currentWorkspace", non_null(named_type("Workspace"))),
+    ];
     let mut mutation_fields = Vec::new();
 
     for object in schema.objects() {
@@ -1231,6 +1241,59 @@ fn schema_type_specs(schema: &WorkspaceSchema) -> Vec<Value> {
         ));
     }
 
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "ObjectRecordsPermissions",
+        "fields": [
+            field_entry("objectMetadataId", non_null(scalar_type("UUID"))),
+            field_entry("canCreateAllRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canReadAllRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canUpdateAllRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canSoftDeleteAllRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canDestroyAllRecords", non_null(scalar_type("Boolean"))),
+            field_entry("unreadableFields", non_null(list(scalar_type("UUID")))),
+            field_entry("uneditableFields", non_null(list(scalar_type("UUID")))),
+            field_entry("rowLevelRecordsPermissions", list(named_type("RowLevelRecordsPermissions"))),
+            field_entry("canReadSomeRecords", non_null(scalar_type("Boolean"))),
+        ],
+    }));
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "RowLevelRecordsPermissions",
+        "fields": [
+            field_entry("ruleId", non_null(scalar_type("UUID"))),
+            field_entry("canCreateRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canReadRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canUpdateRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canSoftDeleteRecords", non_null(scalar_type("Boolean"))),
+            field_entry("canDestroyRecords", non_null(scalar_type("Boolean"))),
+            field_entry("predicates", non_null(list(scalar_type("JSON")))),
+            field_entry("predicateGroups", non_null(list(scalar_type("JSON")))),
+            field_entry("unreadableFields", non_null(list(scalar_type("UUID")))),
+            field_entry("uneditableFields", non_null(list(scalar_type("UUID")))),
+        ],
+    }));
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "UserWorkspace",
+        "fields": [
+            field_entry("id", non_null(scalar_type("UUID"))),
+            field_entry("permissionFlags", list(scalar_type("String"))),
+            field_entry("objectRecordsPermissions", list(non_null(named_type("ObjectRecordsPermissions")))),
+        ],
+    }));
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "User",
+        "fields": [
+            field_entry("id", non_null(scalar_type("UUID"))),
+            field_entry("firstName", non_null(scalar_type("String"))),
+            field_entry("lastName", non_null(scalar_type("String"))),
+            field_entry("email", non_null(scalar_type("String"))),
+            field_entry("isEmailVerified", non_null(scalar_type("Boolean"))),
+            field_entry("currentUserWorkspace", named_type("UserWorkspace")),
+        ],
+    }));
     specs.push(json!({
         "kind": "OBJECT",
         "name": "Query",

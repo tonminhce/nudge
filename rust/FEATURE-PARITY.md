@@ -12,7 +12,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 |---|---|---|
 | A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (seeding, DDL runner, metadata CRUD API and deferred queue merged; validation rules and UI editors remain) |
 | B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL and REST verified live; search, duplicates/merge, permissions, SSE and hooks remain) |
-| C. Auth and access control | ~12k LOC server | **part** (wave 2 complete; permission enforcement P1–P5 next) |
+| C. Auth and access control | ~12k LOC server | **part** (wave 2 complete; P1+P2 permission model/context/kernel and currentUserWorkspace payload landed, with 27 flags and 37 objects matching the live reference; enforcement P3–P5 next) |
 | D. Web interface (Leptos) | ~330k LOC React | **part** (design system landed; front-core in progress; app shell and product screens remain) |
 | E. Automations and integrations | ~60k LOC server | todo |
 | F. Platform and operations | ~10k LOC | **part** |

@@ -64,6 +64,7 @@ pub const GIN_COMPATIBLE_FIELD_TYPES: &[&str] = &["TS_VECTOR", "ARRAY", "MULTI_S
 pub struct OperationContext<'a> {
     pub state: &'a AppState,
     pub workspace_id: Uuid,
+    pub auth: Option<&'a crate::auth::middleware::AuthContext>,
     pub selection: &'a FieldSelection,
     pub variables: &'a Value,
     pub is_query: bool,
@@ -1840,6 +1841,7 @@ mod db_tests {
         let ctx = OperationContext {
             state,
             workspace_id,
+            auth: None,
             selection: &selection,
             variables: &variables,
             is_query: false,

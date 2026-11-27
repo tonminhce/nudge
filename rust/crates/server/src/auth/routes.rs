@@ -13,6 +13,7 @@ use super::error::AuthResult;
 use super::middleware::AuthContext;
 use super::service::{self, CredentialsInput, LoginTokenInput, SignUpInput};
 use super::session::{self, CreationOrigin, SessionRequestContext};
+use crate::permissions::user_workspace_permissions_for_auth;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -297,6 +298,10 @@ async fn me(
         None => None,
     };
 
+    let permissions = user_workspace_permissions_for_auth(&state, &context)
+        .await
+        .map_err(|error| super::error::AuthError::internal(error.message))?;
+
     Ok(Json(json!({
         "user": {
             "id": id,
@@ -305,6 +310,7 @@ async fn me(
             "lastName": last_name.unwrap_or_default(),
         },
         "workspace": workspace,
+        "permissions": permissions,
         "authContext": {
             "tokenType": format!("{:?}", context.token_type),
             "userWorkspaceId": context.user_workspace_id,

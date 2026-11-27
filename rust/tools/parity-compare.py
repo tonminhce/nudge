@@ -11,7 +11,7 @@ NODE_BASE = "http://127.0.0.1:3001"
 RUST_BASE = "http://127.0.0.1:3000"
 REFERENCE_ORIGIN = "http://refhq.localhost:3001"
 REFERENCE_EMAIL = "owner-1795713371@refhq.test"
-REFERENCE_PASSWORD = "ReferenceSecret123"
+REFERENCE_PASSWORD = os.environ.get("TWENTY_REFERENCE_PASSWORD")
 
 UUID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
@@ -120,6 +120,8 @@ def request_raw(base, method, path, body=None, headers=None):
 
 
 def fetch_reference_token():
+    if not REFERENCE_PASSWORD:
+        raise RuntimeError("TWENTY_REFERENCE_PASSWORD is required")
     query = (
         "mutation signIn { signIn(email: \"%s\", password: \"%s\") "
         "{ availableWorkspaces { availableWorkspacesForSignIn { id loginToken } } } }"
