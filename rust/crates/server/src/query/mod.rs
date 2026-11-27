@@ -4,6 +4,7 @@ pub mod compile;
 pub mod cursor;
 pub mod filter;
 pub mod order;
+pub mod repository;
 
 pub use compile::compile_named_parameters;
 pub use compile::CompiledStatement;
