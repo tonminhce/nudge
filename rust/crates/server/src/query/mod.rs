@@ -5,6 +5,15 @@ pub mod cursor;
 pub mod filter;
 pub mod order;
 pub mod repository;
+pub mod runner;
+
+pub use runner::find_many;
+pub use runner::find_one;
+pub use runner::FindManyArgs;
+pub use runner::FindManyResult;
+pub use runner::NestedRelationSelection;
+pub use runner::RunnerError;
+pub use runner::RunnerSchema;
 
 pub use compile::compile_named_parameters;
 pub use compile::CompiledStatement;

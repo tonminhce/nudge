@@ -25,6 +25,7 @@ pub struct WhereConditionInput<'a> {
     pub param_suffix: &'a str,
     pub second_param_suffix: &'a str,
     pub use_direct_table_reference: bool,
+    pub cast_uuid_parameters: bool,
 }
 
 const DATE_TIME_INTERVAL: &str = "::timestamptz + interval '1 millisecond'";
@@ -32,6 +33,15 @@ const DATE_TIME_INTERVAL: &str = "::timestamptz + interval '1 millisecond'";
 pub fn compute_where_condition_parts(
     input: &WhereConditionInput<'_>,
 ) -> Result<WhereConditionParts, FilterError> {
+    let is_uuid = matches!(
+        input.field_metadata_type,
+        FieldMetadataType::Uuid | FieldMetadataType::Relation | FieldMetadataType::MorphRelation
+    );
+    let uuid_cast = if input.cast_uuid_parameters {
+        "::uuid"
+    } else {
+        ""
+    };
     let parameter_key = remove_sql_ddl_injection(input.key);
     let ref_str = field_reference(
         input.object_name_singular,
@@ -79,7 +89,7 @@ pub fn compute_where_condition_parts(
             }
 
             Ok(one_param(
-                format!("{ref_str} = :{param_name}{widen_suffix}"),
+                format!("{ref_str} = :{param_name}{uuid_cast}{widen_suffix}"),
                 &param_name,
                 input.value.clone(),
             ))
@@ -87,7 +97,7 @@ pub fn compute_where_condition_parts(
         Operator::Neq => {
             if let Some(equivalent) = null_equivalent.as_ref() {
                 return Ok(one_param(
-                    format!("({ref_str} != :{param_name} AND {ref_str} IS NOT NULL)"),
+                    format!("({ref_str} != :{param_name}{uuid_cast} AND {ref_str} IS NOT NULL)"),
                     &param_name,
                     Value::String(equivalent.clone()),
                 ));
@@ -108,7 +118,7 @@ pub fn compute_where_condition_parts(
             }
 
             Ok(one_param(
-                format!("({ref_str} != :{param_name} OR {ref_str} IS NULL)"),
+                format!("({ref_str} != :{param_name}{uuid_cast} OR {ref_str} IS NULL)"),
                 &param_name,
                 input.value.clone(),
             ))
@@ -123,18 +133,18 @@ pub fn compute_where_condition_parts(
             }
 
             Ok(one_param(
-                format!("{ref_str} > :{param_name}"),
+                format!("{ref_str} > :{param_name}{uuid_cast}"),
                 &param_name,
                 input.value.clone(),
             ))
         }
         Operator::Gte => Ok(one_param(
-            format!("{ref_str} >= :{param_name}"),
+            format!("{ref_str} >= :{param_name}{uuid_cast}"),
             &param_name,
             input.value.clone(),
         )),
         Operator::Lt => Ok(one_param(
-            format!("{ref_str} < :{param_name}"),
+            format!("{ref_str} < :{param_name}{uuid_cast}"),
             &param_name,
             input.value.clone(),
         )),
@@ -148,16 +158,26 @@ pub fn compute_where_condition_parts(
             }
 
             Ok(one_param(
-                format!("{ref_str} <= :{param_name}"),
+                format!("{ref_str} <= :{param_name}{uuid_cast}"),
                 &param_name,
                 input.value.clone(),
             ))
         }
-        Operator::In => Ok(one_param(
-            format!("{ref_str} IN (:...{param_name})"),
-            &param_name,
-            input.value.clone(),
-        )),
+        Operator::In => {
+            if is_uuid {
+                return Ok(one_param(
+                    format!("{ref_str} = ANY(ARRAY[:...{param_name}]::uuid[])"),
+                    &param_name,
+                    input.value.clone(),
+                ));
+            }
+
+            Ok(one_param(
+                format!("{ref_str} IN (:...{param_name})"),
+                &param_name,
+                input.value.clone(),
+            ))
+        }
         Operator::Is => {
             let null_str = input.value.as_str() == Some("NULL");
             let predicate = if null_str { "NULL" } else { "NOT NULL" };
@@ -178,6 +198,8 @@ pub fn compute_where_condition_parts(
                 None => Map::new(),
             };
 
+            let _ = is_uuid;
+
             Ok(WhereConditionParts { sql, params })
         }
         Operator::IsStrictly => {
@@ -190,12 +212,12 @@ pub fn compute_where_condition_parts(
             Ok(parts(format!("{ref_str} IS {predicate}"), Map::new()))
         }
         Operator::GtStrict => Ok(one_param(
-            format!("{ref_str} > :{param_name}"),
+            format!("{ref_str} > :{param_name}{uuid_cast}"),
             &param_name,
             input.value.clone(),
         )),
         Operator::EqStrict => Ok(one_param(
-            format!("{ref_str} = :{param_name}"),
+            format!("{ref_str} = :{param_name}{uuid_cast}"),
             &param_name,
             input.value.clone(),
         )),
@@ -366,6 +388,7 @@ mod tests {
             param_suffix: SUFFIX,
             second_param_suffix: SUFFIX,
             use_direct_table_reference: use_direct,
+            cast_uuid_parameters: false,
         })
     }
 

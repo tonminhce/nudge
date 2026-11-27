@@ -3,6 +3,7 @@ use std::fmt;
 pub mod sql;
 pub mod table_shape;
 
+pub use sql::build_column_result_alias;
 pub use sql::build_delete_statement;
 pub use sql::build_insert_rows;
 pub use sql::build_insert_statement;
@@ -12,6 +13,7 @@ pub use sql::build_soft_delete_statement;
 pub use sql::build_update_statement;
 pub use sql::check_update_many_limit;
 pub use sql::expand_record_columns;
+pub use sql::quote_identifier;
 pub use sql::Conjunction;
 pub use sql::InsertRowValue;
 pub use sql::InsertRows;
