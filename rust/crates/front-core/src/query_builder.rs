@@ -187,6 +187,74 @@ fn variable_type(name: &str, value: &Value, type_name: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SearchQueryArgs {
+    pub search_input: String,
+    pub limit: usize,
+    pub after: Option<String>,
+    pub included_object_name_singulars: Option<Vec<String>>,
+    pub excluded_object_name_singulars: Option<Vec<String>>,
+    pub filter: Option<Value>,
+}
+
+pub fn search_query(args: SearchQueryArgs) -> GraphQLDocument {
+    let mut variables = Map::new();
+    let mut definitions = vec![
+        String::from("$searchInput: String!"),
+        String::from("$limit: Int!"),
+    ];
+    variables.insert(
+        String::from("searchInput"),
+        Value::String(args.search_input),
+    );
+    variables.insert(
+        String::from("limit"),
+        Value::from(args.limit.min(100) as u64),
+    );
+    if let Some(after) = args.after.filter(|value| !value.is_empty()) {
+        definitions.push(String::from("$after: String"));
+        variables.insert(String::from("after"), Value::String(after));
+    }
+    if let Some(included) = args
+        .included_object_name_singulars
+        .filter(|values| !values.is_empty())
+    {
+        definitions.push(String::from("$includedObjectNameSingulars: [String!]"));
+        variables.insert(
+            String::from("includedObjectNameSingulars"),
+            Value::Array(included.into_iter().map(Value::String).collect()),
+        );
+    }
+    if let Some(excluded) = args
+        .excluded_object_name_singulars
+        .filter(|values| !values.is_empty())
+    {
+        definitions.push(String::from("$excludedObjectNameSingulars: [String!]"));
+        variables.insert(
+            String::from("excludedObjectNameSingulars"),
+            Value::Array(excluded.into_iter().map(Value::String).collect()),
+        );
+    }
+    if let Some(filter) = args.filter {
+        definitions.push(String::from("$filter: ObjectRecordFilterInput"));
+        variables.insert(String::from("filter"), filter);
+    }
+    let query = format!(
+        "query Search({}) {{ search({}) {{ edges {{ node {{ recordId objectNameSingular objectLabelSingular label imageUrl tsRankCD tsRank }} cursor }} pageInfo {{ endCursor hasNextPage }} }} }}",
+        definitions.join(", "),
+        definitions
+            .iter()
+            .map(|definition| {
+                let name = definition.split(':').next().expect("variable definition");
+                let argument = name.strip_prefix('$').unwrap_or(name);
+                format!("{argument}: {name}")
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    GraphQLDocument::new(query, variables)
+}
+
 pub fn pascal_case(name: &str) -> String {
     let mut output = String::new();
     let mut uppercase = true;
@@ -290,6 +358,36 @@ mod tests {
             let document = record_action_mutation(&person(), action, "p1".into()).unwrap();
             assert!(document.query.contains(&format!("{resolver}(id: $id)")));
         }
+    }
+
+    #[test]
+    fn search_query_uses_the_upstream_connection_shape() {
+        let document = search_query(SearchQueryArgs {
+            search_input: String::from("Ada"),
+            limit: 20,
+            after: Some(String::from("cursor")),
+            included_object_name_singulars: Some(vec![String::from("person")]),
+            excluded_object_name_singulars: Some(vec![String::from("task")]),
+            filter: Some(json!({"id": {"eq": "8f3a0e5a-6f2d-4f4f-9a1e-2f7f0f6f4d51"}})),
+        });
+        assert!(document.query.starts_with(
+            "query Search($searchInput: String!, $limit: Int!, $after: String, $includedObjectNameSingulars: [String!]"
+        ));
+        assert!(
+            document
+                .query
+                .contains("search(searchInput: $searchInput, limit: $limit, after: $after"),
+            "{}",
+            document.query
+        );
+        assert!(document
+            .query
+            .contains("node { recordId objectNameSingular objectLabelSingular label imageUrl tsRankCD tsRank }"));
+        assert!(document
+            .query
+            .contains("pageInfo { endCursor hasNextPage }"));
+        assert_eq!(document.variables["limit"], 20);
+        assert_eq!(document.variables["after"], "cursor");
     }
 
     #[test]

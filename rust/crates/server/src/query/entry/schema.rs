@@ -149,7 +149,8 @@ impl WorkspaceSchema {
     }
 
     pub fn query_root_fields(&self) -> Vec<String> {
-        self.objects
+        let mut fields = self
+            .objects
             .iter()
             .flat_map(|object| {
                 [
@@ -157,7 +158,9 @@ impl WorkspaceSchema {
                     camel_case(&object.name_singular),
                 ]
             })
-            .collect()
+            .collect::<Vec<_>>();
+        fields.push(String::from("search"));
+        fields
     }
 
     pub fn mutation_root_fields(&self) -> Vec<String> {
@@ -178,7 +181,11 @@ impl WorkspaceSchema {
 
     pub fn sdl(&self) -> String {
         let mut sdl = String::from("schema {\n  query: Query\n  mutation: Mutation\n}\n\n");
-        sdl.push_str("scalar DateTime\nscalar JSON\nscalar RawJson\n\n");
+        sdl.push_str("scalar DateTime\nscalar JSON\nscalar RawJson\nscalar UUID\n\n");
+        sdl.push_str("enum FilterIs {\n  NULL\n  NOT_NULL\n}\n\n");
+        sdl.push_str("input UUIDFilter {\n  eq: UUID\n  gt: UUID\n  gte: UUID\n  in: [UUID]\n  lt: UUID\n  lte: UUID\n  neq: UUID\n  is: FilterIs\n}\n\n");
+        sdl.push_str("input DateTimeFilter {\n  eq: DateTime\n  gt: DateTime\n  gte: DateTime\n  in: [DateTime!]\n  lt: DateTime\n  lte: DateTime\n  neq: DateTime\n  is: FilterIs\n  gtField: String\n  gteField: String\n  ltField: String\n  lteField: String\n}\n\n");
+        sdl.push_str("input ObjectRecordFilterInput {\n  and: [ObjectRecordFilterInput]\n  not: ObjectRecordFilterInput\n  or: [ObjectRecordFilterInput]\n  id: UUIDFilter\n  createdAt: DateTimeFilter\n  updatedAt: DateTimeFilter\n  deletedAt: DateTimeFilter\n}\n\n");
         sdl.push_str("type PageInfo {\n  startCursor: String\n  endCursor: String\n  hasNextPage: Boolean!\n  hasPreviousPage: Boolean!\n}\n\n");
 
         for object in &self.objects {
@@ -245,7 +252,14 @@ impl WorkspaceSchema {
             ));
         }
 
+        sdl.push_str("type SearchRecord {\n  recordId: UUID!\n  objectNameSingular: String!\n  objectLabelSingular: String!\n  label: String!\n  imageUrl: String\n  tsRankCD: Float!\n  tsRank: Float!\n}\n\n");
+        sdl.push_str("type SearchResultEdge {\n  node: SearchRecord!\n  cursor: String!\n}\n\n");
+        sdl.push_str(
+            "type SearchResultPageInfo {\n  endCursor: String\n  hasNextPage: Boolean!\n}\n\n",
+        );
+        sdl.push_str("type SearchResultConnection {\n  edges: [SearchResultEdge!]!\n  pageInfo: SearchResultPageInfo!\n}\n\n");
         sdl.push_str("type Query {\n");
+        sdl.push_str("  search(searchInput: String!, limit: Int!, after: String, includedObjectNameSingulars: [String!], filter: ObjectRecordFilterInput, excludedObjectNameSingulars: [String!]): SearchResultConnection!\n");
 
         for object in &self.objects {
             let type_name = pascal_case(&object.name_singular);
@@ -330,7 +344,7 @@ pub fn classify_root(root_field: &str, schema: &WorkspaceSchema) -> RootClassifi
         return RootClassification::Introspection;
     }
 
-    if schema.resolver(root_field).is_some() {
+    if root_field == "search" || schema.resolver(root_field).is_some() {
         return RootClassification::Workspace;
     }
 
@@ -405,6 +419,10 @@ mod tests {
             RootClassification::Workspace
         );
         assert_eq!(
+            classify_root("search", &schema),
+            RootClassification::Workspace
+        );
+        assert_eq!(
             classify_root("currentUser", &schema),
             RootClassification::Core
         );
@@ -419,6 +437,13 @@ mod tests {
         assert!(sdl.contains("type PersonConnection {"));
         assert!(sdl.contains("people(first: Int"));
         assert!(sdl.contains("person(filter: JSON!"));
+        assert!(sdl.contains("type SearchResultConnection"));
+        assert!(sdl.contains("input ObjectRecordFilterInput"));
+        assert!(sdl.contains("input UUIDFilter"));
+        assert!(sdl.contains("input DateTimeFilter"));
+        assert!(sdl.contains("enum FilterIs"));
+        assert!(sdl.contains("search(searchInput: String!, limit: Int!"));
+        assert!(sdl.contains("filter: ObjectRecordFilterInput"));
         assert!(sdl.contains("createPerson(data: JSON"));
     }
 

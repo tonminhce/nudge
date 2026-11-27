@@ -52,6 +52,7 @@ pub struct Config {
     pub session_idle_timeout_secs: u64,
     pub is_cloudflare_geolocation_enabled: bool,
     pub workspace_schema_ddl_locked: bool,
+    pub search_ilike_fallback_timeout_ms: u64,
 }
 
 impl Config {
@@ -102,6 +103,10 @@ impl Config {
                 false,
             )?,
             workspace_schema_ddl_locked: parse_bool_or("WORKSPACE_SCHEMA_DDL_LOCKED", false)?,
+            search_ilike_fallback_timeout_ms: positive_u64_or(
+                "SEARCH_ILIKE_FALLBACK_TIMEOUT_MS",
+                2000,
+            )?,
         })
     }
 }
@@ -166,6 +171,19 @@ where
         }),
         None => Ok(default),
     }
+}
+
+fn positive_u64_or(key: &'static str, default: u64) -> Result<u64> {
+    let value = parse_or(key, default)?;
+
+    if value == 0 {
+        return Err(Error::InvalidValue {
+            key,
+            value: value.to_string(),
+        });
+    }
+
+    Ok(value)
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ pub mod nested;
 pub mod permissions;
 pub mod position;
 pub mod rls;
+pub mod search;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -53,6 +54,9 @@ pub use mutation::require_filtered_mutation;
 pub use mutation::run_mutation;
 pub use mutation::run_mutation_one;
 pub use mutation::FilteredMutationKind;
+pub use search::search;
+pub use search::SearchArgs;
+pub use search::SearchRecord;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunnerError {

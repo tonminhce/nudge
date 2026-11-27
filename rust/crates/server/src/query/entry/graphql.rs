@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
 use axum::extract::Query;
@@ -39,12 +40,14 @@ use crate::query::runner::find_many;
 use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
 use crate::query::runner::run_mutation_one;
+use crate::query::runner::search;
 use crate::query::runner::ActorContext;
 use crate::query::runner::CreateArgs;
 use crate::query::runner::FilteredMutationKind;
 use crate::query::runner::FindManyArgs;
 use crate::query::runner::NestedRelationSelection;
 use crate::query::runner::RunnerSchema;
+use crate::query::runner::SearchArgs;
 use crate::state::AppState;
 
 use super::schema::classify_root;
@@ -398,6 +401,8 @@ fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlErro
             | "UNKNOWN_RELATION"
             | "UNKNOWN_SUB_FIELD"
             | "INVALID_DIRECTION"
+            | "LABEL_IDENTIFIER_FIELD_NOT_FOUND"
+            | "OBJECT_METADATA_NOT_FOUND"
     ) {
         return friendly_graphql_error(
             GraphQlError::user_input(message),
@@ -460,13 +465,10 @@ async fn execute_workspace(
     is_query: bool,
 ) -> Result<Value, GraphQlError> {
     let _ = request;
-    let resolver = schema.resolver(&field.name).ok_or_else(|| {
-        GraphQlError::user_input(format!("Unknown workspace field {}", field.name))
-    })?;
     let permissions = records_permissions_for_auth(state, auth)
         .await
         .map_err(GraphQlError::from)?;
-    let runner_schema = match permissions {
+    let runner_schema = Arc::new(match permissions {
         Some(permissions) => RunnerSchema::build_with_permissions(
             &workspace_id,
             schema.objects(),
@@ -483,7 +485,7 @@ async fn execute_workspace(
             &maps.index_metadata_maps,
         )
         .map_err(runner_graphql_error)?,
-    };
+    });
     let actor = if auth.workspace_member_id.is_some() {
         Some(ActorContext::manual(
             auth.workspace_member_id.map(|id| id.to_string()),
@@ -492,6 +494,27 @@ async fn execute_workspace(
     } else {
         None
     };
+
+    if field.name == "search" {
+        if !is_query {
+            return Err(GraphQlError::user_input(
+                "Operation kind does not match the workspace resolver.",
+            ));
+        }
+        let result = search(
+            &state.core_pool,
+            runner_schema.clone(),
+            schema.objects(),
+            &parse_search_args(field)?,
+            state.config.search_ilike_fallback_timeout_ms,
+        )
+        .await
+        .map_err(runner_graphql_error)?;
+        return Ok(project_search_connection(&result, &field.selection));
+    }
+    let resolver = schema.resolver(&field.name).ok_or_else(|| {
+        GraphQlError::user_input(format!("Unknown workspace field {}", field.name))
+    })?;
 
     if is_query != resolver.method.is_query() {
         return Err(GraphQlError::user_input(
@@ -711,6 +734,240 @@ async fn find_many_root(
         &field.selection,
         &object_type,
     ))
+}
+
+fn parse_search_args(field: &FieldSelection) -> Result<SearchArgs, GraphQlError> {
+    let search_input = field
+        .argument("searchInput")
+        .and_then(Value::as_str)
+        .ok_or_else(|| GraphQlError::user_input("searchInput is required"))?
+        .to_string();
+    let limit = field
+        .argument("limit")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| GraphQlError::user_input("limit is required"))?;
+    if limit > 100 {
+        return Err(GraphQlError::user_input("Limit cannot exceed 100 items"));
+    }
+    let filter = field.argument("filter").filter(|value| !value.is_null());
+    if let Some(filter) = filter {
+        validate_search_filter(filter)?;
+    }
+    Ok(SearchArgs {
+        search_input,
+        limit: limit as usize,
+        after: optional_string_arg(field, "after").filter(|value| !value.is_empty()),
+        included_object_name_singulars: optional_string_list(field, "includedObjectNameSingulars")?,
+        excluded_object_name_singulars: optional_string_list(field, "excludedObjectNameSingulars")?,
+        filter: filter.cloned(),
+    })
+}
+
+fn optional_string_list(field: &FieldSelection, name: &str) -> Result<Vec<String>, GraphQlError> {
+    let Some(value) = field.argument(name) else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    value
+        .as_array()
+        .ok_or_else(|| GraphQlError::user_input(format!("{name} must be a list of strings")))?
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_string).ok_or_else(|| {
+                GraphQlError::user_input(format!("{name} must be a list of strings"))
+            })
+        })
+        .collect()
+}
+
+fn validate_search_filter(value: &Value) -> Result<(), GraphQlError> {
+    if value.is_null() {
+        return Ok(());
+    }
+    let fields = value
+        .as_object()
+        .ok_or_else(|| search_filter_error("ObjectRecordFilterInput must be an object"))?;
+    for (name, value) in fields {
+        match name.as_str() {
+            "and" | "or" => validate_search_filter_list(value)?,
+            "not" => validate_search_filter(value)?,
+            "id" => validate_uuid_filter(value)?,
+            "createdAt" | "updatedAt" | "deletedAt" => validate_date_time_filter(value)?,
+            _ => {
+                return Err(search_filter_error(format!(
+                    "Field \"{name}\" is not defined by type \"ObjectRecordFilterInput\"."
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_search_filter_list(value: &Value) -> Result<(), GraphQlError> {
+    if value.is_null() {
+        return Ok(());
+    }
+    let values = value
+        .as_array()
+        .ok_or_else(|| search_filter_error("Logical filter must be a list"))?;
+    for value in values {
+        validate_search_filter(value)?;
+    }
+    Ok(())
+}
+
+fn validate_uuid_filter(value: &Value) -> Result<(), GraphQlError> {
+    validate_scalar_filter(value, "UUIDFilter", |value| {
+        Uuid::parse_str(value).map(|_| ()).map_err(|_| ())
+    })
+}
+
+fn validate_date_time_filter(value: &Value) -> Result<(), GraphQlError> {
+    validate_scalar_filter(value, "DateTimeFilter", |value| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .map(|_| ())
+            .map_err(|_| ())
+    })
+}
+
+fn validate_scalar_filter(
+    value: &Value,
+    type_name: &str,
+    validate_scalar: impl Fn(&str) -> Result<(), ()>,
+) -> Result<(), GraphQlError> {
+    if value.is_null() {
+        return Ok(());
+    }
+    let fields = value
+        .as_object()
+        .ok_or_else(|| search_filter_error(format!("{type_name} must be an object")))?;
+    for (name, value) in fields {
+        if value.is_null() {
+            continue;
+        }
+        match name.as_str() {
+            "in" => {
+                let values = value.as_array().ok_or_else(|| {
+                    search_filter_error(format!("Field \"{name}\" in {type_name} must be a list"))
+                })?;
+                for value in values {
+                    if let Some(value) = value.as_str() {
+                        validate_scalar(value).map_err(|_| {
+                            search_filter_error(format!(
+                                "Invalid value for field \"{name}\" in {type_name}."
+                            ))
+                        })?;
+                    } else if !value.is_null() {
+                        return Err(search_filter_error(format!(
+                            "Field \"{name}\" in {type_name} must contain scalar values."
+                        )));
+                    }
+                }
+            }
+            "is" => {
+                if !matches!(value.as_str(), Some("NULL" | "NOT_NULL")) {
+                    return Err(search_filter_error(format!(
+                        "Invalid value for field \"is\" in {type_name}."
+                    )));
+                }
+            }
+            "eq" | "gt" | "gte" | "lt" | "lte" | "neq" => {
+                let value = value.as_str().ok_or_else(|| {
+                    search_filter_error(format!(
+                        "Field \"{name}\" in {type_name} must be a scalar."
+                    ))
+                })?;
+                validate_scalar(value).map_err(|_| {
+                    search_filter_error(format!(
+                        "Invalid value for field \"{name}\" in {type_name}."
+                    ))
+                })?;
+            }
+            "gtField" | "gteField" | "ltField" | "lteField" if type_name == "DateTimeFilter" => {
+                if !value.is_string() {
+                    return Err(search_filter_error(format!(
+                        "Field \"{name}\" in {type_name} must be a string."
+                    )));
+                }
+            }
+            _ => {
+                return Err(search_filter_error(format!(
+                    "Field \"{name}\" is not defined by type \"{type_name}\"."
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn search_filter_error(message: impl Into<String>) -> GraphQlError {
+    GraphQlError::user_input(message)
+}
+
+fn project_search_connection(value: &Value, selections: &[FieldSelection]) -> Value {
+    let mut output = Map::new();
+    for selection in selections {
+        let key = selection.response_key().to_string();
+        match selection.name.as_str() {
+            "edges" => {
+                let edges = value
+                    .get("edges")
+                    .and_then(Value::as_array)
+                    .map(|edges| {
+                        edges
+                            .iter()
+                            .map(|edge| {
+                                let mut projected = Map::new();
+                                for edge_selection in &selection.selection {
+                                    let edge_key = edge_selection.response_key().to_string();
+                                    match edge_selection.name.as_str() {
+                                        "node" => {
+                                            projected.insert(
+                                                edge_key,
+                                                project_record(
+                                                    edge.get("node").unwrap_or(&Value::Null),
+                                                    &edge_selection.selection,
+                                                    "SearchRecord",
+                                                ),
+                                            );
+                                        }
+                                        "cursor" | "__typename" => {
+                                            let value = if edge_selection.name == "__typename" {
+                                                Value::String(String::from("SearchResultEdge"))
+                                            } else {
+                                                edge.get("cursor").cloned().unwrap_or(Value::Null)
+                                            };
+                                            projected.insert(edge_key, value);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                Value::Object(projected)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                output.insert(key, Value::Array(edges));
+            }
+            "pageInfo" => {
+                output.insert(
+                    key,
+                    project_plain(
+                        value.get("pageInfo"),
+                        &selection.selection,
+                        "SearchResultPageInfo",
+                    ),
+                );
+            }
+            "__typename" => {
+                output.insert(key, Value::String(String::from("SearchResultConnection")));
+            }
+            _ => {}
+        }
+    }
+    Value::Object(output)
 }
 
 fn project_connection(
@@ -1234,6 +1491,15 @@ fn field_entry(name: &str, type_value: Value) -> Value {
     })
 }
 
+fn input_value_entry(name: &str, type_value: Value) -> Value {
+    json!({
+        "name": name,
+        "description": Value::Null,
+        "defaultValue": Value::Null,
+        "type": type_value,
+    })
+}
+
 fn schema_type_specs(schema: &WorkspaceSchema) -> Vec<Value> {
     let mut specs = vec![
         field_entry("queryType", non_null(named_type("Query"))),
@@ -1254,9 +1520,136 @@ fn schema_type_specs(schema: &WorkspaceSchema) -> Vec<Value> {
         ],
     }));
 
+    for name in ["DateTime", "JSON", "RawJson", "UUID"] {
+        specs.push(json!({
+            "kind": "SCALAR",
+            "name": name,
+        }));
+    }
+
+    let uuid_filter_fields = vec![
+        input_value_entry("eq", scalar_type("UUID")),
+        input_value_entry("gt", scalar_type("UUID")),
+        input_value_entry("gte", scalar_type("UUID")),
+        input_value_entry("in", list(scalar_type("UUID"))),
+        input_value_entry("lt", scalar_type("UUID")),
+        input_value_entry("lte", scalar_type("UUID")),
+        input_value_entry("neq", scalar_type("UUID")),
+        input_value_entry("is", schema_type("ENUM", "FilterIs")),
+    ];
+    specs.push(json!({
+        "kind": "INPUT_OBJECT",
+        "name": "UUIDFilter",
+        "inputFields": uuid_filter_fields,
+    }));
+
+    let date_time_filter_fields = vec![
+        input_value_entry("eq", scalar_type("DateTime")),
+        input_value_entry("gt", scalar_type("DateTime")),
+        input_value_entry("gte", scalar_type("DateTime")),
+        input_value_entry("in", list(non_null(scalar_type("DateTime")))),
+        input_value_entry("lt", scalar_type("DateTime")),
+        input_value_entry("lte", scalar_type("DateTime")),
+        input_value_entry("neq", scalar_type("DateTime")),
+        input_value_entry("is", schema_type("ENUM", "FilterIs")),
+        input_value_entry("gtField", scalar_type("String")),
+        input_value_entry("gteField", scalar_type("String")),
+        input_value_entry("ltField", scalar_type("String")),
+        input_value_entry("lteField", scalar_type("String")),
+    ];
+    specs.push(json!({
+        "kind": "INPUT_OBJECT",
+        "name": "DateTimeFilter",
+        "inputFields": date_time_filter_fields,
+    }));
+    specs.push(json!({
+        "kind": "INPUT_OBJECT",
+        "name": "ObjectRecordFilterInput",
+        "inputFields": [
+            input_value_entry(
+                "and",
+                list(schema_type("INPUT_OBJECT", "ObjectRecordFilterInput")),
+            ),
+            input_value_entry("not", schema_type("INPUT_OBJECT", "ObjectRecordFilterInput")),
+            input_value_entry(
+                "or",
+                list(schema_type("INPUT_OBJECT", "ObjectRecordFilterInput")),
+            ),
+            input_value_entry("id", schema_type("INPUT_OBJECT", "UUIDFilter")),
+            input_value_entry("createdAt", schema_type("INPUT_OBJECT", "DateTimeFilter")),
+            input_value_entry("updatedAt", schema_type("INPUT_OBJECT", "DateTimeFilter")),
+            input_value_entry("deletedAt", schema_type("INPUT_OBJECT", "DateTimeFilter")),
+        ],
+    }));
+    specs.push(json!({
+        "kind": "ENUM",
+        "name": "FilterIs",
+        "enumValues": [
+            {"name": "NULL"},
+            {"name": "NOT_NULL"},
+        ],
+    }));
+
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "SearchRecord",
+        "fields": [
+            field_entry("recordId", non_null(scalar_type("UUID"))),
+            field_entry("objectNameSingular", non_null(scalar_type("String"))),
+            field_entry("objectLabelSingular", non_null(scalar_type("String"))),
+            field_entry("label", non_null(scalar_type("String"))),
+            field_entry("imageUrl", scalar_type("String")),
+            field_entry("tsRankCD", non_null(scalar_type("Float"))),
+            field_entry("tsRank", non_null(scalar_type("Float"))),
+        ],
+    }));
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "SearchResultEdge",
+        "fields": [
+            field_entry("node", non_null(named_type("SearchRecord"))),
+            field_entry("cursor", non_null(scalar_type("String"))),
+        ],
+    }));
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "SearchResultPageInfo",
+        "fields": [
+            field_entry("endCursor", scalar_type("String")),
+            field_entry("hasNextPage", non_null(scalar_type("Boolean"))),
+        ],
+    }));
+    specs.push(json!({
+        "kind": "OBJECT",
+        "name": "SearchResultConnection",
+        "fields": [
+            field_entry("edges", non_null(list(non_null(named_type("SearchResultEdge"))))),
+            field_entry("pageInfo", non_null(named_type("SearchResultPageInfo"))),
+        ],
+    }));
+
+    let mut search_field = field_entry("search", non_null(named_type("SearchResultConnection")));
+    search_field["args"] = Value::Array(vec![
+        input_value_entry("searchInput", non_null(scalar_type("String"))),
+        input_value_entry("limit", non_null(scalar_type("Int"))),
+        input_value_entry("after", scalar_type("String")),
+        input_value_entry(
+            "includedObjectNameSingulars",
+            list(non_null(scalar_type("String"))),
+        ),
+        input_value_entry(
+            "filter",
+            schema_type("INPUT_OBJECT", "ObjectRecordFilterInput"),
+        ),
+        input_value_entry(
+            "excludedObjectNameSingulars",
+            list(non_null(scalar_type("String"))),
+        ),
+    ]);
     let mut query_fields = vec![
         field_entry("currentUser", non_null(named_type("User"))),
         field_entry("currentWorkspace", non_null(named_type("Workspace"))),
+        search_field,
     ];
     let mut mutation_fields = Vec::new();
 
@@ -1538,8 +1931,28 @@ fn introspect_type(spec: Option<&Value>, selections: &[FieldSelection]) -> Value
             "args" => Value::Array(vec![]),
             "interfaces" => Value::Array(vec![]),
             "possibleTypes" => Value::Null,
-            "enumValues" => Value::Null,
-            "inputFields" => Value::Null,
+            "enumValues" => spec
+                .get("enumValues")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .map(|value| introspect_enum_value(value, &selection.selection))
+                        .collect::<Vec<_>>()
+                })
+                .map(Value::Array)
+                .unwrap_or(Value::Null),
+            "inputFields" => spec
+                .get("inputFields")
+                .and_then(Value::as_array)
+                .map(|fields| {
+                    fields
+                        .iter()
+                        .map(|field| introspect_input_value(field, &selection.selection))
+                        .collect::<Vec<_>>()
+                })
+                .map(Value::Array)
+                .unwrap_or(Value::Null),
             "ofType" => spec
                 .get("ofType")
                 .map(|inner| introspect_type(Some(inner), &selection.selection))
@@ -1565,7 +1978,57 @@ fn introspect_field(field: &Value, selections: &[FieldSelection]) -> Value {
                 .get("type")
                 .map(|type_value| introspect_type(Some(type_value), &selection.selection))
                 .unwrap_or(Value::Null),
-            "args" => Value::Array(vec![]),
+            "args" => field
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|args| {
+                    args.iter()
+                        .map(|arg| introspect_input_value(arg, &selection.selection))
+                        .collect::<Vec<_>>()
+                })
+                .map(Value::Array)
+                .unwrap_or_else(|| Value::Array(vec![])),
+            "isDeprecated" => Value::Bool(false),
+            "deprecationReason" => Value::Null,
+            _ => Value::Null,
+        };
+
+        output.insert(key, value);
+    }
+
+    Value::Object(output)
+}
+
+fn introspect_input_value(value: &Value, selections: &[FieldSelection]) -> Value {
+    let mut output = Map::new();
+
+    for selection in selections {
+        let key = selection.response_key().to_string();
+        let value = match selection.name.as_str() {
+            "name" => value.get("name").cloned().unwrap_or(Value::Null),
+            "description" => Value::Null,
+            "defaultValue" => value.get("defaultValue").cloned().unwrap_or(Value::Null),
+            "type" => value
+                .get("type")
+                .map(|type_value| introspect_type(Some(type_value), &selection.selection))
+                .unwrap_or(Value::Null),
+            _ => Value::Null,
+        };
+
+        output.insert(key, value);
+    }
+
+    Value::Object(output)
+}
+
+fn introspect_enum_value(value: &Value, selections: &[FieldSelection]) -> Value {
+    let mut output = Map::new();
+
+    for selection in selections {
+        let key = selection.response_key().to_string();
+        let value = match selection.name.as_str() {
+            "name" => value.get("name").cloned().unwrap_or(Value::Null),
+            "description" => Value::Null,
             "isDeprecated" => Value::Bool(false),
             "deprecationReason" => Value::Null,
             _ => Value::Null,
@@ -1583,4 +2046,118 @@ fn unused_schema_helpers(schema: &WorkspaceSchema) -> HashMap<String, Vec<String
 
 fn unused_camel_marker(value: &str) -> String {
     camel_case(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadata::flat::FlatWorkspaceMaps;
+
+    #[test]
+    fn search_introspection_exposes_the_upstream_filter_contract() {
+        let schema = WorkspaceSchema::build(&FlatWorkspaceMaps::default());
+        let specs = schema_type_specs(&schema);
+        for name in ["DateTime", "JSON", "RawJson", "UUID"] {
+            assert!(specs
+                .iter()
+                .any(|spec| { spec["kind"] == "SCALAR" && spec["name"] == name }));
+        }
+        let filter = specs
+            .iter()
+            .find(|spec| spec["name"] == "ObjectRecordFilterInput")
+            .expect("ObjectRecordFilterInput");
+        let fields = filter["inputFields"].as_array().expect("input fields");
+        let names = fields
+            .iter()
+            .map(|field| field["name"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+
+        assert_eq!(filter["kind"], "INPUT_OBJECT");
+        assert_eq!(
+            names,
+            [
+                "and",
+                "not",
+                "or",
+                "id",
+                "createdAt",
+                "updatedAt",
+                "deletedAt"
+            ]
+        );
+        assert_eq!(fields[0]["type"]["kind"], "LIST");
+        assert_eq!(
+            fields[0]["type"]["ofType"]["name"],
+            "ObjectRecordFilterInput"
+        );
+
+        let date_time = specs
+            .iter()
+            .find(|spec| spec["name"] == "DateTimeFilter")
+            .expect("DateTimeFilter");
+        assert_eq!(
+            date_time["inputFields"][3]["type"]["ofType"]["kind"],
+            "NON_NULL"
+        );
+        assert_eq!(date_time["inputFields"][8]["name"], "gtField");
+        assert_eq!(date_time["inputFields"][11]["name"], "lteField");
+
+        let filter_is = specs
+            .iter()
+            .find(|spec| spec["name"] == "FilterIs")
+            .expect("FilterIs");
+        assert_eq!(filter_is["kind"], "ENUM");
+        assert_eq!(filter_is["enumValues"][0]["name"], "NULL");
+        assert_eq!(filter_is["enumValues"][1]["name"], "NOT_NULL");
+
+        let query = specs
+            .iter()
+            .find(|spec| spec["name"] == "Query")
+            .expect("Query");
+        let search = query["fields"]
+            .as_array()
+            .expect("query fields")
+            .iter()
+            .find(|field| field["name"] == "search")
+            .expect("search");
+        let args = search["args"].as_array().expect("search args");
+        let names = args
+            .iter()
+            .map(|arg| arg["name"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            [
+                "searchInput",
+                "limit",
+                "after",
+                "includedObjectNameSingulars",
+                "filter",
+                "excludedObjectNameSingulars",
+            ]
+        );
+        assert_eq!(args[0]["type"]["kind"], "NON_NULL");
+        assert_eq!(args[1]["type"]["kind"], "NON_NULL");
+        assert_eq!(args[4]["type"]["kind"], "INPUT_OBJECT");
+        assert_eq!(args[4]["type"]["name"], "ObjectRecordFilterInput");
+    }
+
+    #[test]
+    fn search_filter_validation_matches_the_upstream_input_type() {
+        let id = Uuid::new_v4().to_string();
+        assert!(validate_search_filter(&json!({
+            "and": [{"id": {"eq": id}}],
+            "or": [{"deletedAt": {"is": "NULL"}}],
+            "not": {"updatedAt": {"gte": "2026-11-28T00:00:00Z"}},
+            "id": {"in": [id, null], "neq": Uuid::nil().to_string()},
+            "createdAt": {"gtField": "updatedAt", "lteField": "createdAt"}
+        }))
+        .is_ok());
+        assert!(validate_search_filter(&json!({"name": {"eq": "Ada"}})).is_err());
+        assert!(validate_search_filter(&json!({"id": {"eq": "not-a-uuid"}})).is_err());
+        assert!(validate_search_filter(&json!({"createdAt": {"eq": "yesterday"}})).is_err());
+        assert!(validate_search_filter(&json!({"id": {"is": "EMPTY"}})).is_err());
+        assert!(validate_search_filter(&json!({"and": {"id": {"eq": id}}})).is_err());
+    }
 }

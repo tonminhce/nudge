@@ -739,7 +739,10 @@ pub(crate) fn json_cell(row: &sqlx::postgres::PgRow, name: &str) -> Result<Value
         "INT2" => row.try_get::<i16, _>(name).map(|v| number(v as i64)),
         "INT4" => row.try_get::<i32, _>(name).map(|v| number(v as i64)),
         "INT8" => row.try_get::<i64, _>(name).map(number),
-        "FLOAT4" | "FLOAT8" => row.try_get::<f64, _>(name).map(number_f64),
+        "FLOAT4" => row
+            .try_get::<f32, _>(name)
+            .map(|value| number_f64(value as f64)),
+        "FLOAT8" => row.try_get::<f64, _>(name).map(number_f64),
         "TEXT" | "VARCHAR" | "CHAR" | "NAME" | "CITEXT" | "UNKNOWN" => {
             row.try_get::<String, _>(name).map(Value::String)
         }
