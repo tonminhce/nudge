@@ -1,0 +1,1259 @@
+{
+  "document": {
+    "bodyBackground": "color(display-p3 0.945 0.945 0.945)",
+    "bodyFont": "Inter, sans-serif",
+    "scrollHeight": 769,
+    "scrollWidth": 1075,
+    "title": "Sign in or Create an account",
+    "url": "http://127.0.0.1:3001/welcome"
+  },
+  "selectors": {
+    "actions": {
+      "animations": [],
+      "attributes": {},
+      "children": [
+        {
+          "rect": {
+            "bottom": 23,
+            "height": 24,
+            "right": 20,
+            "width": 24,
+            "x": 1031,
+            "y": 722
+          },
+          "tag": "BUTTON",
+          "text": ""
+        }
+      ],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 23,
+        "height": 24,
+        "right": 20,
+        "width": 24,
+        "x": 1031,
+        "y": 722
+      },
+      "style": {
+        "alignItems": "center",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "0px",
+        "bottom": "auto",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "flex",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "500",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "24px",
+        "inset": "auto",
+        "justifyContent": "normal",
+        "left": "auto",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "auto",
+        "minWidth": "auto",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "0px",
+        "position": "static",
+        "right": "auto",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "auto",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "24px",
+        "zIndex": "auto"
+      },
+      "svg": {
+        "height": "24",
+        "markup": {
+          "attributes": {
+            "class": "tabler-icon tabler-icon-x ",
+            "fill": "none",
+            "height": "24",
+            "stroke": "currentColor",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "stroke-width": "2",
+            "viewBox": "0 0 24 24",
+            "width": "24",
+            "xmlns": "http://www.w3.org/2000/svg"
+          },
+          "innerHTML": "<path d=\"M18 6l-12 12\"></path><path d=\"M6 6l12 12\"></path>"
+        },
+        "rect": {
+          "bottom": 28,
+          "height": 14,
+          "right": 25,
+          "width": 14,
+          "x": 1036,
+          "y": 727
+        },
+        "stroke": "currentColor",
+        "width": "24"
+      },
+      "tag": "DIV",
+      "text": ""
+    },
+    "close": {
+      "animations": [],
+      "attributes": {
+        "aria-label": "Close",
+        "tabindex": "0",
+        "title": "Close",
+        "type": "button"
+      },
+      "children": [
+        {
+          "rect": {
+            "bottom": 28,
+            "height": 14,
+            "right": 25,
+            "width": 14,
+            "x": 1036,
+            "y": 727
+          },
+          "tag": "SPAN",
+          "text": ""
+        }
+      ],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 23,
+        "height": 24,
+        "right": 20,
+        "width": 24,
+        "x": 1031,
+        "y": 722
+      },
+      "style": {
+        "alignItems": "center",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "1px solid rgba(0, 0, 0, 0)",
+        "borderRadius": "16px",
+        "bottom": "0px",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.4 0.4 0.4)",
+        "display": "flex",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "500",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "24px",
+        "inset": "0px",
+        "justifyContent": "center",
+        "left": "0px",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "auto",
+        "minWidth": "0px",
+        "opacity": "1",
+        "outline": "color(display-p3 0.4 0.4 0.4) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "0px",
+        "position": "relative",
+        "right": "0px",
+        "textAlign": "center",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "0px",
+        "transform": "none",
+        "transition": "background 0.1s",
+        "whiteSpace": "nowrap",
+        "width": "24px",
+        "zIndex": "auto"
+      },
+      "svg": {
+        "height": "24",
+        "markup": {
+          "attributes": {
+            "class": "tabler-icon tabler-icon-x ",
+            "fill": "none",
+            "height": "24",
+            "stroke": "currentColor",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "stroke-width": "2",
+            "viewBox": "0 0 24 24",
+            "width": "24",
+            "xmlns": "http://www.w3.org/2000/svg"
+          },
+          "innerHTML": "<path d=\"M18 6l-12 12\"></path><path d=\"M6 6l12 12\"></path>"
+        },
+        "rect": {
+          "bottom": 28,
+          "height": 14,
+          "right": 25,
+          "width": 14,
+          "x": 1036,
+          "y": 727
+        },
+        "stroke": "currentColor",
+        "width": "24"
+      },
+      "tag": "BUTTON",
+      "text": ""
+    },
+    "countdown": {
+      "animations": [
+        {
+          "delay": 0,
+          "duration": 6000,
+          "easing": "linear",
+          "fill": "forwards",
+          "keyframes": [
+            {
+              "composite": "auto",
+              "computedOffset": 0,
+              "easing": "linear",
+              "offset": 0,
+              "width": "100%"
+            },
+            {
+              "composite": "auto",
+              "computedOffset": 1,
+              "easing": "linear",
+              "offset": 1,
+              "width": "0px"
+            }
+          ],
+          "state": "running"
+        }
+      ],
+      "attributes": {
+        "style": "--toast-countdown-color: #00a43319; --toast-countdown-width: 100%; --toast-countdown-duration: 6000ms;"
+      },
+      "children": [],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 12,
+        "height": 46,
+        "right": 46.9375,
+        "width": 261.0625,
+        "x": 767,
+        "y": 711
+      },
+      "style": {
+        "alignItems": "normal",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "6s",
+        "animationFillMode": "forwards",
+        "animationName": "_toastCountdown_1vuo8_1",
+        "animationPlayState": "running",
+        "animationTimingFunction": "linear",
+        "background": "rgba(0, 164, 51, 0.098) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 164, 51, 0.098)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "0px",
+        "bottom": "auto",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "block",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "400",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "46px",
+        "inset": "auto",
+        "justifyContent": "normal",
+        "left": "auto",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "0px",
+        "minWidth": "0px",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "0px",
+        "position": "static",
+        "right": "auto",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "auto",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "261.062px",
+        "zIndex": "auto"
+      },
+      "svg": null,
+      "tag": "DIV",
+      "text": ""
+    },
+    "header": {
+      "animations": [],
+      "attributes": {},
+      "children": [
+        {
+          "rect": {
+            "bottom": 27,
+            "height": 16,
+            "right": 284,
+            "width": 16,
+            "x": 775,
+            "y": 726
+          },
+          "tag": "DIV",
+          "text": ""
+        },
+        {
+          "rect": {
+            "bottom": 20,
+            "height": 30,
+            "right": 52,
+            "width": 224,
+            "x": 799,
+            "y": 719
+          },
+          "tag": "DIV",
+          "text": "If this email is registered, a password reset link has been sent"
+        },
+        {
+          "rect": {
+            "bottom": 23,
+            "height": 24,
+            "right": 20,
+            "width": 24,
+            "x": 1031,
+            "y": 722
+          },
+          "tag": "DIV",
+          "text": ""
+        }
+      ],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 20,
+        "height": 30,
+        "right": 20,
+        "width": 280,
+        "x": 775,
+        "y": 719
+      },
+      "style": {
+        "alignItems": "center",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "0px",
+        "bottom": "0px",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "flex",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "500",
+        "gap": "8px",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "30px",
+        "inset": "0px",
+        "justifyContent": "normal",
+        "left": "0px",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px 0px 4px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "0px",
+        "minWidth": "0px",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "0px",
+        "position": "relative",
+        "right": "0px",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "0px",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "280px",
+        "zIndex": "auto"
+      },
+      "svg": {
+        "height": "16",
+        "markup": {
+          "attributes": {
+            "aria-hidden": "false",
+            "aria-label": "Success",
+            "class": "tabler-icon tabler-icon-square-rounded-check ",
+            "fill": "none",
+            "height": "16",
+            "stroke": "color(display-p3 .297 .637 .581)",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "stroke-width": "2",
+            "viewBox": "0 0 24 24",
+            "width": "16",
+            "xmlns": "http://www.w3.org/2000/svg"
+          },
+          "innerHTML": "<path d=\"M9 12l2 2l4 -4\"></path><path d=\"M12 3c7.2 0 9 1.8 9 9c0 7.2 -1.8 9 -9 9c-7.2 0 -9 -1.8 -9 -9c0 -7.2 1.8 -9 9 -9\"></path>"
+        },
+        "rect": {
+          "bottom": 27,
+          "height": 16,
+          "right": 284,
+          "width": 16,
+          "x": 775,
+          "y": 726
+        },
+        "stroke": "color(display-p3 .297 .637 .581)",
+        "width": "16"
+      },
+      "tag": "DIV",
+      "text": "If this email is registered, a password reset link has been sent"
+    },
+    "icon": {
+      "animations": [],
+      "attributes": {
+        "aria-hidden": "false",
+        "aria-label": "Success",
+        "fill": "none",
+        "height": "16",
+        "stroke": "color(display-p3 .297 .637 .581)",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "stroke-width": "2",
+        "viewBox": "0 0 24 24",
+        "width": "16",
+        "xmlns": "http://www.w3.org/2000/svg"
+      },
+      "children": [
+        {
+          "rect": {
+            "bottom": 33.66668701171875,
+            "height": 2.6666259765625,
+            "right": 290,
+            "width": 4,
+            "x": 781,
+            "y": 732.6666870117188
+          },
+          "tag": "path",
+          "text": ""
+        },
+        {
+          "rect": {
+            "bottom": 29,
+            "height": 12,
+            "right": 286,
+            "width": 12,
+            "x": 777,
+            "y": 728
+          },
+          "tag": "path",
+          "text": ""
+        }
+      ],
+      "found": true,
+      "matchCount": 2,
+      "rect": {
+        "bottom": 27,
+        "height": 16,
+        "right": 284,
+        "width": 16,
+        "x": 775,
+        "y": 726
+      },
+      "style": {
+        "alignItems": "normal",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "0px",
+        "bottom": "auto",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "block",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "500",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "16px",
+        "inset": "auto",
+        "justifyContent": "normal",
+        "left": "auto",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "auto",
+        "minWidth": "auto",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "hidden",
+        "overflowX": "hidden",
+        "overflowY": "hidden",
+        "padding": "0px",
+        "position": "static",
+        "right": "auto",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "auto",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "16px",
+        "zIndex": "auto"
+      },
+      "svg": {
+        "height": "16",
+        "markup": {
+          "attributes": {
+            "aria-hidden": "false",
+            "aria-label": "Success",
+            "class": "tabler-icon tabler-icon-square-rounded-check ",
+            "fill": "none",
+            "height": "16",
+            "stroke": "color(display-p3 .297 .637 .581)",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "stroke-width": "2",
+            "viewBox": "0 0 24 24",
+            "width": "16",
+            "xmlns": "http://www.w3.org/2000/svg"
+          },
+          "innerHTML": "<path d=\"M9 12l2 2l4 -4\"></path><path d=\"M12 3c7.2 0 9 1.8 9 9c0 7.2 -1.8 9 -9 9c-7.2 0 -9 -1.8 -9 -9c0 -7.2 1.8 -9 9 -9\"></path>"
+        },
+        "rect": {
+          "bottom": 27,
+          "height": 16,
+          "right": 284,
+          "width": 16,
+          "x": 775,
+          "y": 726
+        },
+        "stroke": "color(display-p3 .297 .637 .581)",
+        "width": "16"
+      },
+      "tag": "svg",
+      "text": ""
+    },
+    "item": {
+      "animations": [
+        {
+          "delay": 0,
+          "duration": 6000,
+          "easing": "linear",
+          "fill": "forwards",
+          "keyframes": [
+            {
+              "composite": "auto",
+              "computedOffset": 0,
+              "easing": "linear",
+              "offset": 0,
+              "width": "100%"
+            },
+            {
+              "composite": "auto",
+              "computedOffset": 1,
+              "easing": "linear",
+              "offset": 1,
+              "width": "0px"
+            }
+          ],
+          "state": "running"
+        }
+      ],
+      "attributes": {},
+      "children": [
+        {
+          "rect": {
+            "bottom": 12,
+            "height": 54,
+            "right": 12,
+            "width": 296,
+            "x": 767,
+            "y": 703
+          },
+          "tag": "DIV",
+          "text": "If this email is registered, a password reset link has been sent"
+        }
+      ],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 12,
+        "height": 54,
+        "right": 12,
+        "width": 296,
+        "x": 767,
+        "y": 703
+      },
+      "style": {
+        "alignItems": "normal",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "0px",
+        "bottom": "auto",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "grid",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "400",
+        "gap": "normal",
+        "gridTemplateColumns": "296px",
+        "gridTemplateRows": "54px",
+        "height": "54px",
+        "inset": "auto",
+        "justifyContent": "normal",
+        "left": "auto",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "auto",
+        "minWidth": "auto",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "0px",
+        "position": "static",
+        "right": "auto",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "auto",
+        "transform": "matrix(1, 0, 0, 1, 0, 0)",
+        "transition": "grid-template-rows 0.5s ease-in-out, opacity 0.5s ease-in-out, transform 0.5s ease-in-out",
+        "whiteSpace": "normal",
+        "width": "296px",
+        "zIndex": "auto"
+      },
+      "svg": {
+        "height": "16",
+        "markup": {
+          "attributes": {
+            "aria-hidden": "false",
+            "aria-label": "Success",
+            "class": "tabler-icon tabler-icon-square-rounded-check ",
+            "fill": "none",
+            "height": "16",
+            "stroke": "color(display-p3 .297 .637 .581)",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "stroke-width": "2",
+            "viewBox": "0 0 24 24",
+            "width": "16",
+            "xmlns": "http://www.w3.org/2000/svg"
+          },
+          "innerHTML": "<path d=\"M9 12l2 2l4 -4\"></path><path d=\"M12 3c7.2 0 9 1.8 9 9c0 7.2 -1.8 9 -9 9c-7.2 0 -9 -1.8 -9 -9c0 -7.2 1.8 -9 9 -9\"></path>"
+        },
+        "rect": {
+          "bottom": 27,
+          "height": 16,
+          "right": 284,
+          "width": 16,
+          "x": 775,
+          "y": 726
+        },
+        "stroke": "color(display-p3 .297 .637 .581)",
+        "width": "16"
+      },
+      "tag": "DIV",
+      "text": "If this email is registered, a password reset link has been sent"
+    },
+    "message": {
+      "animations": [],
+      "attributes": {},
+      "children": [],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 20,
+        "height": 30,
+        "right": 52,
+        "width": 224,
+        "x": 799,
+        "y": 719
+      },
+      "style": {
+        "alignItems": "normal",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.4 0.4 0.4)",
+        "borderRadius": "0px",
+        "bottom": "auto",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.4 0.4 0.4)",
+        "display": "block",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "11.96px",
+        "fontStyle": "normal",
+        "fontWeight": "500",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "30px",
+        "inset": "auto",
+        "justifyContent": "normal",
+        "left": "auto",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "auto",
+        "minWidth": "auto",
+        "opacity": "1",
+        "outline": "color(display-p3 0.4 0.4 0.4) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "0px",
+        "position": "static",
+        "right": "auto",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "auto",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "224px",
+        "zIndex": "auto"
+      },
+      "svg": null,
+      "tag": "DIV",
+      "text": "If this email is registered, a password reset link has been sent"
+    },
+    "progress": {
+      "animations": [
+        {
+          "delay": 0,
+          "duration": 6000,
+          "easing": "linear",
+          "fill": "forwards",
+          "keyframes": [
+            {
+              "composite": "auto",
+              "computedOffset": 0,
+              "easing": "linear",
+              "offset": 0,
+              "width": "100%"
+            },
+            {
+              "composite": "auto",
+              "computedOffset": 1,
+              "easing": "linear",
+              "offset": 1,
+              "width": "0px"
+            }
+          ],
+          "state": "running"
+        }
+      ],
+      "attributes": {
+        "aria-hidden": "true"
+      },
+      "children": [
+        {
+          "rect": {
+            "bottom": 12,
+            "height": 46,
+            "right": 46.9375,
+            "width": 261.0625,
+            "x": 767,
+            "y": 711
+          },
+          "tag": "DIV",
+          "text": ""
+        }
+      ],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 12,
+        "height": 46,
+        "right": 12,
+        "width": 296,
+        "x": 767,
+        "y": 711
+      },
+      "style": {
+        "alignItems": "normal",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "16px",
+        "bottom": "0px",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "block",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "400",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "46px",
+        "inset": "0px",
+        "justifyContent": "normal",
+        "left": "0px",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "0px",
+        "minWidth": "0px",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "hidden",
+        "overflowX": "hidden",
+        "overflowY": "hidden",
+        "padding": "0px",
+        "position": "absolute",
+        "right": "0px",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "0px",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "296px",
+        "zIndex": "auto"
+      },
+      "svg": null,
+      "tag": "DIV",
+      "text": ""
+    },
+    "toast": {
+      "animations": [
+        {
+          "delay": 0,
+          "duration": 6000,
+          "easing": "linear",
+          "fill": "forwards",
+          "keyframes": [
+            {
+              "composite": "auto",
+              "computedOffset": 0,
+              "easing": "linear",
+              "offset": 0,
+              "width": "100%"
+            },
+            {
+              "composite": "auto",
+              "computedOffset": 1,
+              "easing": "linear",
+              "offset": 1,
+              "width": "0px"
+            }
+          ],
+          "state": "running"
+        }
+      ],
+      "attributes": {
+        "aria-live": "polite",
+        "id": "toast-6",
+        "role": "status",
+        "title": "If this email is registered, a password reset link has been sent"
+      },
+      "children": [
+        {
+          "rect": {
+            "bottom": 12,
+            "height": 46,
+            "right": 12,
+            "width": 296,
+            "x": 767,
+            "y": 711
+          },
+          "tag": "DIV",
+          "text": ""
+        },
+        {
+          "rect": {
+            "bottom": 20,
+            "height": 30,
+            "right": 20,
+            "width": 280,
+            "x": 775,
+            "y": 719
+          },
+          "tag": "DIV",
+          "text": "If this email is registered, a password reset link has been sent"
+        }
+      ],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 12,
+        "height": 46,
+        "right": 12,
+        "width": 296,
+        "x": 767,
+        "y": 711
+      },
+      "style": {
+        "alignItems": "normal",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "color(display-p3 1 1 1) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "color(display-p3 1 1 1)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "16px",
+        "bottom": "0px",
+        "boxShadow": "color(display-p3 0 0 0 / 0.161) 2px 4px 16px 0px, color(display-p3 0 0 0 / 0.078) 0px 2px 4px 0px",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "block",
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "400",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "46px",
+        "inset": "0px",
+        "justifyContent": "normal",
+        "left": "0px",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "8px 0px 0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "auto",
+        "minWidth": "auto",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "8px 8px 4px",
+        "position": "relative",
+        "right": "0px",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "0px",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "296px",
+        "zIndex": "auto"
+      },
+      "svg": {
+        "height": "16",
+        "markup": {
+          "attributes": {
+            "aria-hidden": "false",
+            "aria-label": "Success",
+            "class": "tabler-icon tabler-icon-square-rounded-check ",
+            "fill": "none",
+            "height": "16",
+            "stroke": "color(display-p3 .297 .637 .581)",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "stroke-width": "2",
+            "viewBox": "0 0 24 24",
+            "width": "16",
+            "xmlns": "http://www.w3.org/2000/svg"
+          },
+          "innerHTML": "<path d=\"M9 12l2 2l4 -4\"></path><path d=\"M12 3c7.2 0 9 1.8 9 9c0 7.2 -1.8 9 -9 9c-7.2 0 -9 -1.8 -9 -9c0 -7.2 1.8 -9 9 -9\"></path>"
+        },
+        "rect": {
+          "bottom": 27,
+          "height": 16,
+          "right": 284,
+          "width": 16,
+          "x": 775,
+          "y": 726
+        },
+        "stroke": "color(display-p3 .297 .637 .581)",
+        "width": "16"
+      },
+      "tag": "DIV",
+      "text": "If this email is registered, a password reset link has been sent"
+    },
+    "viewport": {
+      "animations": [
+        {
+          "delay": 0,
+          "duration": 6000,
+          "easing": "linear",
+          "fill": "forwards",
+          "keyframes": [
+            {
+              "composite": "auto",
+              "computedOffset": 0,
+              "easing": "linear",
+              "offset": 0,
+              "width": "100%"
+            },
+            {
+              "composite": "auto",
+              "computedOffset": 1,
+              "easing": "linear",
+              "offset": 1,
+              "width": "0px"
+            }
+          ],
+          "state": "running"
+        }
+      ],
+      "attributes": {
+        "aria-label": "Notifications",
+        "dir": "ltr",
+        "role": "region",
+        "style": "z-index: 10002;"
+      },
+      "children": [
+        {
+          "rect": {
+            "bottom": 12,
+            "height": 54,
+            "right": 12,
+            "width": 296,
+            "x": 767,
+            "y": 703
+          },
+          "tag": "DIV",
+          "text": "If this email is registered, a password reset link has been sent"
+        }
+      ],
+      "found": true,
+      "matchCount": 1,
+      "rect": {
+        "bottom": 12,
+        "height": 54,
+        "right": 12,
+        "width": 296,
+        "x": 767,
+        "y": 703
+      },
+      "style": {
+        "alignItems": "normal",
+        "alignSelf": "auto",
+        "animationDelay": "0s",
+        "animationDuration": "0s",
+        "animationFillMode": "none",
+        "animationName": "none",
+        "animationPlayState": "running",
+        "animationTimingFunction": "ease",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "backgroundImage": "none",
+        "border": "0px none color(display-p3 0.2 0.2 0.2)",
+        "borderRadius": "0px",
+        "bottom": "12px",
+        "boxShadow": "none",
+        "color": "color(display-p3 0.2 0.2 0.2)",
+        "display": "flex",
+        "flexDirection": "column",
+        "flexWrap": "nowrap",
+        "fontFamily": "Inter, sans-serif",
+        "fontSize": "13px",
+        "fontStyle": "normal",
+        "fontWeight": "400",
+        "gap": "normal",
+        "gridTemplateColumns": "none",
+        "gridTemplateRows": "none",
+        "height": "54px",
+        "inset": "703px 12px 12px 767px",
+        "justifyContent": "normal",
+        "left": "767px",
+        "letterSpacing": "normal",
+        "lineHeight": "normal",
+        "margin": "0px",
+        "maxHeight": "none",
+        "maxWidth": "none",
+        "minHeight": "0px",
+        "minWidth": "0px",
+        "opacity": "1",
+        "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible",
+        "padding": "0px",
+        "position": "fixed",
+        "right": "12px",
+        "textAlign": "start",
+        "textDecoration": "none",
+        "textTransform": "none",
+        "top": "703px",
+        "transform": "none",
+        "transition": "all",
+        "whiteSpace": "normal",
+        "width": "296px",
+        "zIndex": "10002"
+      },
+      "svg": {
+        "height": "16",
+        "markup": {
+          "attributes": {
+            "aria-hidden": "false",
+            "aria-label": "Success",
+            "class": "tabler-icon tabler-icon-square-rounded-check ",
+            "fill": "none",
+            "height": "16",
+            "stroke": "color(display-p3 .297 .637 .581)",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "stroke-width": "2",
+            "viewBox": "0 0 24 24",
+            "width": "16",
+            "xmlns": "http://www.w3.org/2000/svg"
+          },
+          "innerHTML": "<path d=\"M9 12l2 2l4 -4\"></path><path d=\"M12 3c7.2 0 9 1.8 9 9c0 7.2 -1.8 9 -9 9c-7.2 0 -9 -1.8 -9 -9c0 -7.2 1.8 -9 9 -9\"></path>"
+        },
+        "rect": {
+          "bottom": 27,
+          "height": 16,
+          "right": 284,
+          "width": 16,
+          "x": 775,
+          "y": 726
+        },
+        "stroke": "color(display-p3 .297 .637 .581)",
+        "width": "16"
+      },
+      "tag": "DIV",
+      "text": "If this email is registered, a password reset link has been sent"
+    }
+  },
+  "viewport": {
+    "dpr": 1,
+    "height": 769,
+    "width": 1075
+  }
+}

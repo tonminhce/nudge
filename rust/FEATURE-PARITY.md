@@ -24,9 +24,10 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 - Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
 - Quality gates: fmt clean, clippy `-D warnings` clean, **92 core + 468 server tests** pass.
-- Frontend gates: Trunk release build, native clippy/tests and `wasm32-unknown-unknown` check pass; 137 front-ui tests and 15 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
+- Frontend gates: Trunk release build, native clippy/tests and `wasm32-unknown-unknown` check pass; 32 front-core tests, 138 front-ui tests and 15 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
 - Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Real pointer interactions pass for reset, sorting, selection, row activation, popover, collapsible and toast. The welcome heading/font metrics now match the reference; authenticated product-surface parity remains open.
-- UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. These are evidence snapshots, not a full-parity certificate.
+- Auth browser checkpoint: new and existing email branches match the reference labels and layout; 8-character validation, password visibility and the password-reset notice work against the local auth endpoints. The reset toast uses the shared reference-matched `Toast` primitive, Web Animations timing, manual close and timed auto-dismiss; `parity/ui/toast-diff.json` records a zero-difference visual diff.
+- UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. The reusable DOM/style/icon/animation harness is `tools/ui-parity-harness.mjs`; toast evidence is under `parity/ui/`. These are evidence snapshots, not a full-parity certificate.
 
 ## A. Data model and metadata engine
 
@@ -86,7 +87,8 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Impersonation (server and workspace level) | **done** | 2 | start/exchange/stop, 1 d sessions, parked-cookie restore; workspace level gated on permission flags (flags land with the query runner) |
 | Invitations | **done** | 2 | verbatim tokens, resend rotation, upstream throttle set |
 | Email verification and password reset | **done** | 2 | hashed tokens, upstream error matrix, 3/15 min reset throttle, `PASSWORD_CHANGED` revocations |
-| Role, object, field and row level permission enforcement | todo | 2→4 | roles, roleTargets and flags seeded; enforcement lands with the query runner |
+| Browser email/password auth flow | **part** | 5 | Existing/new email branching, reference-matched second step, validation, password visibility and reset notice are implemented; SSO/2FA screens and full account-recovery UI remain |
+| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 and core RLS landed; advanced update/relation RLS and sharing remain |
 
 ## D. Web interface (Leptos)
 
@@ -98,7 +100,7 @@ the live reference in the browser.
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
 | Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **done** | 5 | U2 `crates/front-core`; native tests, wasm check and a live Twenty round trip pass |
-| Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 137 front-ui tests; the gallery has browser-verified sorting, selection, row activation and custom cells. Exact component and page parity remains open. |
+| Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 137 front-ui tests; the gallery has browser-verified sorting, selection, row activation and custom cells. The email/password auth flow is compared against the live reference. Exact component and page parity remains open. |
 | Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; U4b adds a Cmd/Ctrl+K command menu with navigation, create actions and debounced record search, plus a record-details side panel with Escape/focus behavior; broader side-panel pages remain |
 | Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records; U4b adds server filters, sorting, 240-slot virtualization, Person/Company create dialogs, relation selection and functional List/Kanban/Calendar view dispatch; drag/drop, groups and aggregates remain |
 | Record kanban board | **part** | 5 | U4b grouping and view dispatch landed; upstream drag/drop and live visual parity remain |

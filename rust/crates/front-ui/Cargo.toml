@@ -16,6 +16,8 @@ path = "src/bin/gen-tokens.rs"
 
 [dependencies]
 leptos = "0.8.23"
+js-sys = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 leptos = { version = "0.8.23", features = ["ssr"] }

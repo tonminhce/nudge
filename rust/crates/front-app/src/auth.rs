@@ -2,10 +2,13 @@ use front_core::client::BrowserGraphQLClient;
 use front_core::client::Endpoint;
 use front_core::client::GraphQLClient;
 use front_core::client::RequestOptions;
+use front_ui::components::{Toast, ToastTone, ToastViewport};
+use front_ui::icons::Icon;
 use front_ui::icons::IconSun;
 use front_ui::tokens::Scheme;
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
+use serde_json::json;
 
 use crate::app::server_url;
 use crate::app::write_storage;
@@ -46,25 +49,49 @@ pub fn AuthPage() -> impl IntoView {
     let email = RwSignal::new(String::new());
     let password = RwSignal::new(String::new());
     let step = RwSignal::new(AuthStep::Email);
+    let user_exists = RwSignal::new(false);
+    let password_visible = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let loading = RwSignal::new(false);
+    let notice = RwSignal::new(None::<String>);
 
     let submit = move || match step.get() {
         AuthStep::Email => {
-            if !email.get().trim().is_empty() {
+            let email_value = email.get();
+            if !email_value.trim().is_empty() {
                 error.set(None);
-                step.set(AuthStep::Password);
+                loading.set(true);
+                leptos::task::spawn_local(async move {
+                    match check_user(&email_value).await {
+                        Ok(exists) => {
+                            user_exists.set(exists);
+                            password_visible.set(false);
+                            step.set(AuthStep::Password);
+                            loading.set(false);
+                        }
+                        Err(message) => {
+                            error.set(Some(message));
+                            loading.set(false);
+                        }
+                    }
+                });
             }
         }
         AuthStep::Password => {
-            let email = email.get();
-            let password = password.get();
+            let email_value = email.get();
+            let password_value = password.get();
+            let exists = user_exists.get();
             let auth = auth.clone();
             let navigate = navigate.clone();
             error.set(None);
             loading.set(true);
             leptos::task::spawn_local(async move {
-                match sign_in(&email, &password).await {
+                let result = if exists {
+                    sign_up(&email_value, &password_value).await
+                } else {
+                    sign_in(&email_value, &password_value).await
+                };
+                match result {
                     Ok(session) => {
                         auth.token.set(Some(session.token.clone()));
                         auth.workspace_id.set(Some(session.workspace_id.clone()));
@@ -83,6 +110,21 @@ pub fn AuthPage() -> impl IntoView {
             });
         }
     };
+    let forgot_password = move || {
+        let email_value = email.get();
+        if !email_value.trim().is_empty() {
+            error.set(None);
+            leptos::task::spawn_local(async move {
+                match send_password_reset(&email_value).await {
+                    Ok(()) => notice.set(Some(
+                        "If this email is registered, a password reset link has been sent"
+                            .to_string(),
+                    )),
+                    Err(message) => error.set(Some(message)),
+                }
+            });
+        }
+    };
 
     view! {
         <main class="auth-layout">
@@ -96,34 +138,93 @@ pub fn AuthPage() -> impl IntoView {
                     event.prevent_default();
                     submit();
                 }>
+                    <input class="t-input auth-input" type="text" inputmode="email" autocomplete="email" required
+                        placeholder="Email" bind:value=email />
                     {move || match step.get() {
-                        AuthStep::Email => view! {
-                            <input class="t-input auth-input" type="email" autocomplete="email" required
-                                placeholder="Email" bind:value=email />
-                        }.into_any(),
+                        AuthStep::Email => ().into_any(),
                         AuthStep::Password => view! {
-                            <input class="t-input auth-input" type="password" autocomplete="current-password" required
-                                placeholder="Password" bind:value=password />
+                            <div class="auth-password">
+                                <input
+                                    class="t-input auth-input"
+                                    type=move || if password_visible.get() { "text" } else { "password" }
+                                    autocomplete=move || if user_exists.get() { "current-password" } else { "new-password" }
+                                    minlength=8
+                                    required
+                                    autofocus=true
+                                    placeholder="Password"
+                                    bind:value=password
+                                />
+                                <button
+                                    type="button"
+                                    class="auth-password-toggle"
+                                    aria-label=move || if password_visible.get() { "Hide password" } else { "Show password" }
+                                    on:click=move |_| password_visible.update(|visible| *visible = !*visible)
+                                >
+                                    {move || {
+                                        if password_visible.get() {
+                                            view! { <Icon name="eye-off" size=16/> }.into_any()
+                                        } else {
+                                            view! { <Icon name="eye" size=16/> }.into_any()
+                                        }
+                                    }}
+                                </button>
+                            </div>
+                            {if user_exists.get() {
+                                None
+                            } else {
+                                Some(view! { <div class="auth-password-hint">{"At least 8 characters long."}</div> })
+                            }}
                         }.into_any(),
                     }}
                     {move || error.get().map(|message| view! { <div class="auth-error" role="alert">{message}</div> })}
-                    <button class="t-button auth-submit" type="submit" disabled=move || loading.get()
-                        data-variant="solid" data-color="neutral" data-size="md" data-full-width="true" data-elevated="true">
-                        {move || if loading.get() { "Signing in..." } else { "Continue" }}
+                    <button
+                        class="t-button auth-submit"
+                        type="submit"
+                        disabled=move || {
+                            loading.get()
+                                || (step.get() == AuthStep::Password
+                                    && password.get().chars().count() < 8)
+                        }
+                        data-variant="solid"
+                        data-color="neutral"
+                        data-size="md"
+                        data-full-width="true"
+                        data-elevated="true"
+                    >
+                        {move || {
+                            if loading.get() {
+                                "Please wait...".to_string()
+                            } else {
+                                match step.get() {
+                                    AuthStep::Email => "Continue".to_string(),
+                                    AuthStep::Password if user_exists.get() => "Sign in".to_string(),
+                                    AuthStep::Password => "Sign up".to_string(),
+                                }
+                            }
+                        }}
                     </button>
+                    <Show when=move || step.get() == AuthStep::Password fallback=|| ()>
+                        <button type="button" class="auth-forgot" on:click=move |_| forgot_password()>
+                            {"Forgot your password?"}
+                        </button>
+                    </Show>
                 </form>
-                <Show when=move || step.get() == AuthStep::Password fallback=|| view! { <span /> }>
-                    <button class="auth-back" on:click=move |_| {
-                        error.set(None);
-                        step.set(AuthStep::Email);
-                    }>"Back"</button>
-                </Show>
                 <footer class="auth-footer">
                     <a href="/privacy-policy">"Privacy Policy"</a>
                     <span>"•"</span>
                     <a href="/terms">"Terms of Service"</a>
                 </footer>
             </section>
+            <Show when=move || notice.get().is_some() fallback=|| ()>
+                <ToastViewport>
+                    <Toast
+                        title=notice.get().unwrap_or_default()
+                        tone=ToastTone::Success
+                        duration=6000
+                        on_dismiss=move |_| notice.set(None)
+                    />
+                </ToastViewport>
+            </Show>
         </main>
     }
 }
@@ -131,6 +232,56 @@ pub fn AuthPage() -> impl IntoView {
 struct Session {
     token: String,
     workspace_id: String,
+}
+
+async fn check_user(email: &str) -> Result<bool, String> {
+    let response = BrowserGraphQLClient::default()
+        .post_json(&server_url(), "/auth/check-user", json!({ "email": email }))
+        .await
+        .map_err(|error| error.to_string())?;
+    response["exists"]
+        .as_bool()
+        .ok_or_else(|| "Unable to check account status".to_string())
+}
+
+async fn sign_up(email: &str, password: &str) -> Result<Session, String> {
+    let response = BrowserGraphQLClient::default()
+        .post_json(
+            &server_url(),
+            "/auth/sign-up",
+            json!({
+                "email": email,
+                "password": password,
+                "workspaceDisplayName": "Nudge",
+                "locale": "en"
+            }),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let token = response["accessToken"]
+        .as_str()
+        .ok_or_else(|| "Sign-up response did not include an access token".to_string())?
+        .to_string();
+    let workspace_id = response["workspaceId"]
+        .as_str()
+        .ok_or_else(|| "Sign-up response did not include a workspace".to_string())?
+        .to_string();
+    Ok(Session {
+        token,
+        workspace_id,
+    })
+}
+
+async fn send_password_reset(email: &str) -> Result<(), String> {
+    BrowserGraphQLClient::default()
+        .post_json(
+            &server_url(),
+            "/auth/email-password-reset-link",
+            json!({ "email": email }),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 async fn sign_in(email: &str, password: &str) -> Result<Session, String> {

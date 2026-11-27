@@ -76,6 +76,8 @@ pub enum ClientError {
     MissingData,
     #[error("transport failed: {0}")]
     Transport(String),
+    #[error("HTTP {status}: {message}")]
+    Response { status: u16, message: String },
     #[error("server URL must be an absolute http(s) URL")]
     InvalidBaseUrl,
 }
@@ -167,6 +169,22 @@ impl ReqwestGraphQLClient {
     pub fn with_client(http: reqwest::Client) -> Self {
         Self { http }
     }
+
+    pub async fn post_json(
+        &self,
+        base_url: &str,
+        path: &str,
+        body: Value,
+    ) -> Result<Value, ClientError> {
+        if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+            return Err(ClientError::InvalidBaseUrl);
+        }
+        let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+        let response = self.http.post(url).json(&body).send().await?;
+        let status = response.status().as_u16();
+        let bytes = response.bytes().await?;
+        decode_json_response(status, &bytes)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -226,6 +244,35 @@ pub type BrowserGraphQLClient = ReqwestGraphQLClient;
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, Default)]
 pub struct BrowserGraphQLClient;
+
+#[cfg(target_arch = "wasm32")]
+impl BrowserGraphQLClient {
+    pub async fn post_json(
+        &self,
+        base_url: &str,
+        path: &str,
+        body: Value,
+    ) -> Result<Value, ClientError> {
+        if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+            return Err(ClientError::InvalidBaseUrl);
+        }
+        let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+        let request = gloo_net::http::Request::post(&url)
+            .credentials(web_sys::RequestCredentials::Include)
+            .json(&body)
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        decode_json_response(status, text.as_bytes())
+    }
+}
 
 #[cfg(target_arch = "wasm32")]
 #[async_trait::async_trait(?Send)]
@@ -288,6 +335,21 @@ impl GraphQLClient for BrowserGraphQLClient {
     }
 }
 
+fn decode_json_response(status: u16, bytes: &[u8]) -> Result<Value, ClientError> {
+    let payload = serde_json::from_slice(bytes).map_err(ClientError::Json)?;
+    if (200..300).contains(&status) {
+        return Ok(payload);
+    }
+    let message = payload["messages"]
+        .as_array()
+        .and_then(|messages| messages.first())
+        .and_then(Value::as_str)
+        .or_else(|| payload["message"].as_str())
+        .unwrap_or("Request failed")
+        .to_string();
+    Err(ClientError::Response { status, message })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,5 +384,25 @@ mod tests {
             .variables(serde_json::json!({"first": 2}));
         assert_eq!(options.operation_name.as_deref(), Some("FindManyPeople"));
         assert_eq!(options.variables.unwrap()["first"], 2);
+    }
+
+    #[test]
+    fn json_response_preserves_auth_error_messages() {
+        let error = decode_json_response(
+            400,
+            br#"{"statusCode":400,"error":"INVALID_INPUT","messages":["Email is not a valid email address"]}"#,
+        )
+        .expect_err("auth error");
+        assert!(matches!(
+            error,
+            ClientError::Response { status: 400, ref message }
+                if message == "Email is not a valid email address"
+        ));
+    }
+
+    #[test]
+    fn json_response_accepts_success_payloads() {
+        let response = decode_json_response(200, br#"{"exists":false}"#).unwrap();
+        assert_eq!(response["exists"], false);
     }
 }

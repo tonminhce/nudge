@@ -82,6 +82,7 @@ pub fn Icon(
     #[prop(optional)] size: u16,
     #[prop(optional)] stroke: Option<IconStroke>,
     #[prop(optional)] color: &'static str,
+    #[prop(optional)] aria_label: Option<&'static str>,
 ) -> impl IntoView {
     let def = icon_def(name).unwrap_or(&ICON_DEFS[0]);
     let size = if size == 0 { 16 } else { size };
@@ -106,6 +107,8 @@ pub fn Icon(
             stroke-linecap="round"
             stroke-linejoin="round"
             class=class
+            aria-label=aria_label
+            aria-hidden=aria_label.map(|_| "false")
             inner_html=def.inner_svg
         />
     }

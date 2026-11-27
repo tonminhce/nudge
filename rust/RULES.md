@@ -41,7 +41,7 @@ rust-anything rules <repo> --add "<the rule, in one sentence>"
 ### R-003: Frontend parity is exact and measured live
 - **Statement:** Frontend UI must match the live Twenty CRM v2.61.0 reference exactly; verify every surface with side-by-side browser screenshots and computed styles, with zero tolerated visual differences.
 - **Why:** The user requires the port to look and behave like the real product, not an approximation.
-- **How to apply:** Keep the reference open during implementation, capture paired screenshots for every flow, and compare token/layout anchors before marking a UI unit done.
+- **How to apply:** Use `tools/ui-parity-harness.mjs` from the persistent Qoder Browser `node_repl`. For every page, component and interaction, capture the reference and Nudge at the same viewport and state with `captureSurface`, then run `diffSurfaces` and `formatDiff`. Compare DOM structure, geometry, computed layout/spacing/color/typography, SVG markup/stroke, focus/disabled state, and animation timing/keyframes. The default tolerance is zero; only explicit branding/text substitutions may be ignored. Save paired screenshots and the JSON diff as evidence, exercise the real pointer/keyboard path, and do not mark the UI unit done until the diff is empty and the interaction matches.
 
 ### R-004: The backend scope is every Twenty feature
 - **Statement:** Backend must reimplement every Twenty CRM feature, not only the daily-driver surface; keep the full wave-6 and wave-7 scope and prove behavior with live reference parity.

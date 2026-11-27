@@ -1922,6 +1922,8 @@ dependencies = [
 name = "nudge-front-ui"
 version = "0.1.0"
 dependencies = [
+ "gloo-timers",
+ "js-sys",
  "leptos",
 ]
 
