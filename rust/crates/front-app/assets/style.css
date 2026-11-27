@@ -1,5 +1,5 @@
 :root {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--t-font-family);
   font-size: 13px;
   color: var(--t-font-color-primary);
   background: var(--t-background-primary);
@@ -152,6 +152,7 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .gallery-cell h3 { margin: 0 0 14px; font-size: var(--t-font-size-md); font-weight: 600; }
 .gallery-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .gallery-action-status { min-height: 18px; margin: 12px 0 0; color: var(--t-font-color-tertiary); font-size: var(--t-font-size-sm); }
+.gallery-table-actions { margin-block: 12px; }
 .gallery-record-name { overflow: hidden; font-weight: 500; text-overflow: ellipsis; }
 .gallery-company-badge { max-width: 100%; overflow: hidden; padding: 2px 8px; border-radius: 999px; color: var(--t-font-color-secondary); background: var(--t-background-tertiary); font-size: var(--t-font-size-sm); text-overflow: ellipsis; }
 .gallery-popover-menu { display: grid; gap: 2px; }
@@ -208,9 +209,9 @@ button:disabled { cursor: not-allowed; opacity: .6; }
   font-weight: 600;
 }
 .auth-heading { display: flex; min-height: 56px; align-items: center; justify-content: center; margin-bottom: 40px; }
-.auth-heading h1 { margin: 0; font-size: var(--t-font-size-xxl); line-height: 1.25; font-weight: 600; letter-spacing: -.4px; }
+.auth-heading h1 { margin: 0; font-size: var(--t-font-size-xl); line-height: 1.2; font-weight: 600; letter-spacing: normal; }
 .auth-form { display: grid; gap: 12px; }
-.auth-input { height: 32px; padding: 0 8px; border-radius: var(--t-border-radius-md); background: color(display-p3 0 0 0 / .02); }
+.auth-input { height: 32px; padding: 8px; border-radius: var(--t-border-radius-md); background: color(display-p3 0 0 0 / .02); }
 .auth-submit { width: 100%; border-radius: var(--t-border-radius-md); font-weight: 600; }
 .auth-submit[data-color="neutral"] {
   color: var(--t-font-color-on-accent);

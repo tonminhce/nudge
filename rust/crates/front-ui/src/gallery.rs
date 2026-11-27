@@ -91,10 +91,11 @@ pub fn gallery_section(scheme: Scheme) -> impl IntoView {
     let (popover_open, set_popover_open) = signal(false);
     let (details_open, set_details_open) = signal(true);
     let (toast_visible, set_toast_visible) = signal(true);
-    let selected_ids = RwSignal::new(BTreeSet::new());
-    let sort_column = RwSignal::new(String::from("name"));
-    let sort_ascending = RwSignal::new(true);
-    let last_action = RwSignal::new(String::from("Try sorting, selection, or row activation"));
+    let (selected_ids, set_selected_ids) = signal(BTreeSet::new());
+    let (sort_column, set_sort_column) = signal(String::from("name"));
+    let (sort_ascending, set_sort_ascending) = signal(true);
+    let (last_action, set_last_action) =
+        signal(String::from("Try sorting, selection, or row activation"));
     let sorted_rows = move || {
         let mut rows = demo_rows();
         let column = sort_column.get();
@@ -115,37 +116,65 @@ pub fn gallery_section(scheme: Scheme) -> impl IntoView {
         });
         rows
     };
-    let on_sort = move |key: String| {
+    let on_sort = Callback::new(move |key: String| {
         if sort_column.get() == key {
-            sort_ascending.update(|ascending| *ascending = !*ascending);
+            set_sort_ascending.update(|ascending| *ascending = !*ascending);
         } else {
-            sort_column.set(key.clone());
-            sort_ascending.set(true);
+            set_sort_column.set(key.clone());
+            set_sort_ascending.set(true);
         }
-        last_action.set(format!("Sorted by {key}"));
-    };
-    let on_select = move |(id, selected): (String, bool)| {
+        set_last_action.set(format!("Sorted by {key}"));
+    });
+    let on_select = Callback::new(move |(id, selected): (String, bool)| {
         if selected {
-            selected_ids.update(|ids| {
+            set_selected_ids.update(|ids| {
                 ids.insert(id.clone());
             });
         } else {
-            selected_ids.update(|ids| {
+            set_selected_ids.update(|ids| {
                 ids.remove(&id);
             });
         }
-        last_action.set(format!("{id} selected: {selected}"));
+        set_last_action.set(format!("{id} selected: {selected}"));
+    });
+    let on_row_click = Callback::new(move |id: String| set_last_action.set(format!("Opened {id}")));
+    let reset_table = move |_: leptos::web_sys::MouseEvent| {
+        set_selected_ids.set(BTreeSet::new());
+        set_sort_column.set(String::from("name"));
+        set_sort_ascending.set(true);
+        set_last_action.set(String::from("Table reset"));
     };
-    let on_row_click = move |id: String| last_action.set(format!("Opened {id}"));
-    let render_cell = move |(_, column, value): (usize, usize, leptos::serde_json::Value)| {
-        if column == 0 {
-            view! { <span class="gallery-record-name">{display_value(&value)}</span> }.into_any()
-        } else if column == 2 {
-            view! { <span class="gallery-company-badge">{display_value(&value)}</span> }.into_any()
-        } else {
-            view! { <span>{display_value(&value)}</span> }.into_any()
+    let render_cell = Callback::new(
+        move |(_, column, value): (usize, usize, leptos::serde_json::Value)| {
+            if column == 0 {
+                view! { <span class="gallery-record-name">{display_value(&value)}</span> }
+                    .into_any()
+            } else if column == 2 {
+                view! { <span class="gallery-company-badge">{display_value(&value)}</span> }
+                    .into_any()
+            } else {
+                view! { <span>{display_value(&value)}</span> }.into_any()
+            }
+        },
+    );
+    let table_columns = cols.clone();
+    let table_view = Callback::new(move |_: ()| {
+        view! {
+            <RecordTable
+                columns=table_columns.clone()
+                total_rows=4
+                data=sorted_rows()
+                checkbox_column=true
+                selected_ids=selected_ids.get()
+                on_select=on_select
+                on_row_click=on_row_click
+                on_sort=on_sort
+                sort_column=sort_column.get()
+                sort_ascending=sort_ascending.get()
+                render_cell=render_cell
+            />
         }
-    };
+    });
     view! {
         <ThemeScope scheme=scheme class="gallery">
             <AppHeader><strong>{"Nudge front-ui"}</strong></AppHeader>
@@ -247,20 +276,13 @@ pub fn gallery_section(scheme: Scheme) -> impl IntoView {
                         BreadcrumbItem::new("People", "/object/people"),
                         BreadcrumbItem::current("All people"),
                     ]/>
-                    <RecordTable
-                        columns=cols.clone()
-                        total_rows=4
-                        data=sorted_rows()
-                        checkbox_column=true
-                        selected_ids=selected_ids.get()
-                        on_select=on_select
-                        on_row_click=on_row_click
-                        on_sort=on_sort
-                        sort_column=sort_column.get()
-                        sort_ascending=sort_ascending.get()
-                        render_cell=render_cell
-                    />
-                    <p class="gallery-action-status" aria-live="polite">{last_action.get()}</p>
+                    <div class="gallery-row gallery-table-actions">
+                        <Button variant=ButtonVariant::Outline size=ButtonSize::Sm on_click=Callback::new(reset_table)>
+                            {"Reset table"}
+                        </Button>
+                    </div>
+                    {move || table_view.run(())}
+                    <p class="gallery-action-status" aria-live="polite">{move || last_action.get()}</p>
                 </section>
                 <section class="gallery-cell">
                     <h3>{"Navigation & feedback"}</h3>
@@ -356,6 +378,7 @@ mod tests {
         assert!(html.contains("Keyboard shortcut: Ctrl+S"), "tooltip");
         assert!(html.contains("aria-label=\"Breadcrumb\""), "breadcrumb");
         assert!(html.contains(">All people<"), "current breadcrumb");
+        assert!(html.contains(">Reset table<"), "table reset action");
         assert!(html.contains(">Actions<"), "popover trigger");
         assert!(html.contains("Profile settings"), "popover item");
         assert!(

@@ -25,7 +25,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
 - Quality gates: fmt clean, clippy `-D warnings` clean, **92 core + 468 server tests** pass.
 - Frontend gates: Trunk release build, native clippy/tests and `wasm32-unknown-unknown` check pass; 137 front-ui tests and 15 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
-- Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Pointer/screenshot interaction remains open because Qoder reports the selected viewport as hidden.
+- Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Real pointer interactions pass for reset, sorting, selection, row activation, popover, collapsible and toast. The welcome heading/font metrics now match the reference; authenticated product-surface parity remains open.
 - UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. These are evidence snapshots, not a full-parity certificate.
 
 ## A. Data model and metadata engine
@@ -90,14 +90,15 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 
 ## D. Web interface (Leptos)
 
-The design-system crate is landed; the front logic layer is in progress. The upstream is about
-330k lines of React across 12,700 files; the Leptos port follows the unit plan in
-`research/frontend-architecture.md` and is verified against the live reference in the browser.
+The design-system crate, front logic layer, app shell and core record surfaces have landed. Exact
+full-feature UI parity remains open. The upstream is about 330k lines of React across 12,700 files;
+the Leptos port follows the unit plan in `research/frontend-architecture.md` and is compared against
+the live reference in the browser.
 
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
 | Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **done** | 5 | U2 `crates/front-core`; native tests, wasm check and a live Twenty round trip pass |
-| Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 137 front-ui tests; the gallery now exercises sorting, selection, row activation and custom cells. Exact component and page parity remains open. |
+| Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 137 front-ui tests; the gallery has browser-verified sorting, selection, row activation and custom cells. Exact component and page parity remains open. |
 | Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; U4b adds a Cmd/Ctrl+K command menu with navigation, create actions and debounced record search, plus a record-details side panel with Escape/focus behavior; broader side-panel pages remain |
 | Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records; U4b adds server filters, sorting, 240-slot virtualization, Person/Company create dialogs, relation selection and functional List/Kanban/Calendar view dispatch; drag/drop, groups and aggregates remain |
 | Record kanban board | **part** | 5 | U4b grouping and view dispatch landed; upstream drag/drop and live visual parity remain |
