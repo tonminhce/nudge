@@ -6,15 +6,21 @@ use crate::query::order::OrderError;
 use crate::query::repository::table_shape::ColumnShape;
 use crate::query::repository::table_shape::TableShape;
 
+pub mod actors;
 pub mod aggregate;
 pub mod base;
+pub mod create;
 pub mod find_many;
 pub mod find_one;
 pub mod group_by;
+pub mod mutation;
 pub mod nested;
+pub mod position;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+pub use actors::ActorContext;
+pub use actors::ActorSource;
 pub use aggregate::aggregate;
 pub use aggregate::aggregate_expression;
 pub use aggregate::aggregate_result_name;
@@ -27,6 +33,9 @@ pub use base::DEFAULT_PAGE_SIZE;
 pub use base::NESTED_RELATION_QUERY_MAX_CONCURRENCY;
 pub use base::QUERY_MAX_RECORDS;
 pub use base::QUERY_MAX_RECORDS_FROM_RELATION;
+pub use create::create_many;
+pub use create::create_one;
+pub use create::CreateArgs;
 pub use find_many::find_many;
 pub use find_many::FindManyArgs;
 pub use find_many::FindManyResult;
@@ -38,6 +47,10 @@ pub use group_by::Granularity;
 pub use group_by::GroupByDefinition;
 pub use group_by::GroupByRow;
 pub use group_by::DEFAULT_NUMBER_OF_GROUPS_LIMIT;
+pub use mutation::require_filtered_mutation;
+pub use mutation::run_mutation;
+pub use mutation::run_mutation_one;
+pub use mutation::FilteredMutationKind;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunnerError {
@@ -138,11 +151,22 @@ impl RunnerError {
         Self::new("RECORD_NOT_FOUND", "Record was not found")
     }
 
+    pub fn too_many_records_to_update() -> Self {
+        Self::new(
+            "TOO_MANY_RECORDS_TO_UPDATE",
+            format!("Cannot update more than {QUERY_MAX_RECORDS} records at once"),
+        )
+    }
+
     pub fn missing_filter() -> Self {
         Self::new("INVALID_QUERY_INPUT", "Missing filter argument")
     }
 
     pub fn from_filter(error: FilterError) -> Self {
+        Self::new(error.code(), error.message())
+    }
+
+    pub fn from_repository(error: crate::query::repository::RepositoryError) -> Self {
         Self::new(error.code(), error.message())
     }
 

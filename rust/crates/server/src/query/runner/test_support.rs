@@ -152,6 +152,7 @@ pub(crate) async fn runner_schema(seeded: &SeededWorkspace) -> crate::query::run
         &seeded.workspace_id,
         &objects,
         &maps.field_metadata_maps,
+        &maps.index_metadata_maps,
     )
     .expect("build aggregate schema")
 }

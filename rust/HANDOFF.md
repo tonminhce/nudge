@@ -134,7 +134,20 @@ R-002 (verify auth behaviour against upstream, never guess).
     `totalCount`, and defaults to 50 groups ordered by the group key. The DB-gated test
     seeds a workspace and proves company aggregate names/values, ordered person groups with
     per-group totalCount, and both timezone error codes.
-  - Next: U5 mutation runners; wave 5 (Leptos front) spec
+  - U5 `query::runner::create` + `query::runner::mutation` + actor/position helpers
+    (branch `wave4/u5`): createOne/createMany reuse the repository insert statements, stamp
+    `createdBy`/`updatedBy` actor composites, backfill `position` first/last with min-1 /
+    max+1 arithmetic, and reject over-limit creates with
+    `TOO_MANY_RECORDS_TO_UPDATE`. Filtered update/soft-delete/destroy/restore runners
+    compile through `build_mutation_statement`, expand composite write data, cast UUID /
+    JSONB / timestamp / actor-enum parameters for sqlx, and return `RECORD_NOT_FOUND` on
+    one-record mutations. Upsert detects unique index groups (including composite
+    `isIncludedInUniqueConstraint` sub-fields), loads existing records with
+    `deletedAt IS NULL`, raises
+    `UPSERT_MULTIPLE_MATCHING_RECORDS_CONFLICT`, strips `createdBy`, clears `deletedAt`,
+    and updates the existing row. The DB-gated test proves actor/position stamps, update,
+    soft-delete/restore visibility, destroy, and company upsert by `domainName.primaryLinkUrl`.
+  - Next: U6 GraphQL entry/schema, then U7 REST entry; wave 5 (Leptos front) spec
     `research/frontend-architecture.md`.
 
 ## How to run everything
