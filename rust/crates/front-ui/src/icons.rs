@@ -27,6 +27,26 @@ pub fn icon_def(name: &str) -> Option<&'static IconDef> {
     ICON_DEFS.iter().find(|def| def.tabler_name == name)
 }
 
+pub const OBJECT_ICONS: &[(&str, &str)] = &[
+    ("person", "user"),
+    ("company", "building-skyscraper"),
+    ("opportunity", "target-arrow"),
+    ("task", "checkbox"),
+    ("note", "notes"),
+    ("view", "table"),
+    ("workflow", "settings-automation"),
+    ("workflows", "settings-automation"),
+    ("agent", "lego"),
+    ("agents", "lego"),
+];
+
+pub fn object_icon(key: &str) -> Option<&'static str> {
+    OBJECT_ICONS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|&(_, tabler)| tabler)
+}
+
 pub fn icon_defs() -> &'static [IconDef] {
     ICON_DEFS
 }

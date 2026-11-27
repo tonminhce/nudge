@@ -4,8 +4,8 @@ pub mod generated;
 mod tests;
 
 use generated::{
-    DARK_SQUIRCLE, DARK_TOKENS, LIGHT_SQUIRCLE, LIGHT_TOKENS, TOKEN_COUNT_COLOR, TOKEN_COUNT_DARK,
-    TOKEN_COUNT_HUES, TOKEN_COUNT_LIGHT, TOKEN_STEPS_PER_HUE,
+    DARK_SQUIRCLE, DARK_TOKENS, LAYOUT_TOKENS, LIGHT_SQUIRCLE, LIGHT_TOKENS, TOKEN_COUNT_COLOR,
+    TOKEN_COUNT_DARK, TOKEN_COUNT_HUES, TOKEN_COUNT_LIGHT, TOKEN_STEPS_PER_HUE,
 };
 
 pub const HUES: [&str; TOKEN_COUNT_HUES] = [
@@ -79,6 +79,17 @@ pub fn squircle_table(scheme: Scheme) -> &'static [(&'static str, &'static str)]
         Scheme::Light => LIGHT_SQUIRCLE,
         Scheme::Dark => DARK_SQUIRCLE,
     }
+}
+
+pub fn layout_table() -> &'static [(&'static str, &'static str)] {
+    LAYOUT_TOKENS
+}
+
+pub fn layout(name: &str) -> Option<&'static str> {
+    LAYOUT_TOKENS
+        .iter()
+        .find(|(k, _)| *k == name)
+        .map(|&(_, v)| v)
 }
 
 pub fn token(scheme: Scheme, name: &str) -> Option<&'static str> {
@@ -178,6 +189,7 @@ pub fn generate_css(scheme: Scheme) -> String {
     ));
     out.push('\n');
     out.push_str(&render_squircle(scheme, squircle_table(scheme)));
+    out.push_str(&render_block(".light,\n  .dark", LAYOUT_TOKENS));
     out.push_str("}\n");
     out
 }
