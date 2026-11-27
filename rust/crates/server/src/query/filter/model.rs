@@ -735,6 +735,12 @@ fn compile_scalar_filter(
         param_suffix: &suffixes.take(),
         second_param_suffix: &suffixes.take(),
         use_direct_table_reference,
+        cast_uuid_parameters: matches!(
+            field_type,
+            FieldMetadataType::Uuid
+                | FieldMetadataType::Relation
+                | FieldMetadataType::MorphRelation
+        ),
     })?;
 
     let clause = WhereClause::sql(JoinOp::And, parts.sql.clone());
@@ -879,6 +885,7 @@ fn compile_composite_filter(
                 param_suffix: &suffixes.take(),
                 second_param_suffix: &suffixes.take(),
                 use_direct_table_reference,
+                cast_uuid_parameters: false,
             })?;
 
         let sql = parts.sql.clone();

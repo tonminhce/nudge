@@ -114,8 +114,19 @@ R-002 (verify auth behaviour against upstream, never guess).
     (`engine/metadata-modules/flat-object-metadata/types/flat-object-metadata.type.ts` @ the tag).
     Field/index/option/search-field identifiers stay empty on load (deferred; nothing in the
     record path reads them yet — listed under known gaps).
-  - Next: U3 (`find_many`/`find_one` + relation joins) builds on these shapes and statements;
-    wave 5 (Leptos front) spec `research/frontend-architecture.md`.
+  - U3 `query::runner` (branch `wave4/u3`): a workspace model over the flat maps + table
+    shapes, `RunnerSchema::build`, the filter schema adapter, `find_many` with the upstream
+    truthiness conflict matrix, page size (`first ?? last ?? 200`, capped), keyset cursor
+    filters from the shared `getEffectiveScanOrder` model, the automatic `id` tie-breaker,
+    `deletedAt IS NULL`, one aggregate `COUNT(*)`, to-one filter/order joins, EXISTS-based
+    to-many filters, batched nested relation loading (to-one by id and to-many grouped by the
+    reverse join column with the 60-per-parent cap), and `find_one` with required-filter +
+    `RECORD_NOT_FOUND` semantics. Result formatting rebuilds composite field objects and maps
+    the null-equivalent empty string back to null. The DB-gated test seeds a workspace and
+    exercises composite filters, relation filters/orders, pagination totals, nested to-one
+    loading, findOne and arg conflicts. HTTP/GraphQL wiring remains for wave 4 U6/U7.
+  - Next: U4 aggregates/group-by, then U5 mutation runners; wave 5 (Leptos front) spec
+    `research/frontend-architecture.md`.
 
 ## How to run everything
 ```
