@@ -24,6 +24,8 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 - Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
 - Quality gates: fmt clean, clippy `-D warnings` clean, **92 core + 468 server tests** pass.
+- Frontend gates: Trunk build, native clippy/tests and `wasm32-unknown-unknown` check pass; the app is served at `http://127.0.0.1:8080`.
+- UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. These are evidence snapshots, not a full-parity certificate.
 
 ## A. Data model and metadata engine
 
@@ -93,17 +95,17 @@ The design-system crate is landed; the front logic layer is in progress. The ups
 
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
-| Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **part** | 5 | U2 `crates/front-core` in progress on `wave5/u2`; live metadata payloads captured from the reference |
-| Design system: tokens, primitives, icons | **part** | 5 | U1 landed; `wave5/u1b` completes the upstream primitive inventory, gallery and token-anchor tests |
-| Application shell, navigation, command menu | todo | 5 | |
-| Record table: virtualised, drag and drop, groups, aggregates | todo | 5 | 101k LOC upstream, the largest area |
+| Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **done** | 5 | U2 `crates/front-core`; native tests, wasm check and a live Twenty round trip pass |
+| Design system: tokens, primitives, icons | **part** | 5 | tokens, layout metrics and standard object icons landed (94 tests); remaining primitives and gallery are `wave5/u1b` follow-up |
+| Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; command menu and side panel remain |
+| Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records and renders the People table; U4b owns virtualization, filters, sorting and inline editing |
 | Record kanban board | todo | 5 | |
 | Record calendar and list views | todo | 5 | |
-| Record show page and per type field display and input | todo | 5 | |
+| Record show page and per type field display and input | **part** | 5 | U4a record route and live show page landed; per-type editors and relation fields remain |
 | Views, filters, sorts, group by | todo | 5 | 27 view operations |
 | Side panel (57 kinds) | todo | 5 | |
 | Settings pages | todo | 5 | 86k LOC upstream |
-| Auth and onboarding screens | todo | 5 | 7 onboarding steps |
+| Auth and onboarding screens | **part** | 5 | U3/U4a workspace Email → Password flow matches the captured reference DOM/layout; full browser verification awaits the Qoder connector runtime |
 | Dashboards and page layouts | todo | 5 | |
 | Spreadsheet import | todo | 6 | |
 | AI chat | todo | 7 | |
