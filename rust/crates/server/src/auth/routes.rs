@@ -66,7 +66,11 @@ async fn check_user(
         .ok_or_else(|| super::error::AuthError::invalid_input("email is required"))?
         .to_string();
 
-    let exists = service::check_user_exists(&state, &email).await?;
+    let exists = if service::normalize_email(&email).is_err() {
+        false
+    } else {
+        service::check_user_exists(&state, &email).await?
+    };
 
     Ok((StatusCode::OK, Json(json!({ "exists": exists }))))
 }

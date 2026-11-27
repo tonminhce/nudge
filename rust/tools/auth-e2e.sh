@@ -92,6 +92,10 @@ post /auth/check-user "{\"email\":\"$EMAIL\"}"
 check "check user exists" 200 "$STATUS"
 check_value "  exists is true" "$(printf '%s' "$BODY" | grep -c '"exists":true')"
 
+post /auth/check-user "{\"email\":\"not-an-email\"}"
+check "check user with invalid email" 200 "$STATUS"
+check_value "  invalid email is treated as new" "$(printf '%s' "$BODY" | grep -c '"exists":false')"
+
 post /auth/sign-up "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"subdomain\":\"$SUBDOMAIN-again\"}"
 check "duplicate sign up rejected" 403 "$STATUS"
 check_value "  error code" "$([ "$(error_code)" = "USER_ALREADY_EXISTS" ] && echo 1 || echo 0)"
