@@ -1,6 +1,8 @@
 {
-  "matched": true,
-  "tolerance": 0,
-  "differenceCount": 0,
-  "differences": []
+  "matched": false,
+  "stale": true,
+  "legacyTolerance": 0,
+  "differenceCount": null,
+  "differences": [],
+  "reason": "Legacy ledger did not record selectors or ignores and predates the strict all-attribute harness; recapture required."
 }

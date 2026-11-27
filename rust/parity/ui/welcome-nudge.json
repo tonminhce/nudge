@@ -1,4 +1,22 @@
 {
+  "capture": {
+    "selectors": {
+      "layout": "main",
+      "logo": ".auth-logo",
+      "badge": ".auth-workspace-badge",
+      "heading": ".auth-heading h1",
+      "form": ".auth-form",
+      "email": ".auth-input",
+      "submit": ".auth-submit",
+      "footer": ".auth-footer",
+      "privacy": "a[href*=privacy]",
+      "terms": "a[href*=terms]"
+    },
+    "settleMs": 600,
+    "screenshot": true,
+    "format": "png",
+    "fullPage": false
+  },
   "document": {
     "bodyBackground": "color(display-p3 0.945 0.945 0.945)",
     "bodyFont": "Inter, sans-serif",
@@ -10,7 +28,9 @@
   "selectors": {
     "badge": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "auth-workspace-badge"
+      },
       "children": [
         {
           "rect": {
@@ -99,6 +119,7 @@
       "animations": [],
       "attributes": {
         "autocomplete": "email",
+        "class": "t-input auth-input",
         "placeholder": "Email"
       },
       "children": [],
@@ -174,7 +195,9 @@
     },
     "footer": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "auth-footer"
+      },
       "children": [
         {
           "rect": {
@@ -285,7 +308,9 @@
     },
     "form": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "auth-form"
+      },
       "children": [
         {
           "rect": {
@@ -458,7 +483,9 @@
     },
     "layout": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "auth-layout"
+      },
       "children": [
         {
           "rect": {
@@ -566,6 +593,7 @@
     "logo": {
       "animations": [],
       "attributes": {
+        "class": "auth-logo",
         "href": "/welcome"
       },
       "children": [
@@ -753,6 +781,12 @@
     "submit": {
       "animations": [],
       "attributes": {
+        "class": "t-button auth-submit",
+        "data-color": "neutral",
+        "data-elevated": "true",
+        "data-full-width": "true",
+        "data-size": "md",
+        "data-variant": "solid",
         "type": "submit"
       },
       "children": [

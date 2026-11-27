@@ -1,4 +1,22 @@
 {
+  "capture": {
+    "selectors": {
+      "layout": "#root > div:last-child",
+      "logo": "a[href=\"/welcome\"]",
+      "badge": "a[href=\"/welcome\"] + div > span",
+      "heading": "#root .sfyinng > div",
+      "form": "form",
+      "email": "input[autocomplete=email]",
+      "submit": "button[type=submit]",
+      "footer": "#root .s1c6e69w",
+      "privacy": "a[href*=privacy]",
+      "terms": "a[href*=terms]"
+    },
+    "settleMs": 600,
+    "screenshot": true,
+    "format": "png",
+    "fullPage": false
+  },
   "document": {
     "bodyBackground": "color(display-p3 0.945 0.945 0.945)",
     "bodyFont": "Inter, sans-serif",
@@ -11,20 +29,23 @@
     "badge": {
       "animations": [],
       "attributes": {
-        "style": "--tw-avatar-color: color(display-p3 .222 .25 .128); --tw-avatar-background: color(display-p3 .896 .94 .76); --tw-avatar-border: none;"
+        "class": "_root_1bbob_1",
+        "data-shape": "square",
+        "data-size": "lg",
+        "style": "--tw-avatar-color: color(display-p3 .11 .235 .219); --tw-avatar-background: color(display-p3 .831 .949 .92); --tw-avatar-border: none;"
       },
       "children": [
         {
           "rect": {
             "bottom": 496.015625,
             "height": 16,
-            "right": 511.28125,
-            "width": 8.4375,
-            "x": 555.28125,
+            "right": 508.984375,
+            "width": 13.046875,
+            "x": 552.96875,
             "y": 256.984375
           },
           "tag": "SPAN",
-          "text": "R"
+          "text": "W"
         }
       ],
       "found": true,
@@ -46,14 +67,14 @@
         "animationName": "none",
         "animationPlayState": "running",
         "animationTimingFunction": "ease",
-        "background": "color(display-p3 0.896 0.94 0.76) none repeat scroll 0% 0% / auto padding-box border-box",
-        "backgroundColor": "color(display-p3 0.896 0.94 0.76)",
+        "background": "color(display-p3 0.831 0.949 0.92) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "color(display-p3 0.831 0.949 0.92)",
         "backgroundImage": "none",
-        "border": "0px none color(display-p3 0.222 0.25 0.128)",
+        "border": "0px none color(display-p3 0.11 0.235 0.219)",
         "borderRadius": "4px",
         "bottom": "0px",
         "boxShadow": "none",
-        "color": "color(display-p3 0.222 0.25 0.128)",
+        "color": "color(display-p3 0.11 0.235 0.219)",
         "display": "flex",
         "flexDirection": "row",
         "flexWrap": "nowrap",
@@ -76,7 +97,7 @@
         "minHeight": "auto",
         "minWidth": "auto",
         "opacity": "1",
-        "outline": "color(display-p3 0.222 0.25 0.128) none 3px",
+        "outline": "color(display-p3 0.11 0.235 0.219) none 3px",
         "overflow": "hidden",
         "overflowX": "hidden",
         "overflowY": "hidden",
@@ -95,12 +116,13 @@
       },
       "svg": null,
       "tag": "SPAN",
-      "text": "R"
+      "text": "W"
     },
     "email": {
       "animations": [],
       "attributes": {
         "autocomplete": "email",
+        "class": "s1hpd1gt",
         "id": "_r_3_",
         "placeholder": "Email",
         "style": "--s1hpd1gt-0: var(--t-border-color-medium); --s1hpd1gt-1: var(--t-border-radius-md); --s1hpd1gt-2: var(--t-font-family); --s1hpd1gt-3: var(--t-font-size-md); --s1hpd1gt-4: var(--t-font-weight-regular); --s1hpd1gt-5: 32px; --s1hpd1gt-6: none; --s1hpd1gt-7: var(--t-spacing-2); --s1hpd1gt-8: var(--t-spacing-2); --s1hpd1gt-9: var(--t-spacing-2); --s1hpd1gt-10: 100%; --s1hpd1gt-11: var(--t-color-blue);",
@@ -180,7 +202,9 @@
     },
     "footer": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "s1c6e69w"
+      },
       "children": [
         {
           "rect": {
@@ -291,7 +315,9 @@
     },
     "form": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "s5om775"
+      },
       "children": [
         {
           "rect": {
@@ -390,27 +416,43 @@
     },
     "heading": {
       "animations": [],
-      "attributes": {},
-      "children": [],
+      "attributes": {
+        "class": "sdtdivd",
+        "style": "--sdtdivd-0: var(--t-spacing-4);"
+      },
+      "children": [
+        {
+          "rect": {
+            "bottom": 406,
+            "height": 24.015625,
+            "right": 392.25,
+            "width": 290.5,
+            "x": 392.25,
+            "y": 338.984375
+          },
+          "tag": "DIV",
+          "text": "Welcome, WL Cookie Second."
+        }
+      ],
       "found": true,
       "matchCount": 1,
       "rect": {
         "bottom": 406,
         "height": 24.015625,
-        "right": 416.96875,
-        "width": 241.0625,
-        "x": 416.96875,
+        "right": 392.25,
+        "width": 290.5,
+        "x": 392.25,
         "y": 338.984375
       },
       "style": {
         "alignItems": "normal",
         "alignSelf": "auto",
         "animationDelay": "0s",
-        "animationDuration": "0.3s",
+        "animationDuration": "0s",
         "animationFillMode": "none",
-        "animationName": "animated-ease-in-animatedEaseInFadeIn-f5jqen4",
+        "animationName": "none",
         "animationPlayState": "running",
-        "animationTimingFunction": "linear",
+        "animationTimingFunction": "ease",
         "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
         "backgroundColor": "rgba(0, 0, 0, 0)",
         "backgroundImage": "none",
@@ -435,7 +477,7 @@
         "left": "auto",
         "letterSpacing": "normal",
         "lineHeight": "24.024px",
-        "margin": "0px",
+        "margin": "16px 0px",
         "maxHeight": "none",
         "maxWidth": "none",
         "minHeight": "0px",
@@ -455,64 +497,30 @@
         "transform": "none",
         "transition": "all",
         "whiteSpace": "normal",
-        "width": "241.062px",
+        "width": "290.5px",
         "zIndex": "auto"
       },
       "svg": null,
       "tag": "DIV",
-      "text": "Welcome, Reference HQ."
+      "text": "Welcome, WL Cookie Second."
     },
     "layout": {
       "animations": [],
-      "attributes": {},
+      "attributes": {
+        "class": "sltii1y"
+      },
       "children": [
         {
           "rect": {
-            "bottom": 486.015625,
-            "height": 80,
-            "right": 513.5,
-            "width": 48,
-            "x": 513.5,
-            "y": 202.984375
+            "bottom": 0,
+            "height": 769,
+            "right": 0,
+            "width": 1075,
+            "x": 0,
+            "y": 0
           },
           "tag": "DIV",
-          "text": "R"
-        },
-        {
-          "rect": {
-            "bottom": 390,
-            "height": 56.015625,
-            "right": 416.96875,
-            "width": 241.0625,
-            "x": 416.96875,
-            "y": 322.984375
-          },
-          "tag": "DIV",
-          "text": "Welcome, Reference HQ."
-        },
-        {
-          "rect": {
-            "bottom": 242,
-            "height": 124,
-            "right": 40,
-            "width": 995,
-            "x": 40,
-            "y": 403
-          },
-          "tag": "DIV",
-          "text": "Continue"
-        },
-        {
-          "rect": {
-            "bottom": 203,
-            "height": 15,
-            "right": 438.4375,
-            "width": 198.140625,
-            "x": 438.421875,
-            "y": 551
-          },
-          "tag": "DIV",
-          "text": "Privacy Policy•Terms of Service"
+          "text": "WWelcome, WL Cookie Second.ContinuePrivacy Policy•Terms of Service"
         }
       ],
       "found": true,
@@ -526,7 +534,7 @@
         "y": 0
       },
       "style": {
-        "alignItems": "center",
+        "alignItems": "normal",
         "alignSelf": "auto",
         "animationDelay": "0s",
         "animationDuration": "0s",
@@ -534,12 +542,12 @@
         "animationName": "none",
         "animationPlayState": "running",
         "animationTimingFunction": "ease",
-        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
-        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "background": "color(display-p3 0.988 0.988 0.988) none repeat scroll 0% 0% / auto padding-box border-box",
+        "backgroundColor": "color(display-p3 0.988 0.988 0.988)",
         "backgroundImage": "none",
         "border": "0px none color(display-p3 0.2 0.2 0.2)",
         "borderRadius": "0px",
-        "bottom": "auto",
+        "bottom": "0px",
         "boxShadow": "none",
         "color": "color(display-p3 0.2 0.2 0.2)",
         "display": "flex",
@@ -553,28 +561,28 @@
         "gridTemplateColumns": "none",
         "gridTemplateRows": "none",
         "height": "769px",
-        "inset": "auto",
-        "justifyContent": "center",
-        "left": "auto",
+        "inset": "0px",
+        "justifyContent": "normal",
+        "left": "0px",
         "letterSpacing": "normal",
         "lineHeight": "normal",
         "margin": "0px",
         "maxHeight": "none",
         "maxWidth": "none",
-        "minHeight": "auto",
-        "minWidth": "auto",
+        "minHeight": "0px",
+        "minWidth": "0px",
         "opacity": "1",
         "outline": "color(display-p3 0.2 0.2 0.2) none 3px",
         "overflow": "visible",
         "overflowX": "visible",
         "overflowY": "visible",
-        "padding": "40px",
-        "position": "static",
-        "right": "auto",
+        "padding": "0px",
+        "position": "relative",
+        "right": "0px",
         "textAlign": "start",
         "textDecoration": "none",
         "textTransform": "none",
-        "top": "auto",
+        "top": "0px",
         "transform": "none",
         "transition": "all",
         "whiteSpace": "normal",
@@ -583,11 +591,13 @@
       },
       "svg": null,
       "tag": "DIV",
-      "text": "RWelcome, Reference HQ.ContinuePrivacy Policy•Terms of Service"
+      "text": "WWelcome, WL Cookie Second.ContinuePrivacy Policy•Terms of Service"
     },
     "logo": {
       "animations": [],
       "attributes": {
+        "class": "uexihlt",
+        "data-discover": "true",
         "href": "/welcome"
       },
       "children": [
@@ -755,6 +765,12 @@
     "submit": {
       "animations": [],
       "attributes": {
+        "class": "_button_1tycy_1 _button_1mfb6_1",
+        "data-color": "neutral",
+        "data-elevated": "true",
+        "data-full-width": "true",
+        "data-size": "md",
+        "data-variant": "solid",
         "tabindex": "0",
         "type": "submit"
       },

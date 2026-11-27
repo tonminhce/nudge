@@ -17,18 +17,18 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | E. Automations and integrations | ~60k LOC server | todo |
 | F. Platform and operations | ~10k LOC | **part** |
 
-### Measured checkpoints (2026-11-27)
+### Measured checkpoints (2026-11-28)
 - Wave 4 live record parity: `tools/parity-compare.py --records` — **18/18 captures match** the real `twentycrm/twenty:v2.61.0` server on the same database.
 - REST error/shape parity: `tools/parity-rest-errors.py` — **18/18 probes match** live.
 - Auth + metadata + record E2E: `tools/auth-e2e.sh` — **372/372 checks pass**.
 - Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
 - Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
 - Quality gates: fmt clean, clippy `-D warnings` clean, **5 core + 526 server tests** pass; `tools/test-workspace.sh` runs the full workspace serially against an isolated Postgres database and drops it on exit.
-- Frontend gates: `tools/build-frontend.sh`, native clippy/tests and `wasm32-unknown-unknown` check pass; 32 front-core tests, 138 front-ui tests and 16 front-app tests pass. The app is served at `http://127.0.0.1:3000`.
+- Frontend gates: `tools/build-frontend.sh`, native clippy/tests and `wasm32-unknown-unknown` check pass; 32 front-core tests, 138 front-ui tests and 17 front-app tests pass. The app is served at `http://127.0.0.1:3000`. The release wasm is 2.4MB; the missing `target_features` section warning remains open until `wasm-opt` is available.
 - Browser checkpoint: the built-in Browser renders `/gallery` with 8 data rows, no malformed row attributes and no horizontal overflow. Real pointer interactions pass for reset, sorting, selection, row activation, popover, collapsible and toast. The welcome heading/font metrics now match the reference; authenticated product-surface parity remains open.
-- Auth browser checkpoint: new and existing email branches match the reference labels and layout; malformed email advances to sign-up, editing email returns to account selection, invalid email or short password keeps submit disabled, password visibility and the password-reset notice work against the local auth endpoints. The reset toast uses the shared reference-matched `Toast` primitive, Web Animations timing, manual close and timed auto-dismiss; `parity/ui/toast-diff.json` records a zero-difference visual diff.
-- Auth surface checkpoint: the exact upstream Inter 400/500/600 font files are bundled. `parity/ui/welcome-diff.json`, `parity/ui/password-diff.json` and `parity/ui/signin-diff.json` each record a zero-difference visual diff against Twenty 2.61.0.
-- UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. The reusable DOM/style/icon/animation harness is `tools/ui-parity-harness.mjs`; toast and auth evidence is under `parity/ui/`. These are evidence snapshots, not a full-parity certificate.
+- Auth browser checkpoint: email branching, validation, password visibility and reset notice are implemented. A strict live recapture of `/welcome` is stored in `parity/ui/welcome-diff.json`; it currently records 56 open differences at tolerance 0, including DOM wrappers, computed box styles and focus attributes. Password, sign-in and toast ledgers are legacy evidence and require recapture.
+- Auth surface checkpoint: the exact upstream Inter 400/500/600 font files are bundled. `parity/ui/welcome-reference.json`, `welcome-nudge.json` and `welcome-diff.json` are regenerated with the strict harness; full auth-surface parity remains open.
+- UI evidence: reference/Nudge auth captures are in `parity/auth/`; live People-table and record-show captures are in `parity/people-index/` and `parity/record-show/`. The reusable DOM/style/icon/animation harness is `tools/ui-parity-harness.mjs`; it records all attributes plus selector/tolerance/ignore metadata, and `tools/ui-parity-harness.test.mjs` covers strict diff behavior. Evidence under `parity/ui/` is not a full-parity certificate.
 
 ## A. Data model and metadata engine
 

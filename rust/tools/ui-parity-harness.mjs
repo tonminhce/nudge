@@ -57,7 +57,6 @@ function browserExtractor(selectors) {
         tag: node.tagName,
         text: node.textContent?.replace(/\s+/g, ' ').trim() ?? '',
         attributes: Object.fromEntries([...node.attributes]
-          .filter((attribute) => !attribute.name.startsWith('data-') && attribute.name !== 'class')
           .map((attribute) => [attribute.name, attribute.value])),
         rect: rectOf(node),
         style: styleOf(node),
@@ -124,14 +123,28 @@ export async function captureSurface(tab, selectors, options = {}) {
   const screenshot = options.screenshot === false
     ? null
     : await tab.screenshot({ format: options.format ?? 'png', fullPage: options.fullPage ?? false });
-  return { ...metrics, screenshot };
+  return {
+    capture: {
+      selectors,
+      settleMs,
+      screenshot: options.screenshot !== false,
+      format: options.format ?? 'png',
+      fullPage: options.fullPage ?? false,
+    },
+    ...metrics,
+    screenshot,
+  };
 }
 
 export function diffSurfaces(reference, nudge, options = {}) {
   const tolerance = options.tolerance ?? 0;
   const ignored = options.ignore ?? [];
-  const { screenshot: referenceScreenshot, ...referenceMetrics } = reference;
-  const { screenshot: nudgeScreenshot, ...nudgeMetrics } = nudge;
+  const {
+    screenshot: referenceScreenshot,
+    capture: referenceCapture,
+    ...referenceMetrics
+  } = reference;
+  const { screenshot: nudgeScreenshot, capture: nudgeCapture, ...nudgeMetrics } = nudge;
   const referenceFlat = flatten(referenceMetrics);
   const nudgeFlat = flatten(nudgeMetrics);
   const keys = [...new Set([...Object.keys(referenceFlat), ...Object.keys(nudgeFlat)])].sort();
@@ -149,9 +162,6 @@ export function diffSurfaces(reference, nudge, options = {}) {
     if (ignored.some((path) => key === path || key.startsWith(`${path}.`) || key.startsWith(`${path}[`))) {
       continue;
     }
-    if (key.endsWith('.screenshot') || key === 'document.url' || key === 'document.title') {
-      continue;
-    }
     const expected = referenceFlat[key];
     const actual = nudgeFlat[key];
     if (typeof expected === 'number' && typeof actual === 'number') {
@@ -165,6 +175,12 @@ export function diffSurfaces(reference, nudge, options = {}) {
   return {
     matched: differences.length === 0,
     tolerance,
+    visualOnly: options.visualOnly === true,
+    ignored: [...new Set(ignored)].sort(),
+    capture: {
+      reference: referenceCapture ?? null,
+      nudge: nudgeCapture ?? null,
+    },
     differenceCount: differences.length,
     differences,
   };
@@ -181,6 +197,13 @@ export async function saveCapture(capture, name, directory = 'parity/ui') {
     await writeFile(screenshotPath, screenshot);
   }
   return { jsonPath, screenshotPath };
+}
+
+export async function saveDiff(diff, name, directory = 'parity/ui') {
+  await mkdir(directory, { recursive: true });
+  const jsonPath = `${directory}/${name}.json`;
+  await writeFile(jsonPath, JSON.stringify(diff, null, 2));
+  return { jsonPath };
 }
 
 export function formatDiff(diff) {
