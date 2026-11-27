@@ -1553,3 +1553,792 @@ pub fn builder_failure_message_for(
 ) -> GraphQlError {
     GraphQlError::builder_failure(fallback, report)
 }
+
+fn retyped_create_entity(
+    action: &mut crate::metadata::actions::UniversalCreateAction,
+) -> Option<crate::metadata::actions::MetadataName> {
+    let metadata_name = action.metadata_name;
+
+    let Some(UniversalFlatEntity::Other { entity, .. }) = &action.flat_entity else {
+        return Some(metadata_name);
+    };
+
+    if !matches!(
+        metadata_name,
+        MetadataName::ObjectMetadata
+            | MetadataName::FieldMetadata
+            | MetadataName::Index
+            | MetadataName::FieldMetadataOption
+            | MetadataName::SearchFieldMetadata
+    ) {
+        return Some(metadata_name);
+    }
+
+    match UniversalFlatEntity::from_value(metadata_name, entity.clone()) {
+        Ok(typed) => {
+            action.flat_entity = Some(typed);
+            Some(metadata_name)
+        }
+        Err(_) => None,
+    }
+}
+
+pub fn normalize_create_action_entities(
+    actions: &mut Vec<crate::metadata::actions::UniversalAction>,
+) {
+    use crate::metadata::actions::UniversalAction;
+
+    for action in actions.iter_mut() {
+        let UniversalAction::Create(create) = action else {
+            continue;
+        };
+
+        if retyped_create_entity(create).is_none() {
+            continue;
+        }
+
+        if create.id.is_none() {
+            create.id = Some(Uuid::new_v4().to_string());
+        }
+    }
+
+    fold_fields_into_object_creates(actions);
+}
+
+fn fold_fields_into_object_creates(actions: &mut Vec<crate::metadata::actions::UniversalAction>) {
+    use crate::metadata::actions::UniversalAction;
+
+    let mut object_positions: Vec<(usize, String)> = Vec::new();
+
+    for (position, action) in actions.iter().enumerate() {
+        let UniversalAction::Create(create) = action else {
+            continue;
+        };
+
+        if create.metadata_name != MetadataName::ObjectMetadata {
+            continue;
+        }
+
+        let Some(UniversalFlatEntity::ObjectMetadata(object)) = &create.flat_entity else {
+            continue;
+        };
+
+        object_positions.push((position, object.universal_identifier.clone()));
+    }
+
+    if object_positions.is_empty() {
+        return;
+    }
+
+    let mut folds: Vec<(usize, usize, UniversalFlatFieldMetadata, Option<String>)> = Vec::new();
+
+    for (position, action) in actions.iter().enumerate() {
+        let UniversalAction::Create(create) = action else {
+            continue;
+        };
+
+        if create.metadata_name != MetadataName::FieldMetadata {
+            continue;
+        }
+
+        let Some(UniversalFlatEntity::FieldMetadata(field)) = &create.flat_entity else {
+            continue;
+        };
+
+        if field.field_type.is_relation_or_morph() {
+            continue;
+        }
+
+        let Some((object_position, _)) = object_positions
+            .iter()
+            .find(|(_, identifier)| identifier == &field.object_metadata_universal_identifier)
+        else {
+            continue;
+        };
+
+        folds.push((
+            *object_position,
+            position,
+            (**field).clone(),
+            create.id.clone(),
+        ));
+    }
+
+    let removals: std::collections::HashSet<usize> =
+        folds.iter().map(|(_, position, _, _)| *position).collect();
+
+    for (object_position, _, field, field_id) in folds {
+        let UniversalAction::Create(object_create) = &mut actions[object_position] else {
+            continue;
+        };
+
+        if let Some(id) = field_id {
+            object_create
+                .field_id_by_universal_identifier
+                .get_or_insert_with(Default::default)
+                .insert(field.universal_identifier.clone(), id);
+        }
+
+        object_create.universal_flat_field_metadatas.push(field);
+    }
+
+    let kept: Vec<crate::metadata::actions::UniversalAction> = actions
+        .iter()
+        .enumerate()
+        .filter(|(position, _)| !removals.contains(position))
+        .map(|(_, action)| action.clone())
+        .collect();
+
+    actions.clone_from(&kept);
+}
+
+#[cfg(test)]
+mod db_tests {
+    use nudge_core::NodeEnv;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::metadata::api::graphql::FieldSelection;
+    use crate::metadata::api::handlers::dispatch;
+    use crate::metadata::api::handlers::ResponsePayload;
+    use crate::state::AppState;
+
+    static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    fn test_config(pg_database_url: String) -> nudge_core::Config {
+        nudge_core::Config {
+            node_env: NodeEnv::Test,
+            node_port: 3999,
+            server_url: "http://localhost:3999".to_string(),
+            pg_database_url,
+            pg_pool_max_connections: 4,
+            redis_url: "redis://127.0.0.1:6399".to_string(),
+            redis_cache_prefix: String::new(),
+            app_secret: "integration-test-secret".to_string(),
+            encryption_key: None,
+            fallback_encryption_key: None,
+            access_token_expires_in_secs: 1800,
+            refresh_token_expires_in_secs: 3600,
+            login_token_expires_in_secs: 900,
+            workspace_agnostic_token_expires_in_secs: 1800,
+            refresh_token_reuse_grace_period_secs: 60,
+            frontend_url: "http://localhost:3999".to_string(),
+            auth_cookie_same_site: "lax".to_string(),
+            auth_cookie_allowed_origins: String::new(),
+            session_absolute_lifetime_secs: 3600,
+            session_idle_timeout_secs: 3600,
+            is_cloudflare_geolocation_enabled: false,
+            workspace_schema_ddl_locked: false,
+        }
+    }
+
+    async fn test_state(url: &str) -> AppState {
+        let state = AppState::connect(&test_config(url.to_string()))
+            .await
+            .expect("connecting the test state");
+
+        crate::workspace_migrations::ddl::test_support::migrate_core(url)
+            .await
+            .expect("running core migrations");
+
+        state
+    }
+
+    async fn create_workspace(state: &AppState) -> (Uuid, String) {
+        let workspace_id = Uuid::new_v4();
+        let application_id = Uuid::new_v4();
+        let application_universal_identifier = Uuid::new_v4().to_string();
+        let schema_name = nudge_core::ids::workspace_schema_name(&workspace_id);
+        let role_id = Uuid::new_v4();
+        let subdomain = format!("api-{}", &Uuid::new_v4().simple().to_string()[..10]);
+
+        let mut transaction = state.core_pool.begin().await.expect("fixture tx");
+
+        sqlx::query(
+            "INSERT INTO core.\"workspace\" \
+             (id, \"displayName\", \"inviteHash\", \"activationStatus\", subdomain, \
+              \"workspaceCustomApplicationId\", \"isPasswordAuthEnabled\", \"databaseSchema\") \
+             VALUES ($1, 'API Test', $2, 'PENDING_CREATION', $3, $4, true, $5)",
+        )
+        .bind(workspace_id)
+        .bind(Uuid::new_v4())
+        .bind(&subdomain)
+        .bind(application_id)
+        .bind(&schema_name)
+        .execute(&mut *transaction)
+        .await
+        .expect("inserting the workspace");
+
+        sqlx::query(
+            "INSERT INTO core.\"application\" \
+             (id, \"universalIdentifier\", name, \"sourceType\", state, \"sourcePath\", \
+              \"workspaceId\") \
+             VALUES ($1, $2, 'API Test Application', 'LOCAL', 'INSTALLED', '', $3)",
+        )
+        .bind(application_id)
+        .bind(
+            Uuid::parse_str(&application_universal_identifier)
+                .expect("application universal identifier is a uuid"),
+        )
+        .bind(workspace_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("inserting the application");
+
+        sqlx::query(
+            "INSERT INTO core.\"role\" \
+             (id, \"universalIdentifier\", label, \"applicationId\", \"workspaceId\") \
+             VALUES ($1, $2, 'Member', $3, $4)",
+        )
+        .bind(role_id)
+        .bind(Uuid::new_v4())
+        .bind(application_id)
+        .bind(workspace_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("inserting the default role");
+
+        sqlx::query(
+            "UPDATE core.\"workspace\" SET \"activationStatus\" = 'CREATED', \
+             \"defaultRoleId\" = $2 WHERE id = $1",
+        )
+        .bind(workspace_id)
+        .bind(role_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("activating the workspace");
+
+        sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS \"{schema_name}\""))
+            .execute(&mut *transaction)
+            .await
+            .expect("creating the workspace schema");
+
+        transaction.commit().await.expect("committing the fixture");
+
+        (workspace_id, schema_name)
+    }
+
+    fn selection(name: &str, input: Value) -> FieldSelection {
+        FieldSelection {
+            alias: None,
+            name: name.to_string(),
+            arguments: vec![("input".to_string(), input)],
+            selection: Vec::new(),
+            spreads: Vec::new(),
+        }
+    }
+
+    async fn run_operation(
+        state: &AppState,
+        workspace_id: Uuid,
+        name: &str,
+        input: Value,
+    ) -> ResponsePayload {
+        let selection = selection(name, input);
+        let variables = json!({});
+
+        let ctx = OperationContext {
+            state,
+            workspace_id,
+            selection: &selection,
+            variables: &variables,
+            is_query: false,
+        };
+
+        dispatch(&ctx).await
+    }
+
+    fn node(payload: &ResponsePayload, name: &str) -> Value {
+        payload
+            .data
+            .as_ref()
+            .and_then(|data| data.get(name))
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    async fn metadata_version(state: &AppState, workspace_id: Uuid) -> i64 {
+        let row: (i64,) = sqlx::query_as(
+            "SELECT \"metadataVersion\"::bigint FROM core.\"workspace\" WHERE id = $1",
+        )
+        .bind(workspace_id)
+        .fetch_one(&state.core_pool)
+        .await
+        .expect("reading metadata version");
+
+        row.0
+    }
+
+    async fn column_exists(state: &AppState, schema: &str, table: &str, column: &str) -> bool {
+        let row: (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+             WHERE table_schema = $1 AND table_name = $2 AND column_name = $3)",
+        )
+        .bind(schema)
+        .bind(table)
+        .bind(column)
+        .fetch_one(&state.core_pool)
+        .await
+        .expect("checking column existence");
+
+        row.0
+    }
+
+    async fn object_row(state: &AppState, workspace_id: Uuid, name_singular: &str) -> Value {
+        let row: (Uuid, String, Uuid, Option<Uuid>) = sqlx::query_as(
+            "SELECT id, \"targetTableName\", \"universalIdentifier\", \
+             \"labelIdentifierFieldMetadataId\" \
+             FROM core.\"objectMetadata\" WHERE \"workspaceId\" = $1 AND \"nameSingular\" = $2",
+        )
+        .bind(workspace_id)
+        .bind(name_singular)
+        .fetch_one(&state.core_pool)
+        .await
+        .unwrap_or_else(|error| panic!("reading the {name_singular} object: {error}"));
+
+        json!({
+            "id": row.0.to_string(),
+            "targetTableName": row.1,
+            "universalIdentifier": row.2.to_string(),
+            "labelIdentifierFieldMetadataId": row.3.map(|value| value.to_string())
+        })
+    }
+
+    async fn count_bound(state: &AppState, sql: &str, first: Uuid, second: Uuid) -> i64 {
+        let row: (i64,) = sqlx::query_as(sql)
+            .bind(first)
+            .bind(second)
+            .fetch_one(&state.core_pool)
+            .await
+            .unwrap_or_else(|error| panic!("counting rows: {error}"));
+
+        row.0
+    }
+
+    async fn index_names_for_field(state: &AppState, field_id: Uuid) -> Vec<String> {
+        sqlx::query_as::<_, (String,)>(
+            "SELECT im.name FROM core.\"indexFieldMetadata\" ifm \
+             JOIN core.\"indexMetadata\" im ON im.id = ifm.\"indexMetadataId\" \
+             WHERE ifm.\"fieldMetadataId\" = $1",
+        )
+        .bind(field_id)
+        .fetch_all(&state.core_pool)
+        .await
+        .expect("reading index names")
+        .into_iter()
+        .map(|row| row.0)
+        .collect()
+    }
+
+    async fn search_vector_generation_expression(state: &AppState, schema: &str) -> Option<String> {
+        sqlx::query_as::<_, (String,)>(
+            "SELECT generation_expression FROM information_schema.columns \
+             WHERE table_schema = $1 AND table_name = '_gadget' AND column_name = 'searchVector'",
+        )
+        .bind(schema)
+        .fetch_optional(&state.core_pool)
+        .await
+        .expect("reading the searchVector expression")
+        .map(|row| row.0)
+    }
+
+    #[tokio::test]
+    async fn create_one_object_persists_object_and_name_field_end_to_end() {
+        let Ok(url) = std::env::var("NUDGE_TEST_DATABASE_URL") else {
+            return;
+        };
+
+        let _guard = TEST_LOCK.lock().await;
+
+        let state = test_state(&url).await;
+        let (workspace_id, schema_name) = create_workspace(&state).await;
+
+        let before = metadata_version(&state, workspace_id).await;
+
+        let payload = run_operation(
+            &state,
+            workspace_id,
+            "createOneObject",
+            json!({
+                "object": {
+                    "nameSingular": "rocket",
+                    "namePlural": "rockets",
+                    "labelSingular": "Rocket",
+                    "labelPlural": "Rockets"
+                }
+            }),
+        )
+        .await;
+
+        assert!(
+            payload.errors.is_empty(),
+            "createOneObject failed: {}",
+            payload.to_json()
+        );
+
+        let created = node(&payload, "createOneObject");
+
+        assert_eq!(created["nameSingular"], json!("rocket"));
+        assert_eq!(created["labelPlural"], json!("Rockets"));
+
+        let row = object_row(&state, workspace_id, "rocket").await;
+
+        assert_eq!(row["targetTableName"], json!("DEPRECATED"));
+
+        let label_identifier = row["labelIdentifierFieldMetadataId"]
+            .as_str()
+            .expect("the object resolves its name field id");
+
+        let name_field: (String, Uuid) = sqlx::query_as(
+            "SELECT name, \"universalIdentifier\" FROM core.\"fieldMetadata\" WHERE id = $1",
+        )
+        .bind(Uuid::parse_str(label_identifier).expect("label identifier is a uuid"))
+        .fetch_one(&state.core_pool)
+        .await
+        .expect("reading the label identifier field");
+
+        assert_eq!(name_field.0, "name");
+        assert_eq!(
+            name_field.1.to_string(),
+            created["labelIdentifierFieldMetadataId"]
+                .as_str()
+                .expect("the dto exposes the label identifier")
+        );
+
+        let field_count = count_bound(
+            &state,
+            "SELECT count(*)::bigint FROM core.\"fieldMetadata\" f \
+             JOIN core.\"objectMetadata\" o ON o.id = f.\"objectMetadataId\" \
+             WHERE o.id = $1 AND o.\"workspaceId\" = $2",
+            Uuid::parse_str(row["id"].as_str().unwrap()).expect("object id"),
+            workspace_id,
+        )
+        .await;
+
+        assert_eq!(field_count, 1, "exactly the name field is seeded");
+
+        let rocket_object_id = Uuid::parse_str(row["id"].as_str().unwrap()).expect("object id");
+
+        let view_count = count_bound(
+            &state,
+            "SELECT count(*)::bigint FROM core.view v \
+             WHERE v.\"objectMetadataId\" = $1 AND v.\"workspaceId\" = $2",
+            rocket_object_id,
+            workspace_id,
+        )
+        .await;
+
+        let navigation_count = count_bound(
+            &state,
+            "SELECT count(*)::bigint FROM core.\"navigationMenuItem\" n \
+             WHERE n.\"targetObjectMetadataId\" = $1 AND n.\"workspaceId\" = $2",
+            rocket_object_id,
+            workspace_id,
+        )
+        .await;
+
+        assert_eq!(view_count, 0, "no INDEX view is seeded in wave 3");
+        assert_eq!(
+            navigation_count, 0,
+            "no navigation command item is seeded in wave 3"
+        );
+
+        assert!(
+            column_exists(&state, &schema_name, "_rocket", "name").await,
+            "the physical rocket table carries the name column"
+        );
+        assert!(
+            column_exists(&state, &schema_name, "_rocket", "id").await,
+            "the physical rocket table carries the base id column"
+        );
+
+        let after = metadata_version(&state, workspace_id).await;
+
+        assert!(
+            after > before,
+            "metadataVersion bumped from {before} to {after}"
+        );
+
+        sqlx::query(&format!("DROP SCHEMA \"{schema_name}\" CASCADE"))
+            .execute(&state.core_pool)
+            .await
+            .expect("dropping the workspace schema");
+    }
+
+    #[tokio::test]
+    async fn delete_field_cascades_options_index_and_search_vector() {
+        let Ok(url) = std::env::var("NUDGE_TEST_DATABASE_URL") else {
+            return;
+        };
+
+        let _guard = TEST_LOCK.lock().await;
+
+        let state = test_state(&url).await;
+        let (workspace_id, schema_name) = create_workspace(&state).await;
+
+        let created = run_operation(
+            &state,
+            workspace_id,
+            "createOneObject",
+            json!({
+                "object": {
+                    "nameSingular": "gadget",
+                    "namePlural": "gadgets",
+                    "labelSingular": "Gadget",
+                    "labelPlural": "Gadgets"
+                }
+            }),
+        )
+        .await;
+
+        assert!(
+            created.errors.is_empty(),
+            "createOneObject failed: {}",
+            created.to_json()
+        );
+
+        let gadget = object_row(&state, workspace_id, "gadget").await;
+        let gadget_id = gadget["id"].as_str().unwrap().to_string();
+        let gadget_uuid = Uuid::parse_str(&gadget_id).expect("gadget uuid");
+
+        let status_field = run_operation(
+            &state,
+            workspace_id,
+            "createOneField",
+            json!({
+                "field": {
+                    "objectMetadataId": gadget_id,
+                    "name": "status",
+                    "label": "Status",
+                    "type": "SELECT",
+                    "isNullable": true,
+                    "options": [
+                        { "value": "DRAFT", "label": "Draft", "color": "gray", "position": 0 },
+                        { "value": "LIVE", "label": "Live", "color": "green", "position": 1 }
+                    ]
+                }
+            }),
+        )
+        .await;
+
+        assert!(
+            status_field.errors.is_empty(),
+            "createOneField status failed: {}",
+            status_field.to_json()
+        );
+
+        let title_field = run_operation(
+            &state,
+            workspace_id,
+            "createOneField",
+            json!({
+                "field": {
+                    "objectMetadataId": gadget_id,
+                    "name": "title",
+                    "label": "Title",
+                    "type": "TEXT",
+                    "isNullable": true,
+                    "isUnique": true
+                }
+            }),
+        )
+        .await;
+
+        assert!(
+            title_field.errors.is_empty(),
+            "createOneField title failed: {}",
+            title_field.to_json()
+        );
+
+        let status_node = node(&status_field, "createOneField");
+        let status_uuid =
+            Uuid::parse_str(status_node["id"].as_str().expect("status id")).expect("status uuid");
+        let title_node = node(&title_field, "createOneField");
+        let title_id =
+            Uuid::parse_str(title_node["id"].as_str().expect("title id")).expect("title id");
+        let title_universal = title_node["universalIdentifier"]
+            .as_str()
+            .expect("title universal identifier")
+            .to_string();
+
+        assert!(
+            column_exists(&state, &schema_name, "_gadget", "title").await,
+            "the title column exists before deletion"
+        );
+
+        let option_count = count_bound(
+            &state,
+            "SELECT count(*)::bigint FROM core.\"fieldMetadataOption\" \
+             WHERE \"fieldMetadataId\" = $1 AND \"workspaceId\" = $2",
+            status_uuid,
+            workspace_id,
+        )
+        .await;
+
+        assert_eq!(option_count, 2, "the select field carries two options");
+
+        assert!(
+            !index_names_for_field(&state, title_id).await.is_empty(),
+            "the unique backing index carries an indexFieldMetadata row"
+        );
+
+        seed_search_vector_fixture(&state, &schema_name, gadget_uuid, title_id).await;
+
+        crate::metadata::cache::invalidate_workspace_maps(&state, workspace_id).await;
+
+        let deleted = run_operation(
+            &state,
+            workspace_id,
+            "deleteOneField",
+            json!({ "id": title_universal }),
+        )
+        .await;
+
+        assert!(
+            deleted.errors.is_empty(),
+            "deleteOneField failed: {}",
+            deleted.to_json()
+        );
+
+        assert!(
+            !column_exists(&state, &schema_name, "_gadget", "title").await,
+            "the title column is dropped"
+        );
+        assert!(
+            column_exists(&state, &schema_name, "_gadget", "status").await,
+            "the status column survives"
+        );
+        assert!(
+            column_exists(&state, &schema_name, "_gadget", "searchVector").await,
+            "the searchVector column is rebuilt after the cascade drop"
+        );
+
+        let search_rows = count_bound(
+            &state,
+            "SELECT count(*)::bigint FROM core.\"searchFieldMetadata\" \
+             WHERE \"workspaceId\" = $1 AND \"fieldMetadataId\" = $2",
+            workspace_id,
+            title_id,
+        )
+        .await;
+
+        assert_eq!(search_rows, 0, "the searchFieldMetadata row is gone");
+
+        assert!(
+            index_names_for_field(&state, title_id).await.is_empty(),
+            "the indexFieldMetadata rows for the deleted field are gone"
+        );
+
+        let expression = search_vector_generation_expression(&state, &schema_name)
+            .await
+            .expect("the rebuilt searchVector column");
+
+        assert!(
+            !expression.contains("\"title\""),
+            "the rebuilt searchVector no longer references the deleted column: {expression}"
+        );
+        assert!(
+            expression.contains("searchVector") || expression.contains("name"),
+            "the rebuilt searchVector keeps the remaining searchable column: {expression}"
+        );
+
+        let remaining_options = count_bound(
+            &state,
+            "SELECT count(*)::bigint FROM core.\"fieldMetadataOption\" \
+             WHERE \"fieldMetadataId\" = $1 AND \"workspaceId\" = $2",
+            status_uuid,
+            workspace_id,
+        )
+        .await;
+
+        assert_eq!(
+            remaining_options, 2,
+            "the surviving field keeps its options"
+        );
+
+        sqlx::query(&format!("DROP SCHEMA \"{schema_name}\" CASCADE"))
+            .execute(&state.core_pool)
+            .await
+            .expect("dropping the workspace schema");
+    }
+
+    async fn seed_search_vector_fixture(
+        state: &AppState,
+        schema: &str,
+        gadget_id: Uuid,
+        title_id: Uuid,
+    ) {
+        let context: (Uuid, Uuid, Uuid) = sqlx::query_as(
+            "SELECT o.\"workspaceId\", o.\"applicationId\", f.\"universalIdentifier\" \
+             FROM core.\"objectMetadata\" o \
+             JOIN core.\"fieldMetadata\" f ON f.\"objectMetadataId\" = o.id AND f.name = 'name' \
+             WHERE o.id = $1",
+        )
+        .bind(gadget_id)
+        .fetch_one(&state.core_pool)
+        .await
+        .expect("reading the gadget workspace and application");
+
+        let ts_vector_id = Uuid::new_v4();
+
+        sqlx::query(
+            "INSERT INTO core.\"fieldMetadata\" \
+             (id, \"objectMetadataId\", type, name, label, \"isActive\", \"isSystem\", \
+              \"isNullable\", \"workspaceId\", \"universalIdentifier\", \"applicationId\", \
+              \"isSystemSideEffect\") \
+             VALUES ($1, $2, 'TS_VECTOR', 'searchVector', 'Search Vector', true, false, \
+                     true, $3, $4, $5, true)",
+        )
+        .bind(ts_vector_id)
+        .bind(gadget_id)
+        .bind(context.0)
+        .bind(ts_vector_id)
+        .bind(context.1)
+        .execute(&state.core_pool)
+        .await
+        .expect("inserting the ts vector field row");
+
+        let name_id: (Uuid,) = sqlx::query_as(
+            "SELECT f.id FROM core.\"fieldMetadata\" f \
+             JOIN core.\"objectMetadata\" o ON o.id = f.\"objectMetadataId\" \
+             WHERE o.id = $1 AND f.name = 'name'",
+        )
+        .bind(gadget_id)
+        .fetch_one(&state.core_pool)
+        .await
+        .expect("reading the name field id");
+
+        for (position, field_id) in [(0.0, name_id.0), (1.0, title_id)] {
+            let search_universal = Uuid::new_v4();
+
+            sqlx::query(
+                "INSERT INTO core.\"searchFieldMetadata\" \
+                 (id, \"objectMetadataId\", \"fieldMetadataId\", \"workspaceId\", \
+                  \"universalIdentifier\", \"applicationId\", \"position\", \
+                  \"tsVectorFieldMetadataId\") \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            )
+            .bind(search_universal)
+            .bind(gadget_id)
+            .bind(field_id)
+            .bind(context.0)
+            .bind(search_universal)
+            .bind(context.1)
+            .bind(position)
+            .bind(ts_vector_id)
+            .execute(&state.core_pool)
+            .await
+            .expect("seeding a search field row");
+        }
+
+        sqlx::query(&format!(
+            "ALTER TABLE \"{schema}\".\"_gadget\" ADD COLUMN \"searchVector\" tsvector \
+             GENERATED ALWAYS AS (to_tsvector('simple', \
+             COALESCE(public.unaccent_immutable(\"name\"), '') || ' ' || \
+             COALESCE(public.unaccent_immutable(\"title\"), ''))) STORED"
+        ))
+        .execute(&state.core_pool)
+        .await
+        .expect("adding the searchVector generated column");
+    }
+}

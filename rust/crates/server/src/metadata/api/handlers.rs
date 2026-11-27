@@ -136,6 +136,10 @@ async fn run_migration(
         }
     };
 
+    let mut migration = migration;
+
+    super::service::normalize_create_action_entities(&mut migration.actions);
+
     run_workspace_migration(
         ctx.state,
         RunnerInput {
@@ -1628,4 +1632,312 @@ fn push_param(
     params.push(FilterParam::Scalar(value.clone()));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::add_to_create;
+    use super::field_entity;
+    use super::object_entity;
+    use crate::metadata::actions::MetadataName;
+    use crate::metadata::actions::UniversalAction;
+    use crate::metadata::actions::UniversalFlatEntity;
+    use crate::metadata::api::service::build_options;
+    use crate::metadata::api::service::compute_api_from_to_maps;
+    use crate::metadata::api::service::infer_deletion_for_deletes;
+    use crate::metadata::api::service::normalize_create_action_entities;
+    use crate::metadata::api::service::transpile_create_object;
+    use crate::metadata::api::service::ResolvedApplications;
+    use crate::metadata::builders::build_workspace_migration;
+    use crate::metadata::builders::expand_matrix_with_side_effects;
+    use crate::metadata::builders::FlatEntityOperationsMatrix;
+    use crate::metadata::builders::WorkspaceMigrationBuildResult;
+    use crate::metadata::flat::UniversalWorkspaceMaps;
+
+    fn applications() -> ResolvedApplications {
+        let custom_universal_identifier = uuid::Uuid::new_v4().to_string();
+
+        ResolvedApplications {
+            standard_universal_identifier: custom_universal_identifier.clone(),
+            custom_universal_identifier,
+            custom_id: uuid::Uuid::new_v4(),
+        }
+    }
+
+    fn create_one_object_migration(applications: &ResolvedApplications) -> CreateCase {
+        let input = json!({
+            "object": {
+                "nameSingular": "rocket",
+                "namePlural": "rockets",
+                "labelSingular": "Rocket",
+                "labelPlural": "Rockets"
+            }
+        });
+
+        let transpilation = transpile_create_object(&input, applications)
+            .expect("transpiling the rocket object creation");
+
+        let name_field_universal_identifier = transpilation
+            .name_field
+            .as_ref()
+            .expect("the name field is part of the creation")
+            .universal_identifier
+            .clone();
+
+        let object_universal_identifier = transpilation.entity.universal_identifier.clone();
+
+        let mut matrix = FlatEntityOperationsMatrix::default();
+
+        add_to_create(&mut matrix, object_entity(&transpilation.entity));
+
+        add_to_create(&mut matrix, field_entity(name_field(&transpilation)));
+
+        let universal_maps = UniversalWorkspaceMaps::default();
+
+        let expansion = expand_matrix_with_side_effects(matrix, &universal_maps);
+
+        let infer_deletion = infer_deletion_for_deletes(&expansion.matrix);
+        let from_to = compute_api_from_to_maps(&universal_maps, &expansion.matrix);
+        let options = build_options(
+            applications,
+            &applications.custom_universal_identifier,
+            infer_deletion,
+        );
+
+        let migration = match build_workspace_migration(options, from_to) {
+            WorkspaceMigrationBuildResult::Success(migration) => migration,
+            WorkspaceMigrationBuildResult::Fail(report) => {
+                panic!("building the rocket migration failed: {report:?}")
+            }
+        };
+
+        CreateCase {
+            migration,
+            object_universal_identifier,
+            name_field_universal_identifier,
+        }
+    }
+
+    fn name_field(
+        transpilation: &crate::metadata::api::service::ObjectCreateTranspilation,
+    ) -> &crate::metadata::flat::UniversalFlatFieldMetadata {
+        transpilation
+            .name_field
+            .as_ref()
+            .expect("the name field is part of the creation")
+    }
+
+    struct CreateCase {
+        migration: crate::metadata::actions::WorkspaceMigration,
+        object_universal_identifier: String,
+        name_field_universal_identifier: String,
+    }
+
+    fn object_create(
+        migration: &crate::metadata::actions::WorkspaceMigration,
+    ) -> &crate::metadata::actions::UniversalCreateAction {
+        let mut objects: Vec<&crate::metadata::actions::UniversalCreateAction> = migration
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                UniversalAction::Create(create)
+                    if create.metadata_name == MetadataName::ObjectMetadata =>
+                {
+                    Some(create)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(objects.len(), 1, "exactly one object create action");
+
+        objects.remove(0)
+    }
+
+    #[test]
+    fn the_object_create_carries_a_typed_flat_entity_for_the_runner() {
+        let applications = applications();
+
+        let case = create_one_object_migration(&applications);
+
+        let mut migration = case.migration;
+
+        normalize_create_action_entities(&mut migration.actions);
+
+        let create = object_create(&migration);
+
+        let object = match create.flat_entity.as_ref() {
+            Some(UniversalFlatEntity::ObjectMetadata(object)) => object.as_ref(),
+            other => panic!("object create lost its typed flat entity: {other:?}"),
+        };
+
+        assert_eq!(object.name_singular, "rocket");
+        assert_eq!(object.name_plural, "rockets");
+        assert_eq!(object.label_singular, "Rocket");
+        assert_eq!(object.label_plural, "Rockets");
+        assert_eq!(
+            object.universal_identifier,
+            case.object_universal_identifier
+        );
+
+        assert_eq!(
+            object
+                .label_identifier_field_metadata_universal_identifier
+                .as_deref(),
+            Some(case.name_field_universal_identifier.as_str())
+        );
+
+        let name_field = create
+            .universal_flat_field_metadatas
+            .iter()
+            .find(|field| field.name == "name")
+            .expect("the name field rides the object create");
+
+        assert_eq!(
+            name_field.universal_identifier,
+            case.name_field_universal_identifier
+        );
+
+        assert!(create
+            .field_id_by_universal_identifier
+            .as_ref()
+            .map(|ids| ids.contains_key(&name_field.universal_identifier))
+            .unwrap_or(false));
+
+        assert!(create.id.is_some());
+
+        let standalone_name = migration.actions.iter().any(|action| match action {
+            UniversalAction::Create(create) => {
+                create.metadata_name == MetadataName::FieldMetadata
+                    && matches!(
+                        create.flat_entity.as_ref(),
+                        Some(UniversalFlatEntity::FieldMetadata(field)) if field.name == "name"
+                    )
+            }
+            _ => false,
+        });
+
+        assert!(
+            !standalone_name,
+            "the name field is not also emitted as a standalone field create"
+        );
+    }
+
+    #[test]
+    fn the_builder_downgrades_create_entities_and_normalization_restores_them() {
+        let applications = applications();
+
+        let case = create_one_object_migration(&applications);
+
+        let mut migration = case.migration;
+
+        let raw = object_create(&migration);
+
+        assert!(
+            matches!(raw.flat_entity, Some(UniversalFlatEntity::Other { .. })),
+            "strip_create_foreign_key_aggregators leaves the create entity as Other"
+        );
+
+        normalize_create_action_entities(&mut migration.actions);
+
+        let create = object_create(&migration);
+
+        assert!(
+            matches!(
+                create.flat_entity,
+                Some(UniversalFlatEntity::ObjectMetadata(_))
+            ),
+            "normalization re-types the create entity for the runner"
+        );
+    }
+
+    #[test]
+    fn the_object_create_drops_foreign_key_aggregators() {
+        let applications = applications();
+
+        let case = create_one_object_migration(&applications);
+
+        let mut migration = case.migration;
+
+        normalize_create_action_entities(&mut migration.actions);
+
+        let create = object_create(&migration);
+
+        let Some(UniversalFlatEntity::ObjectMetadata(object)) = create.flat_entity.as_ref() else {
+            panic!("expected a typed object entity");
+        };
+
+        assert!(object.field_universal_identifiers.is_empty());
+        assert!(object.view_universal_identifiers.is_empty());
+    }
+
+    #[test]
+    fn the_create_expansion_seeds_no_view_or_navigation_entities() {
+        let applications = applications();
+
+        let input = json!({
+            "object": {
+                "nameSingular": "probe",
+                "namePlural": "probes",
+                "labelSingular": "Probe",
+                "labelPlural": "Probes"
+            }
+        });
+
+        let transpilation = transpile_create_object(&input, &applications).unwrap();
+
+        let mut matrix = FlatEntityOperationsMatrix::default();
+
+        add_to_create(&mut matrix, object_entity(&transpilation.entity));
+        add_to_create(&mut matrix, field_entity(name_field(&transpilation)));
+
+        let expansion = expand_matrix_with_side_effects(matrix, &UniversalWorkspaceMaps::default());
+
+        let mut names: Vec<&str> = expansion
+            .matrix
+            .by_metadata_name
+            .iter()
+            .filter(|(_, bucket)| !bucket.to_create.is_empty() || !bucket.to_update.is_empty())
+            .map(|(metadata_name, _)| metadata_name.as_str())
+            .collect();
+
+        names.sort_unstable();
+
+        assert_eq!(
+            names,
+            vec!["fieldMetadata", "objectMetadata"],
+            "wave 3 ports the object + name field only; views, favorites and \
+             navigation are side-effect services outside this scope"
+        );
+
+        let case = create_one_object_migration(&applications);
+
+        let mut migration = case.migration;
+
+        normalize_create_action_entities(&mut migration.actions);
+
+        let unsupported: Vec<MetadataName> = migration
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                UniversalAction::Create(create)
+                    if !matches!(
+                        create.metadata_name,
+                        MetadataName::ObjectMetadata
+                            | MetadataName::FieldMetadata
+                            | MetadataName::Index
+                            | MetadataName::FieldMetadataOption
+                            | MetadataName::SearchFieldMetadata
+                    ) =>
+                {
+                    Some(create.metadata_name)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(unsupported.is_empty(), "no action names the runner rejects");
+    }
 }
