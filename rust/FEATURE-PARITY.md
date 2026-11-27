@@ -10,14 +10,20 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 
 | Area | Upstream size | Nudge today |
 |---|---|---|
-| A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (wave 3: seeding, DDL runner and deferred queue merged; metadata API and update/delete matrix in progress) |
-| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | todo (spec done: `research/query-layer.md`) |
-| C. Auth and access control | ~12k LOC server | **part** (wave 2 complete) |
-| D. Web interface (Leptos) | ~330k LOC React | todo (spec done: `research/frontend-architecture.md`) |
+| A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (seeding, DDL runner, metadata CRUD API and deferred queue merged; validation rules and UI editors remain) |
+| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL and REST verified live; search, duplicates/merge, permissions, SSE and hooks remain) |
+| C. Auth and access control | ~12k LOC server | **part** (wave 2 complete; permission enforcement P1–P5 next) |
+| D. Web interface (Leptos) | ~330k LOC React | **part** (design system landed; front-core in progress; app shell and product screens remain) |
 | E. Automations and integrations | ~60k LOC server | todo |
 | F. Platform and operations | ~10k LOC | **part** |
 
-Roughly 3 of about 90 feature areas are done. The rest is the port.
+### Measured checkpoints (2026-11-27)
+- Wave 4 live record parity: `tools/parity-compare.py --records` — **18/18 captures match** the real `twentycrm/twenty:v2.61.0` server on the same database.
+- REST error/shape parity: `tools/parity-rest-errors.py` — **18/18 probes match** live.
+- Auth + metadata + record E2E: `tools/auth-e2e.sh` — **367/367 checks pass**.
+- Metadata content: `tools/metadata-parity.sh` — **5 sections, 0 differences** (37 objects / 636 fields / 65 options / 123 indexes / 34 search fields).
+- Workspace schema: `tools/prove-attnum-parity.sh` — **39/39 tables have identical ordered columns**.
+- Quality gates: fmt clean, clippy `-D warnings` clean, **92 core + 468 server tests** pass.
 
 ## A. Data model and metadata engine
 
@@ -25,9 +31,9 @@ Roughly 3 of about 90 feature areas are done. The rest is the port.
 |---|---|---|---|
 | `core` schema, byte-identical to the reference | **done** | 1 | 80 tables, 57 enums, 368 indexes, 389 constraints; 0 differences |
 | Workspace schema per tenant (`workspace_<base36>`) | **done** | 1 | created on sign-up |
-| Object and field metadata CRUD | **part** | 3 | builders, aggregate, ordering and the runner are done (U5+U6); the `/metadata` GraphQL surface lands with U9 |
+| Object and field metadata CRUD | **done** | 3 | metadata GraphQL API + update/delete matrix merged; covered by the metadata E2E fragments in `tools/auth-e2e.sh` |
 | Standard objects (person, company, opportunity, note, task, attachment, timeline, workspace member) | **done** | 3 | U7: 37 objects / 636 fields / 123 indexes / 34 search fields / 65 options seeded on activation; `tools/metadata-parity.sh` proves field/option/index/search-field content is 0-diff vs the live reference and the catalog parity test proves the workspace schema is equivalent (one open column: `targetTableName='DEPRECATED'` semantics, U10) |
-| Runtime DDL: create and alter workspace tables from metadata | **part** | 3 | create/delete/rename-table+enum + the 4-pass builder are done; the full field-update matrix (nullable/default/onDelete swap, tsvector rebuild) is U10 |
+| Runtime DDL: create and alter workspace tables from metadata | **done** | 3 | create/update/delete matrix, nullable/default/onDelete changes, enum rename→recreate→backfill and tsvector rebuild merged and covered by the workspace migration tests |
 | Composite fields (full name, emails, phones, links, address, currency) and their flattening rule | **done** | 3 | `<field><SubProperty>` column names, U4 column_defs (2.61.0 has no server-only composite columns — verified against the tag and the live schema) |
 | Field types: 25+ (select with options, rating, relation, morph relation, raw json, ts vector, ...) | **done** | 3 | U4 + U7 (composite enum types created, morph heads skipped, relation join columns + FK `onDelete` from settings) |
 | Index metadata and physical index creation (hashed names) | **done** | 3 | U6 runner (hashed deterministic names, `indexFieldMetadata` rows) + U8 deferred `build_index` CONCURRENTLY |
@@ -43,18 +49,19 @@ Roughly 3 of about 90 feature areas are done. The rest is the port.
 
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
-| `findMany` with filter, sort, keyset pagination, `totalCount` | todo | 4 | the shared query runner |
-| `findOne`, `findDuplicates`, `mergeMany` | todo | 4 | |
-| `createOne`/`createMany`, `updateOne`/`updateMany` | todo | 4 | |
-| `deleteOne` (soft), `destroyOne`, `restoreMany` | todo | 4 | |
-| `groupBy` and aggregates | todo | 4 | 12 aggregate operations |
-| Full text search | todo | 4 | |
-| Record permissions, sharing, private records | todo | 4 | |
+| `findMany` with filter, sort, keyset pagination, `totalCount` | **done** | 4 | shared runner + live parity; totalCount ignores cursor predicates and composite sort matches the reference |
+| `findOne` | **done** | 4 | nested relation projection matches the live reference |
+| `findDuplicates`, `mergeMany` | todo | 4→6 | REST routes return the explicit deferred-slice error; duplicate/merge query engines remain |
+| `createOne`/`createMany`, `updateOne`/`updateMany` | **done** | 4 | mutation round-trip capture matches live, including actor fields and upsert |
+| `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
+| `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
+| Full text search | todo | 4→6 | tsvector columns and GIN indexes exist; the cross-object Search resolver remains |
+| Record permissions, sharing, private records | todo | 4 | P1–P5 permission wave next; access storage tables exist |
 | Export records | todo | 6 | |
-| REST API with the upstream shape | todo | 4 | |
-| Dynamic GraphQL schema generated from metadata | todo | 4 | the upstream generates it at runtime |
-| Live updates over SSE (`OnEventSubscription`) | todo | 4 | |
-| Pre and post query hooks (actor stamping, timeline snapshots) | todo | 4 | |
+| REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
+| Dynamic GraphQL schema generated from metadata | **done** | 4 | direct workspace execution with resolver classification, introspection and connection shaping |
+| Live updates over SSE (`OnEventSubscription`) | todo | 4→5 | frontend decoder lands in front-core; server transport and query registration remain |
+| Pre and post query hooks (actor stamping, timeline snapshots) | todo | 4→6 | actor stamping exists in mutations; timeline/post-hook engine remains |
 
 ## C. Auth and access control
 
@@ -80,12 +87,14 @@ Roughly 3 of about 90 feature areas are done. The rest is the port.
 
 ## D. Web interface (Leptos)
 
-Nothing in the interface is built yet. The upstream is about 330k lines of React across 12,700
-files; the Leptos port is estimated at roughly 40k lines of Rust for the daily driver surface.
+The design-system crate is landed; the front logic layer is in progress. The upstream is about
+330k lines of React across 12,700 files; the Leptos port follows the unit plan in
+`research/frontend-architecture.md` and is verified against the live reference in the browser.
 
 | Feature | Status | Wave | Notes |
 |---|---|---|---|
-| Design system: tokens, primitives, icons | todo | 5 | 25 hues, 13 step scale, 618 primitives, 503 components |
+| Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **part** | 5 | U2 `crates/front-core` in progress on `wave5/u2`; live metadata payloads captured from the reference |
+| Design system: tokens, primitives, icons | **part** | 5 | U1 landed; `wave5/u1b` completes the upstream primitive inventory, gallery and token-anchor tests |
 | Application shell, navigation, command menu | todo | 5 | |
 | Record table: virtualised, drag and drop, groups, aggregates | todo | 5 | 101k LOC upstream, the largest area |
 | Record kanban board | todo | 5 | |
@@ -137,12 +146,11 @@ files; the Leptos port is estimated at roughly 40k lines of Rust for the daily d
 
 ## What is left, in order
 
-1. Finish C (the remaining auth and the permission enforcement) — it is the last piece of the
-   identity foundation and the record APIs depend on it.
-2. A, the metadata engine — without it there are no records to serve.
-3. B, the record APIs — the surface every client uses.
-4. D, the interface — the largest area by lines of code.
-5. E and F, the automations and the platform.
+1. Permissions P1–P5 and the remaining record-plane gaps: search, duplicates/merge, SSE and hooks.
+2. Wave 5 frontend: finish U1/U2, then U3 shell + auth, U4 record surfaces, U5 settings, U6 desktop/static serving.
+3. Wave 6: webhooks, files, SMTP email, search/import/export, timeline, favorites, notes/tasks.
+4. Wave 7: queues, workflows, messaging/calendar sync, AI agents, MCP, billing and the remaining platform features.
+5. Full-app live UI/behavior/performance verification against Twenty 2.61.0 before cutover.
 
 The upstream is roughly 1.8M lines across 25,000 files. A faithful port is a multi-session
 program; the waves in [MAP.md](MAP.md) are ordered so that every wave leaves a usable server.

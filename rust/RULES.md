@@ -37,3 +37,13 @@ rust-anything rules <repo> --add "<the rule, in one sentence>"
 
 - DB-gated tests must run core migrations through workspace_migrations::ddl::test_support::migrate_core (pins search_path to public, advisory-locked, fails loudly); never sqlx::migrate! on the AppState pool and never swallow the result with .ok()? — the pool search_path makes sqlx re-apply migrations against a split _sqlx_migrations ledger and .ok()? turns every DB-gated test into a silent skip.
 - core.objectMetadata.targetTableName stores the literal 'DEPRECATED' upstream at 2.61.0; the physical workspace table name must be derived from nameSingular + application universal identifier (compute_object_target_table), never read from that column.
+
+### R-003: Frontend parity is exact and measured live
+- **Statement:** Frontend UI must match the live Twenty CRM v2.61.0 reference exactly; verify every surface with side-by-side browser screenshots and computed styles, with zero tolerated visual differences.
+- **Why:** The user requires the port to look and behave like the real product, not an approximation.
+- **How to apply:** Keep the reference open during implementation, capture paired screenshots for every flow, and compare token/layout anchors before marking a UI unit done.
+
+### R-004: The backend scope is every Twenty feature
+- **Statement:** Backend must reimplement every Twenty CRM feature, not only the daily-driver surface; keep the full wave-6 and wave-7 scope and prove behavior with live reference parity.
+- **Why:** The user explicitly rejected a reduced scope.
+- **How to apply:** Track every feature in `FEATURE-PARITY.md`; do not mark the migration complete while any applicable row remains todo or part.
