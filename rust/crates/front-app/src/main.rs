@@ -30,3 +30,19 @@ pub fn wasm_start() {
 fn main() {
     start();
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn upstream_motion_layer_is_bundled_with_reduced_motion() {
+        let css = include_str!("../assets/animations.css");
+        assert_eq!(css.matches("@keyframes").count(), 89);
+        assert!(css.contains("@keyframes codicon-spin"));
+        assert!(css.contains("@keyframes pulse"));
+        assert!(css.contains("@keyframes _skeletonShimmer_17v1i_1"));
+        assert!(css.contains("@keyframes sonner-fade-in"));
+        assert!(css.contains("@keyframes ProseMirror-cursor-blink"));
+        assert!(css.contains("prefers-reduced-motion"));
+        assert!(css.contains("[data-animation=\"modal\"]"));
+    }
+}
