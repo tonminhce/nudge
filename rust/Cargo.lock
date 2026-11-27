@@ -1758,6 +1758,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nudge-front-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "nudge-front-ui"
 version = "0.1.0"
 dependencies = [
