@@ -30,8 +30,7 @@ pub const CORE_PICTURE_MIME_TYPES: &[&str] = &[
     "image/webp",
 ];
 
-pub const EMAIL_IMAGE_MIME_TYPES: &[&str] =
-    &["image/gif", "image/jpeg", "image/png", "image/webp"];
+pub const EMAIL_IMAGE_MIME_TYPES: &[&str] = &["image/gif", "image/jpeg", "image/png", "image/webp"];
 
 const IMMUTABLE_FILE_CACHE_CONTROL: &str = "private, max-age=86400, immutable";
 const PUBLIC_ASSET_CACHE_CONTROL: &str = "public, max-age=3600";
@@ -99,7 +98,9 @@ impl FileFolder {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|folder| folder.as_str() == value)
+        Self::ALL
+            .into_iter()
+            .find(|folder| folder.as_str() == value)
     }
 
     pub fn pattern(self) -> String {
@@ -111,7 +112,10 @@ impl FileFolder {
     }
 
     pub fn ignores_expiration_token(self) -> bool {
-        matches!(self, Self::CorePicture | Self::PublicAsset | Self::EmailImage)
+        matches!(
+            self,
+            Self::CorePicture | Self::PublicAsset | Self::EmailImage
+        )
     }
 
     pub fn enforces_expiration(self) -> bool {
@@ -144,9 +148,7 @@ impl FileFolder {
             Self::CorePicture => Some(CORE_PICTURE_MIME_TYPES),
             Self::EmailImage => Some(EMAIL_IMAGE_MIME_TYPES),
             Self::AppTarball => Some(&["application/gzip"]),
-            Self::WorkspaceDataExport => {
-                Some(&["application/zip", "text/csv", "application/json"])
-            }
+            Self::WorkspaceDataExport => Some(&["application/zip", "text/csv", "application/json"]),
             Self::AgentChat
             | Self::BuiltLogicFunction
             | Self::BuiltFrontComponent

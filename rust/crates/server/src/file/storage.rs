@@ -9,12 +9,6 @@ use crate::file::folder::FileFolder;
 use crate::file::validation::assert_storage_path_is_safe;
 use crate::file::validation::validate_file_path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ByteWindow {
-    pub start_byte: u64,
-    pub end_byte: u64,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredFile {
     pub size: u64,
@@ -195,16 +189,16 @@ impl FileStorage {
 
         if !validation.is_valid {
             return Err(StorageError::InvalidPath(
-                validation.error.unwrap_or_else(|| String::from("Invalid resource path")),
+                validation
+                    .error
+                    .unwrap_or_else(|| String::from("Invalid resource path")),
             ));
         }
 
         let on_storage_path = Self::storage_path(location, resource_path);
         let prefix = format!(
             "{}/{}/{}/",
-            location.workspace_id,
-            location.application_universal_identifier,
-            location.folder
+            location.workspace_id, location.application_universal_identifier, location.folder
         );
 
         if !on_storage_path.starts_with(&prefix) {
@@ -279,19 +273,12 @@ impl FileStorage {
         content_length: u64,
         expires_in_secs: u64,
     ) -> Option<String> {
-        self.driver
-            .presigned_upload_url(
-                &Self::validate(location, resource_path).ok()?,
-                content_type,
-                content_length,
-                expires_in_secs,
-            )
-    }
-}
-
-impl ByteWindow {
-    pub fn length(self) -> u64 {
-        self.end_byte - self.start_byte + 1
+        self.driver.presigned_upload_url(
+            &Self::validate(location, resource_path).ok()?,
+            content_type,
+            content_length,
+            expires_in_secs,
+        )
     }
 }
 

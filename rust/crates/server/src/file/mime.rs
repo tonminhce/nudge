@@ -60,7 +60,7 @@ pub fn extract_file_info(buffer: &[u8], filename: &str) -> Result<FileInfo, Mime
         let from_extension = mime_from_extension(&ext);
 
         if let Some(candidate) = from_extension {
-            if detectable_mimes().iter().any(|mime| *mime == candidate) {
+            if detectable_mimes().contains(&candidate) {
                 return Err(MimeError::ContentMismatch {
                     ext,
                     expected: candidate.to_string(),
@@ -226,12 +226,6 @@ fn text_markup(buffer: &[u8]) -> Option<(&'static str, &'static str)> {
     None
 }
 
-pub fn looks_like_plain_text(buffer: &[u8]) -> bool {
-    let head = &buffer[..buffer.len().min(4096)];
-
-    !head.is_empty() && head.iter().all(|byte| *byte != 0) && std::str::from_utf8(head).is_ok()
-}
-
 fn detectable_mimes() -> Vec<&'static str> {
     let pairs = [
         ("png", "image/png"),
@@ -314,7 +308,9 @@ fn slice_at(buffer: &[u8], offset: usize, length: usize) -> Option<&[u8]> {
 }
 
 fn find(buffer: &[u8], needle: &[u8]) -> Option<usize> {
-    buffer.windows(needle.len()).position(|window| window == needle)
+    buffer
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 fn zip_entry_name(buffer: &[u8]) -> Option<&str> {
@@ -328,7 +324,12 @@ fn trim_ascii(buffer: &[u8]) -> &[u8] {
     let mut start = 0;
     let mut end = buffer.len();
 
-    while start < end && matches!(buffer[start], b' ' | b'\t' | b'\r' | b'\n' | 0xef | 0xbb | 0xbf) {
+    while start < end
+        && matches!(
+            buffer[start],
+            b' ' | b'\t' | b'\r' | b'\n' | 0xef | 0xbb | 0xbf
+        )
+    {
         start += 1;
     }
 

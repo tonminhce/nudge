@@ -28,14 +28,6 @@ impl PathValidation {
     }
 }
 
-pub fn storage_path_is_safe(storage_path: &str) -> bool {
-    if storage_path.contains('\0') || starts_with_absolute(storage_path) {
-        return false;
-    }
-
-    !normalized_segments(storage_path).iter().any(|segment| *segment == "..")
-}
-
 pub fn assert_storage_path_is_safe(storage_path: &str) -> Result<(), String> {
     if storage_path.contains('\0') {
         return Err(String::from("Invalid storage path: contains null bytes"));
@@ -47,7 +39,7 @@ pub fn assert_storage_path_is_safe(storage_path: &str) -> Result<(), String> {
         ));
     }
 
-    if normalized_segments(storage_path).iter().any(|segment| *segment == "..") {
+    if normalized_segments(storage_path).contains(&"..") {
         return Err(String::from(
             "Invalid storage path: path traversal detected",
         ));
@@ -73,7 +65,7 @@ pub fn validate_safe_relative_path(resource_path: &str) -> PathValidation {
         return PathValidation::invalid("Resource path must not contain backslashes");
     }
 
-    if normalized_segments(resource_path).iter().any(|segment| *segment == "..") {
+    if normalized_segments(resource_path).contains(&"..") {
         return PathValidation::invalid("Resource path must not contain path traversal (..)");
     }
 
@@ -101,9 +93,9 @@ pub fn validate_path_segments_safety(resource_path: &str) -> PathValidation {
         }
 
         if !segment.is_empty()
-            && segment
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-'))
+            && segment.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+            })
         {
             continue;
         }
@@ -116,10 +108,7 @@ pub fn validate_path_segments_safety(resource_path: &str) -> PathValidation {
     PathValidation::valid()
 }
 
-pub fn validate_file_extension(
-    resource_path: &str,
-    folder: FileFolder,
-) -> PathValidation {
+pub fn validate_file_extension(resource_path: &str, folder: FileFolder) -> PathValidation {
     let Some(allowed) = folder.allowed_extensions() else {
         return PathValidation::valid();
     };
@@ -158,44 +147,8 @@ pub fn validate_file_path(resource_path: &str, folder: FileFolder) -> PathValida
     validate_file_extension(resource_path, folder)
 }
 
-pub fn validate_folder_path(folder_path: &str) -> PathValidation {
-    let safe = validate_safe_relative_path(folder_path);
-
-    if !safe.is_valid {
-        return safe;
-    }
-
-    let segments = validate_path_segments_safety(folder_path);
-
-    if !segments.is_valid {
-        return segments;
-    }
-
-    if !extname(folder_path).is_empty() {
-        return PathValidation::invalid(
-            "Folder path must not contain a file extension — use deleteFile for file paths",
-        );
-    }
-
-    PathValidation::valid()
-}
-
 pub fn build_pending_upload_resource_path(file_id: Uuid, resource_path: &str) -> String {
     format!("{PENDING_UPLOAD_PATH_PREFIX}/{file_id}/{resource_path}")
-}
-
-pub fn check_filename(filename: &str) -> Result<String, String> {
-    let sanitized = filename.replace('\0', "");
-
-    if sanitized.is_empty()
-        || sanitized.contains('/')
-        || sanitized.contains('\\')
-        || !sanitized.contains('.')
-    {
-        return Err(format!("Filename '{filename}' is not allowed"));
-    }
-
-    Ok(sanitized.rsplit('/').next().unwrap_or(&sanitized).to_string())
 }
 
 pub fn file_extension(filename: &str) -> String {
@@ -206,20 +159,6 @@ pub fn file_extension(filename: &str) -> String {
     } else {
         String::new()
     }
-}
-
-pub fn build_file_info(filename: &str) -> (String, String) {
-    let extension = file_extension(filename);
-    let name = Uuid::new_v4().to_string();
-
-    (
-        extension.clone(),
-        if extension.is_empty() {
-            name
-        } else {
-            format!("{name}.{extension}")
-        },
-    )
 }
 
 pub fn remove_file_folder_from_file_entity_path(path: &str) -> Result<String, String> {
@@ -247,7 +186,8 @@ pub fn extname(path: &str) -> String {
 }
 
 fn starts_with_absolute(path: &str) -> bool {
-    path.starts_with('/') || (path.as_bytes().get(1) == Some(&b':') && path.as_bytes()[0].is_ascii_alphabetic())
+    path.starts_with('/')
+        || (path.as_bytes().get(1) == Some(&b':') && path.as_bytes()[0].is_ascii_alphabetic())
 }
 
 fn normalized_segments(path: &str) -> Vec<&str> {

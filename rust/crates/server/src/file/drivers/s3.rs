@@ -29,23 +29,6 @@ impl S3Driver {
         }
     }
 
-    pub fn object_url(&self, object_key: &str) -> String {
-        match &self.endpoint {
-            Some(endpoint) => format!(
-                "{}/{}/{}",
-                endpoint.trim_end_matches('/'),
-                self.bucket,
-                aws_encode_path(object_key)
-            ),
-            None => format!(
-                "https://{}.s3.{}.amazonaws.com/{}",
-                self.bucket,
-                self.region,
-                aws_encode_path(object_key)
-            ),
-        }
-    }
-
     pub fn presigned_upload_url(
         &self,
         object_key: &str,
@@ -58,22 +41,14 @@ impl S3Driver {
             .as_ref()
             .ok_or_else(|| String::from("s3 credentials are not configured"))?;
         let date_time = amz_date();
-        let credential_scope = format!(
-            "{}/{}/s3/aws4_request",
-            &date_time[..8],
-            self.region
-        );
+        let credential_scope = format!("{}/{}/s3/aws4_request", &date_time[..8], self.region);
         let canonical_headers = format!(
             "content-length:{content_length}\ncontent-type:{content_type}\nhost:{}\n",
             self.host()
         );
         let signed_headers = "content-length;content-type;host";
         let canonical_query = [
-            (
-                "X-Amz-Algorithm".to_string(),
-                ALGORITHM.to_string(),
-                false,
-            ),
+            ("X-Amz-Algorithm".to_string(), ALGORITHM.to_string(), false),
             (
                 "X-Amz-Credential".to_string(),
                 format!("{}/{}", credentials.access_key_id, credential_scope),
@@ -95,11 +70,7 @@ impl S3Driver {
         .map(|(name, value, encode_name)| {
             format!(
                 "{}={}",
-                if encode_name {
-                    aws_encode(&name)
-                } else {
-                    name
-                },
+                if encode_name { aws_encode(&name) } else { name },
                 aws_encode(&value)
             )
         })
@@ -114,7 +85,11 @@ impl S3Driver {
             hex_sha256(canonical_request.as_bytes())
         );
         let signature = hex(&hmac(
-            &signing_key(&credentials.secret_access_key, &date_time[..8], &self.region),
+            &signing_key(
+                &credentials.secret_access_key,
+                &date_time[..8],
+                &self.region,
+            ),
             string_to_sign.as_bytes(),
         ));
 
@@ -129,10 +104,7 @@ impl S3Driver {
         match (&self.presign_base, &self.endpoint) {
             (Some(base), _) => base.clone(),
             (None, Some(endpoint)) => endpoint.clone(),
-            (None, None) => format!(
-                "https://{}.s3.{}.amazonaws.com",
-                self.bucket, self.region
-            ),
+            (None, None) => format!("https://{}.s3.{}.amazonaws.com", self.bucket, self.region),
         }
     }
 }
@@ -159,8 +131,7 @@ fn signing_key(secret: &str, date: &str, region: &str) -> [u8; 32] {
 }
 
 fn hmac(key: &[u8], message: &[u8]) -> [u8; 32] {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(key).expect("hmac accepts any key length");
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("hmac accepts any key length");
     mac.update(message);
     let digest = mac.finalize().into_bytes();
     let mut out = [0_u8; 32];

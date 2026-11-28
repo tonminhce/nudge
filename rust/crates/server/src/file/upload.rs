@@ -7,9 +7,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::routing::put;
-use http_body_util::BodyExt;
 use chrono::DateTime;
 use chrono::Utc;
+use http_body_util::BodyExt;
 use serde_json::json;
 use serde_json::Value;
 use uuid::Uuid;
@@ -118,9 +118,11 @@ impl From<StorageError> for UploadError {
                 error.to_string(),
                 "This file path is not allowed.",
             ),
-            StorageError::FileNotFound => {
-                Self::new(UploadErrorCode::FileNotFound, error.to_string(), "File not found.")
-            }
+            StorageError::FileNotFound => Self::new(
+                UploadErrorCode::FileNotFound,
+                error.to_string(),
+                "File not found.",
+            ),
             StorageError::PreconditionFailed(message) => Self::new(
                 UploadErrorCode::StorageInconsistent,
                 message,
@@ -148,7 +150,6 @@ struct StoredFileRow {
     id: Uuid,
     path: String,
     size: i64,
-    mime_type: String,
     status: String,
     application_id: Uuid,
     settings: Option<Value>,
@@ -223,7 +224,9 @@ fn s3_driver() -> crate::file::drivers::s3::S3Driver {
 }
 
 fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|value| !value.trim().is_empty())
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 pub async fn create_file_upload(
@@ -282,10 +285,8 @@ pub async fn create_file_upload(
 
     build_upload_target(
         state,
-        workspace_id,
+        location.location(workspace_id),
         stored_id,
-        folder,
-        location.application_universal_identifier,
         &location.resource_path,
         DIRECT_UPLOAD_CONTENT_TYPE.to_string(),
         size as u64,
@@ -343,11 +344,13 @@ async fn resolve_upload_location(
         .bind(identifier.1)
         .fetch_optional(&state.core_pool)
         .await
-        .map_err(|error| UploadError::new(
-            UploadErrorCode::StorageInconsistent,
-            error.to_string(),
-            "File metadata could not be read.",
-        ))?
+        .map_err(|error| {
+            UploadError::new(
+                UploadErrorCode::StorageInconsistent,
+                error.to_string(),
+                "File metadata could not be read.",
+            )
+        })?
         .ok_or_else(|| {
             UploadError::new(
                 UploadErrorCode::FileNotFound,
@@ -371,21 +374,27 @@ async fn resolve_upload_location(
     .bind(workspace_id)
     .fetch_optional(&state.core_pool)
     .await
-    .map_err(|error| UploadError::new(
-        UploadErrorCode::StorageInconsistent,
-        error.to_string(),
-        "Workspace could not be read.",
-    ))?
-    .ok_or_else(|| UploadError::new(
-        UploadErrorCode::FileNotFound,
-        format!("Could not find workspace {workspace_id}"),
-        "Workspace was not found.",
-    ))?
-    .ok_or_else(|| UploadError::new(
-        UploadErrorCode::FileNotFound,
-        format!("Could not find workspace custom application for {workspace_id}"),
-        "Workspace application was not found.",
-    ))?;
+    .map_err(|error| {
+        UploadError::new(
+            UploadErrorCode::StorageInconsistent,
+            error.to_string(),
+            "Workspace could not be read.",
+        )
+    })?
+    .ok_or_else(|| {
+        UploadError::new(
+            UploadErrorCode::FileNotFound,
+            format!("Could not find workspace {workspace_id}"),
+            "Workspace was not found.",
+        )
+    })?
+    .ok_or_else(|| {
+        UploadError::new(
+            UploadErrorCode::FileNotFound,
+            format!("Could not find workspace custom application for {workspace_id}"),
+            "Workspace application was not found.",
+        )
+    })?;
 
     Ok(UploadLocationParts {
         application_universal_identifier: application_by_id(state, workspace_id, row).await?,
@@ -408,21 +417,27 @@ async fn application_by_id(
     .bind(workspace_id)
     .fetch_optional(&state.core_pool)
     .await
-    .map_err(|error| UploadError::new(
-        UploadErrorCode::StorageInconsistent,
-        error.to_string(),
-        "Application could not be read.",
-    ))?
-    .ok_or_else(|| UploadError::new(
-        UploadErrorCode::FileNotFound,
-        format!("Application with id \"{application_id}\" not found"),
-        "Application was not found.",
-    ))?
-    .ok_or_else(|| UploadError::new(
-        UploadErrorCode::FileNotFound,
-        format!("Application with id \"{application_id}\" not found"),
-        "Application was not found.",
-    ))
+    .map_err(|error| {
+        UploadError::new(
+            UploadErrorCode::StorageInconsistent,
+            error.to_string(),
+            "Application could not be read.",
+        )
+    })?
+    .ok_or_else(|| {
+        UploadError::new(
+            UploadErrorCode::FileNotFound,
+            format!("Application with id \"{application_id}\" not found"),
+            "Application was not found.",
+        )
+    })?
+    .ok_or_else(|| {
+        UploadError::new(
+            UploadErrorCode::FileNotFound,
+            format!("Application with id \"{application_id}\" not found"),
+            "Application was not found.",
+        )
+    })
 }
 
 async fn insert_pending_file(
@@ -462,21 +477,14 @@ async fn insert_pending_file(
 
 pub async fn build_upload_target(
     state: &AppState,
-    workspace_id: Uuid,
+    location: FileLocation,
     file_id: Uuid,
-    folder: FileFolder,
-    application_universal_identifier: Uuid,
     resource_path: &str,
     content_type: String,
     size: u64,
 ) -> Result<UploadTarget, UploadError> {
-    let location = FileLocation {
-        workspace_id,
-        application_universal_identifier,
-        folder,
-    };
     let pending_resource_path = build_pending_upload_resource_path(file_id, resource_path);
-    let pending_validation = validate_file_path(&pending_resource_path, folder);
+    let pending_validation = validate_file_path(&pending_resource_path, location.folder);
 
     if !pending_validation.is_valid {
         return Err(UploadError::new(
@@ -512,20 +520,22 @@ pub async fn build_upload_target(
         .jwt
         .sign(
             json!({
-                "workspaceId": workspace_id.to_string(),
+                "workspaceId": location.workspace_id.to_string(),
                 "fileId": file_id.to_string(),
-                "sub": workspace_id.to_string(),
+                "sub": location.workspace_id.to_string(),
             }),
             TokenType::FileUpload,
             expires_in_secs,
             None,
         )
         .await
-        .map_err(|error| UploadError::new(
-            UploadErrorCode::StorageInconsistent,
-            error.to_string(),
-            "The upload target could not be signed.",
-        ))?;
+        .map_err(|error| {
+            UploadError::new(
+                UploadErrorCode::StorageInconsistent,
+                error.to_string(),
+                "The upload target could not be signed.",
+            )
+        })?;
 
     Ok(UploadTarget {
         file_id,
@@ -546,11 +556,13 @@ async fn upload_by_id(
 ) -> Response {
     let file_id = match Uuid::parse_str(&id) {
         Ok(file_id) => file_id,
-        Err(_) => return upload_error(UploadError::new(
-            UploadErrorCode::FileNotFound,
-            format!("File not found: {id}"),
-            "File not found.",
-        )),
+        Err(_) => {
+            return upload_error(UploadError::new(
+                UploadErrorCode::FileNotFound,
+                format!("File not found: {id}"),
+                "File not found.",
+            ))
+        }
     };
     let Some(token) = parameters.get("token") else {
         return (StatusCode::FORBIDDEN, Body::empty()).into_response();
@@ -581,17 +593,14 @@ async fn upload_by_id(
 fn upload_error(error: UploadError) -> Response {
     (
         error.status(),
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "application/json",
-        )],
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
         json!({
             "statusCode": error.status().as_u16(),
             "code": error.code.as_str(),
             "message": error.message,
             "userFriendlyMessage": error.user_friendly,
         })
-            .to_string(),
+        .to_string(),
     )
         .into_response()
 }
@@ -623,7 +632,8 @@ pub async fn receive_file_stream(
         ));
     }
 
-    let pending_resource_path = build_pending_upload_resource_path(file_id, &location.resource_path);
+    let pending_resource_path =
+        build_pending_upload_resource_path(file_id, &location.resource_path);
     let mut writer = file_storage(state)
         .start_write(&location.location(workspace_id), &pending_resource_path)
         .await?;
@@ -685,18 +695,20 @@ async fn find_file(
     file_id: Uuid,
 ) -> Result<StoredFileRow, UploadError> {
     sqlx::query_as::<_, StoredFileRow>(
-        "SELECT id, path, size, \"mimeType\", status::text AS status, \"applicationId\", settings \
+        "SELECT id, path, size, status::text AS status, \"applicationId\", settings \
          FROM core.file WHERE id = $1 AND \"workspaceId\" = $2",
     )
     .bind(file_id)
     .bind(workspace_id)
     .fetch_optional(&state.core_pool)
     .await
-    .map_err(|error| UploadError::new(
-        UploadErrorCode::StorageInconsistent,
-        error.to_string(),
-        "The file record could not be read.",
-    ))?
+    .map_err(|error| {
+        UploadError::new(
+            UploadErrorCode::StorageInconsistent,
+            error.to_string(),
+            "The file record could not be read.",
+        )
+    })?
     .ok_or_else(|| {
         UploadError::new(
             UploadErrorCode::FileNotFound,
@@ -726,7 +738,11 @@ async fn file_location(
         application_universal_identifier,
         folder,
         resource_path: remove_file_folder_from_file_entity_path(&file.path).map_err(|message| {
-            UploadError::new(UploadErrorCode::BadRequest, message, "This file type is not supported.")
+            UploadError::new(
+                UploadErrorCode::BadRequest,
+                message,
+                "This file type is not supported.",
+            )
         })?,
     })
 }
@@ -761,7 +777,6 @@ pub struct CompletedUpload {
     pub path: String,
     pub size: i64,
     pub created_at: DateTime<Utc>,
-    pub mime_type: String,
     pub url: String,
 }
 
@@ -791,9 +806,7 @@ async fn complete_file_upload_inner(
     if Some(folder) != dedicated_folder && FileFolder::DEDICATED_COMPLETION.contains(&folder) {
         return Err(UploadError::new(
             UploadErrorCode::BadRequest,
-            format!(
-                "File {file_id} in folder {folder} is completed by its dedicated mutation"
-            ),
+            format!("File {file_id} in folder {folder} is completed by its dedicated mutation"),
             "This file must be completed with its dedicated mutation.",
         ));
     }
@@ -807,13 +820,13 @@ async fn complete_file_upload_inner(
             ));
         }
 
-        return signed_completion(state, &file, folder, workspace_id, file.size, &file.mime_type)
-            .await;
+        return signed_completion(state, &file, folder, workspace_id, file.size).await;
     }
 
     let location = file_location(state, workspace_id, &file).await?;
     let storage = file_storage(state);
-    let pending_resource_path = build_pending_upload_resource_path(file_id, &location.resource_path);
+    let pending_resource_path =
+        build_pending_upload_resource_path(file_id, &location.resource_path);
     let pending_location = location.location(workspace_id);
     let metadata = storage
         .metadata(&pending_location, &pending_resource_path)
@@ -821,7 +834,10 @@ async fn complete_file_upload_inner(
         .ok_or_else(|| {
             UploadError::new(
                 UploadErrorCode::FileNotUploaded,
-                format!("File \"{}\" has not been uploaded to storage yet.", file.path),
+                format!(
+                    "File \"{}\" has not been uploaded to storage yet.",
+                    file.path
+                ),
                 "The file has not been uploaded yet. Please upload it before confirming.",
             )
         })?;
@@ -839,7 +855,11 @@ async fn complete_file_upload_inner(
     }
 
     let prefix = storage
-        .read_prefix(&pending_location, &pending_resource_path, FILE_CONTENT_SNIFF_BYTE_COUNT)
+        .read_prefix(
+            &pending_location,
+            &pending_resource_path,
+            FILE_CONTENT_SNIFF_BYTE_COUNT,
+        )
         .await?;
     let info = extract_file_info(&prefix, &file.path).map_err(|error| {
         UploadError::new(
@@ -862,12 +882,10 @@ async fn complete_file_upload_inner(
 
     let mut size = metadata.size as i64;
 
-    if info.mime_type == "image/svg+xml" {
-        if size as u64 > MAX_SANITIZABLE_SVG_BYTES {
-            return Err(svg_too_large(format!(
-                "storage reports {size} bytes, above the {MAX_SANITIZABLE_SVG_BYTES} byte limit"
-            )));
-        }
+    if info.mime_type == "image/svg+xml" && size as u64 > MAX_SANITIZABLE_SVG_BYTES {
+        return Err(svg_too_large(format!(
+            "storage reports {size} bytes, above the {MAX_SANITIZABLE_SVG_BYTES} byte limit"
+        )));
     }
 
     storage
@@ -907,7 +925,7 @@ async fn complete_file_upload_inner(
 
     size = declared_size.max(size);
 
-    signed_completion(state, &file, folder, workspace_id, size, &info.mime_type).await
+    signed_completion(state, &file, folder, workspace_id, size).await
 }
 
 fn temporary_file(settings: &Option<Value>) -> bool {
@@ -924,18 +942,20 @@ async fn signed_completion(
     folder: FileFolder,
     workspace_id: Uuid,
     size: i64,
-    mime_type: &str,
 ) -> Result<CompletedUpload, UploadError> {
-    let created_at = sqlx::query_as::<_, (DateTime<Utc>,)>("SELECT \"createdAt\" FROM core.file WHERE id = $1")
-        .bind(file.id)
-        .fetch_one(&state.core_pool)
-        .await
-        .map_err(|error| UploadError::new(
-            UploadErrorCode::StorageInconsistent,
-            error.to_string(),
-            "The file record could not be read.",
-        ))?
-        .0;
+    let created_at =
+        sqlx::query_as::<_, (DateTime<Utc>,)>("SELECT \"createdAt\" FROM core.file WHERE id = $1")
+            .bind(file.id)
+            .fetch_one(&state.core_pool)
+            .await
+            .map_err(|error| {
+                UploadError::new(
+                    UploadErrorCode::StorageInconsistent,
+                    error.to_string(),
+                    "The file record could not be read.",
+                )
+            })?
+            .0;
     let signer = FileUrlSigner::new(
         state.jwt.clone(),
         state.config.server_url.clone(),
@@ -944,18 +964,19 @@ async fn signed_completion(
     let url = signer
         .signed_url_in_folder(file.id, workspace_id, folder)
         .await
-        .map_err(|error| UploadError::new(
-            UploadErrorCode::StorageInconsistent,
-            error.to_string(),
-            "The file url could not be signed.",
-        ))?;
+        .map_err(|error| {
+            UploadError::new(
+                UploadErrorCode::StorageInconsistent,
+                error.to_string(),
+                "The file url could not be signed.",
+            )
+        })?;
 
     Ok(CompletedUpload {
         id: file.id,
         path: file.path.clone(),
         size,
         created_at,
-        mime_type: mime_type.to_string(),
         url,
     })
 }
@@ -1009,11 +1030,14 @@ pub async fn graphql_create_file_upload(
     let field_metadata_universal_identifier =
         argument_optional_uuid(field, "fieldMetadataUniversalIdentifier")?;
 
-    if extname(&filename).is_empty() && !filename.is_empty() && !folder_allows_extensionless(&filename) {
-        return Err(GraphQlError::user_input(format!(
-            "Filename '{filename}' is not allowed"
-        ))
-        .with_sub_code("BAD_REQUEST"));
+    if extname(&filename).is_empty()
+        && !filename.is_empty()
+        && !folder_allows_extensionless(&filename)
+    {
+        return Err(
+            GraphQlError::user_input(format!("Filename '{filename}' is not allowed"))
+                .with_sub_code("BAD_REQUEST"),
+        );
     }
 
     let target = create_file_upload(
@@ -1054,13 +1078,15 @@ fn argument_string(field: &FieldSelection, name: &str) -> Result<String, GraphQl
         .and_then(Value::as_str)
         .map(String::from)
         .ok_or_else(|| {
-            GraphQlError::user_input(format!("Argument \"{name}\" is required")).with_sub_code("BAD_USER_INPUT")
+            GraphQlError::user_input(format!("Argument \"{name}\" is required"))
+                .with_sub_code("BAD_USER_INPUT")
         })
 }
 
 fn argument_number(field: &FieldSelection, name: &str) -> Result<i64, GraphQlError> {
     let value = field.argument(name).ok_or_else(|| {
-        GraphQlError::user_input(format!("Argument \"{name}\" is required")).with_sub_code("BAD_USER_INPUT")
+        GraphQlError::user_input(format!("Argument \"{name}\" is required"))
+            .with_sub_code("BAD_USER_INPUT")
     })?;
 
     value
@@ -1074,7 +1100,8 @@ fn argument_number(field: &FieldSelection, name: &str) -> Result<i64, GraphQlErr
 
 fn argument_uuid(field: &FieldSelection, name: &str) -> Result<Uuid, GraphQlError> {
     argument_optional_uuid(field, name)?.ok_or_else(|| {
-        GraphQlError::user_input(format!("Argument \"{name}\" is required")).with_sub_code("BAD_USER_INPUT")
+        GraphQlError::user_input(format!("Argument \"{name}\" is required"))
+            .with_sub_code("BAD_USER_INPUT")
     })
 }
 
@@ -1109,7 +1136,7 @@ fn argument_folder(field: &FieldSelection) -> Result<FileFolder, GraphQlError> {
 pub async fn cleanup_stale_files(state: &AppState) -> Result<i64, UploadError> {
     let storage = file_storage(state);
     let stale = sqlx::query_as::<_, StoredFileRow>(
-        "SELECT id, path, size, \"mimeType\", status::text AS status, \"applicationId\", settings \
+        "SELECT id, path, size, status::text AS status, \"applicationId\", settings \
          FROM core.file \
          WHERE (status = 'PENDING'::core.file_status_enum \
                 AND \"createdAt\" < now() - make_interval(secs => $1) \
@@ -1153,7 +1180,8 @@ pub async fn cleanup_stale_files(state: &AppState) -> Result<i64, UploadError> {
             continue;
         };
 
-        if folder == FileFolder::RecordExport || (file.status == "UPLOADED" && temporary_file(&file.settings))
+        if folder == FileFolder::RecordExport
+            || (file.status == "UPLOADED" && temporary_file(&file.settings))
         {
             let application = application_by_id(state, workspace_id, file.application_id).await;
             let Ok(application_universal_identifier) = application else {
@@ -1181,12 +1209,14 @@ pub async fn cleanup_stale_files(state: &AppState) -> Result<i64, UploadError> {
             continue;
         }
 
-        let affected = sqlx::query("DELETE FROM core.file WHERE id = $1 AND status = 'PENDING'::core.file_status_enum")
-            .bind(file.id)
-            .execute(&state.core_pool)
-            .await
-            .map(|result| result.rows_affected())
-            .unwrap_or_default();
+        let affected = sqlx::query(
+            "DELETE FROM core.file WHERE id = $1 AND status = 'PENDING'::core.file_status_enum",
+        )
+        .bind(file.id)
+        .execute(&state.core_pool)
+        .await
+        .map(|result| result.rows_affected())
+        .unwrap_or_default();
 
         if affected == 0 {
             continue;

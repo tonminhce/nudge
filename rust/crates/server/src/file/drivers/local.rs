@@ -46,10 +46,6 @@ impl LocalDriver {
         }
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
     fn canonical_root(&self) -> Result<PathBuf, StorageError> {
         std::fs::canonicalize(&self.root).map_err(|error| StorageError::Backend(error.to_string()))
     }
@@ -66,8 +62,7 @@ impl LocalDriver {
 
     fn resolve_readable(&self, file_path: &str) -> Result<PathBuf, StorageError> {
         let joined = self.root.join(file_path);
-        let resolved = std::fs::canonicalize(&joined)
-            .map_err(|_| StorageError::FileNotFound)?;
+        let resolved = std::fs::canonicalize(&joined).map_err(|_| StorageError::FileNotFound)?;
 
         self.assert_within_storage(&resolved)
     }
@@ -79,15 +74,11 @@ impl LocalDriver {
         std::fs::create_dir_all(folder)
             .map_err(|error| StorageError::Backend(error.to_string()))?;
 
-        let real_folder =
-            std::fs::canonicalize(folder).map_err(|error| StorageError::Backend(error.to_string()))?;
-        let target = real_folder.join(
-            joined
-                .file_name()
-                .ok_or(StorageError::InvalidPath(String::from(
-                    "Invalid storage path: missing file name",
-                )))?,
-        );
+        let real_folder = std::fs::canonicalize(folder)
+            .map_err(|error| StorageError::Backend(error.to_string()))?;
+        let target = real_folder.join(joined.file_name().ok_or(StorageError::InvalidPath(
+            String::from("Invalid storage path: missing file name"),
+        ))?);
 
         self.assert_within_storage(&target)?;
 
@@ -141,7 +132,11 @@ impl LocalDriver {
         }))
     }
 
-    pub async fn read_prefix(&self, file_path: &str, byte_count: u64) -> Result<Vec<u8>, StorageError> {
+    pub async fn read_prefix(
+        &self,
+        file_path: &str,
+        byte_count: u64,
+    ) -> Result<Vec<u8>, StorageError> {
         use tokio::io::AsyncReadExt;
 
         let resolved = self.resolve_readable(file_path)?;
@@ -169,7 +164,8 @@ impl LocalDriver {
         let target = absolute(&self.root, to);
         let folder = target.parent().unwrap_or(Path::new("/"));
 
-        std::fs::create_dir_all(folder).map_err(|error| StorageError::Backend(error.to_string()))?;
+        std::fs::create_dir_all(folder)
+            .map_err(|error| StorageError::Backend(error.to_string()))?;
 
         match if_match_checksum {
             Some(checksum) => self.rename_preconditioned(&source, &target, checksum).await,
