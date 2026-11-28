@@ -121,6 +121,13 @@ pub async fn find_one(
         )
         .await?;
     }
+    crate::query::visibility::apply_record_channel_visibility(
+        pool,
+        schema,
+        object_name_singular,
+        &mut records,
+    )
+    .await?;
 
     Ok(records.into_iter().next())
 }

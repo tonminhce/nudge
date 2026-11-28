@@ -50,6 +50,7 @@ pub struct FindManyArgs {
     pub offset: Option<i64>,
     pub with_deleted: bool,
     pub selected_field_names: Vec<String>,
+    pub skip_channel_visibility: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +319,15 @@ pub async fn find_many(
             object_name_singular,
             &mut result.records,
             nested,
+        )
+        .await?;
+    }
+    if !args.skip_channel_visibility {
+        crate::query::visibility::apply_record_channel_visibility(
+            pool,
+            schema,
+            object_name_singular,
+            &mut result.records,
         )
         .await?;
     }

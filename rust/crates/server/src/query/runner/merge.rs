@@ -115,6 +115,7 @@ async fn fetch_records_to_merge(
         &FindManyArgs {
             filter: Some(json!({"id": {"in": ids}})),
             selected_field_names: readable_field_names(schema, model),
+            skip_channel_visibility: true,
             ..Default::default()
         },
         false,

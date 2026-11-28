@@ -599,14 +599,16 @@ async fn execute_workspace(
             permissions,
             auth.workspace_member_id,
         )
-        .map_err(runner_graphql_error)?,
+        .map_err(runner_graphql_error)?
+        .with_user_workspace_id(auth.user_workspace_id),
         None => RunnerSchema::build(
             &workspace_id,
             schema.objects(),
             &maps.field_metadata_maps,
             &maps.index_metadata_maps,
         )
-        .map_err(runner_graphql_error)?,
+        .map_err(runner_graphql_error)?
+        .with_user_workspace_id(auth.user_workspace_id),
     });
     let actor = Some(ActorContext::from_auth(auth));
 
