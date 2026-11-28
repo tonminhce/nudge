@@ -11,7 +11,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Area | Upstream size | Nudge today |
 |---|---|---|
 | A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (seeding, DDL runner, metadata CRUD API and deferred queue merged; validation rules and UI editors remain) |
-| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL and REST verified live; search, duplicates/merge, advanced permissions, SSE and hooks remain) |
+| B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL, REST, Search and duplicate detection implemented; destructive merge, file-backed Search images, advanced access groups, full SSE and hooks remain) |
 | C. Auth and access control | ~12k LOC server | **part** (wave 2 and P1–P3 landed; object/field enforcement, transactional update RLS and feature-gated relation-hop RLS are implemented; access-group synchronization, sharing and the remaining permission surfaces are open) |
 | D. Web interface (Leptos) | ~330k LOC React | **part** (front-core, design system, app shell and core record surfaces landed; exact full-feature UI parity and the remaining product screens are open) |
 | E. Automations and integrations | ~60k LOC server | todo |
@@ -56,16 +56,16 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 |---|---|---|---|
 | `findMany` with filter, sort, keyset pagination, `totalCount` | **done** | 4 | shared runner + live parity; totalCount ignores cursor predicates and composite sort matches the reference |
 | `findOne` | **done** | 4 | nested relation projection matches the live reference |
-| `findDuplicates`, `mergeMany` | todo | 4→6 | REST routes return the explicit deferred-slice error; duplicate/merge query engines remain |
+| `findDuplicates`, `mergeMany` | **part** | 4→6 | duplicate detection supports `id`/`data` criteria through GraphQL and REST; merge is dry-run only, with destructive writes, child migration and collision handling open |
 | `createOne`/`createMany`, `updateOne`/`updateMany` | **done** | 4 | mutation round-trip capture matches live, including actor fields and upsert |
 | `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
 | `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
-| Full text search | todo | 4→6 | tsvector columns and GIN indexes exist; the cross-object Search resolver remains |
+| Full text search | **part** | 4→6 | cross-object ranking, filters, cursors, CJK fallback, favicons, metadata overrides and 39 standard labels across 35 locales are implemented; file signing, application-specific catalogs and replica routing remain |
 | Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope, upstream relative-date ranges and relation-hop feature gating. Access-group synchronization and sharing remain. |
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
 | Dynamic GraphQL schema generated from metadata | **done** | 4 | direct workspace execution with resolver classification, introspection and connection shaping |
-| Live updates over SSE (`OnEventSubscription`) | todo | 4→5 | frontend decoder lands in front-core; server transport and query registration remain |
+| Live updates over SSE (`OnEventSubscription`) | **part** | 4→5 | workspace-scoped streams, query registration, named next frames, post-commit `updated` events and browser readiness/cancellation are implemented; create/delete, filter-level matching, metadata/queue events, reconnect, multi-node transport and hooks remain |
 | Pre and post query hooks (actor stamping, timeline snapshots) | todo | 4→6 | actor stamping exists in mutations; timeline/post-hook engine remains |
 
 ## C. Auth and access control
@@ -153,7 +153,7 @@ the live reference in the browser.
 
 ## What is left, in order
 
-1. Permissions P1–P5 and the remaining record-plane gaps: search, duplicates/merge, SSE and hooks.
+1. Permissions P4–P5 and record-plane gaps: access-group synchronization, private/share overlays, destructive merge, file-backed Search images, full SSE events and hooks.
 2. Wave 5 frontend: finish U1/U2, then U3 shell + auth, U4 record surfaces, U5 settings, U6 desktop/static serving.
 3. Wave 6: webhooks, files, SMTP email, search/import/export, timeline, favorites, notes/tasks.
 4. Wave 7: queues, workflows, messaging/calendar sync, AI agents, MCP, billing and the remaining platform features.
