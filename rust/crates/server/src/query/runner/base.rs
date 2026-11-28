@@ -557,52 +557,64 @@ pub fn select_columns(
 
     if selection.field_names.is_empty() {
         selected.extend(model.shape.columns.iter().cloned());
-    } else {
-        for field_name in &selection.field_names {
-            if let Some(column) = model.shape.column(field_name) {
-                if !selected
-                    .iter()
-                    .any(|pushed| pushed.column_name == column.column_name)
-                {
-                    selected.push(column.clone());
-                }
+
+        return Ok(selected);
+    }
+
+    for field_name in &selection.field_names {
+        if let Some(column) = model.shape.column(field_name) {
+            push_selected_column(&mut selected, column);
+            continue;
+        }
+
+        let composite = model
+            .shape
+            .columns
+            .iter()
+            .filter(|column| {
+                column
+                    .composite_parent_field_name
+                    .as_deref()
+                    .is_some_and(|parent| parent == field_name)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !composite.is_empty() {
+            for column in &composite {
+                push_selected_column(&mut selected, column);
+            }
+
+            continue;
+        }
+
+        if let Some(join_column) = model
+            .shape
+            .relation(field_name)
+            .and_then(|relation| relation.join_column_name.as_deref())
+        {
+            if let Some(column) = model.shape.column(join_column) {
+                push_selected_column(&mut selected, column);
                 continue;
             }
-
-            let mut composite = model
-                .shape
-                .columns
-                .iter()
-                .filter(|column| {
-                    column
-                        .composite_parent_field_name
-                        .as_deref()
-                        .is_some_and(|parent| parent == field_name)
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-
-            if composite.is_empty() {
-                if let Some(relation) = model.shape.relation(field_name) {
-                    if let Some(join_column) = relation.join_column_name.as_deref() {
-                        if let Some(column) = model.shape.column(join_column) {
-                            selected.push(column.clone());
-                            continue;
-                        }
-                    }
-                }
-
-                return Err(RunnerError::unknown_column(
-                    field_name,
-                    &model.object.name_singular,
-                ));
-            }
-
-            selected.append(&mut composite);
         }
+
+        return Err(RunnerError::unknown_column(
+            field_name,
+            &model.object.name_singular,
+        ));
     }
 
     Ok(selected)
+}
+
+fn push_selected_column(selected: &mut Vec<ColumnShape>, column: &ColumnShape) {
+    if !selected
+        .iter()
+        .any(|pushed| pushed.column_name == column.column_name)
+    {
+        selected.push(column.clone());
+    }
 }
 
 pub fn render_select_list(
@@ -848,4 +860,282 @@ pub fn validate_complexity(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::query::runner::find_many::parse_order_by;
+    use crate::query::runner::find_many::RelationJoins;
+
+    const PERSON_TABLE: &str = "person";
+
+    const FLAT_NAME_PROJECTION: &str = "\"person\".\"id\" AS \"person_id\", \"person\".\"nameFirstName\"::text AS \"person_nameFirstName\", \"person\".\"nameLastName\"::text AS \"person_nameLastName\"";
+
+    const FLAT_NAME_AND_POSITION_PROJECTION: &str = "\"person\".\"id\" AS \"person_id\", \"person\".\"nameFirstName\"::text AS \"person_nameFirstName\", \"person\".\"position\" AS \"person_position\"";
+
+    fn fixture_id(byte: u8) -> Uuid {
+        Uuid::from_bytes([byte; 16])
+    }
+
+    fn fixture_field(
+        byte: u8,
+        name: &str,
+        field_type: FieldMetadataType,
+        settings: Option<Value>,
+        target_object: Option<Uuid>,
+    ) -> FlatFieldMetadata {
+        let id = fixture_id(byte);
+
+        FlatFieldMetadata {
+            id,
+            universal_identifier: id.to_string(),
+            object_metadata_id: fixture_id(0x10),
+            object_metadata_universal_identifier: "person-object".to_string(),
+            field_type,
+            name: name.to_string(),
+            label: name.to_string(),
+            is_active: true,
+            is_nullable: true,
+            settings,
+            relation_target_object_metadata_id: target_object,
+            relation_target_field_metadata_id: None,
+            ..Default::default()
+        }
+    }
+
+    fn runner_fixture_schema() -> RunnerSchema {
+        let mut fields: FlatEntityMaps<FlatFieldMetadata> = FlatEntityMaps::default();
+        let many_to_one = json!({ "relationType": "MANY_TO_ONE" });
+
+        let person_fields = [
+            fixture_field(1, "id", FieldMetadataType::Uuid, None, None),
+            fixture_field(2, "name", FieldMetadataType::FullName, None, None),
+            fixture_field(3, "position", FieldMetadataType::Position, None, None),
+            fixture_field(4, "deletedAt", FieldMetadataType::DateTime, None, None),
+            fixture_field(
+                5,
+                "company",
+                FieldMetadataType::Relation,
+                Some(many_to_one),
+                Some(fixture_id(0x20)),
+            ),
+        ];
+
+        for field in person_fields {
+            let id = field.id.to_string();
+            let universal_identifier = field.universal_identifier.clone();
+            fields.add(id, field, universal_identifier, "application-id");
+        }
+
+        let mut company_fields: FlatEntityMaps<FlatFieldMetadata> = FlatEntityMaps::default();
+        let name_field = {
+            let mut field = fixture_field(6, "name", FieldMetadataType::Text, None, None);
+            field.object_metadata_id = fixture_id(0x20);
+            field.object_metadata_universal_identifier = "company-object".to_string();
+            field
+        };
+        let company_id = {
+            let mut field = fixture_field(7, "id", FieldMetadataType::Uuid, None, None);
+            field.object_metadata_id = fixture_id(0x20);
+            field.object_metadata_universal_identifier = "company-object".to_string();
+            field
+        };
+
+        for field in [company_id, name_field] {
+            let id = field.id.to_string();
+            let universal_identifier = field.universal_identifier.clone();
+            company_fields.add(id, field, universal_identifier, "application-id");
+        }
+
+        let person = FlatObjectMetadata {
+            id: fixture_id(0x10),
+            universal_identifier: "person-object".to_string(),
+            name_singular: PERSON_TABLE.to_string(),
+            name_plural: "people".to_string(),
+            label_singular: "Person".to_string(),
+            label_plural: "People".to_string(),
+            application_universal_identifier:
+                crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER.to_string(),
+            target_table_name: Some(PERSON_TABLE.to_string()),
+            field_ids: (1u8..6).map(|byte| fixture_id(byte).to_string()).collect(),
+            ..Default::default()
+        };
+
+        let company = FlatObjectMetadata {
+            id: fixture_id(0x20),
+            universal_identifier: "company-object".to_string(),
+            name_singular: "company".to_string(),
+            name_plural: "companies".to_string(),
+            label_singular: "Company".to_string(),
+            label_plural: "Companies".to_string(),
+            application_universal_identifier:
+                crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER.to_string(),
+            target_table_name: Some("company".to_string()),
+            field_ids: (6u8..8).map(|byte| fixture_id(byte).to_string()).collect(),
+            ..Default::default()
+        };
+
+        let mut combined: FlatEntityMaps<FlatFieldMetadata> = FlatEntityMaps::default();
+
+        for map in [fields, company_fields] {
+            for field in map.by_universal_identifier.values() {
+                let id = field.id.to_string();
+                let universal_identifier = field.universal_identifier.clone();
+                combined.add(id, field.clone(), universal_identifier, "application-id");
+            }
+        }
+
+        RunnerSchema::build(
+            &Uuid::nil(),
+            &[person, company],
+            &combined,
+            &FlatEntityMaps::default(),
+        )
+        .expect("fixture runner schema")
+    }
+
+    fn select_sql(model: &ObjectModel, field_names: &[&str]) -> String {
+        let selection =
+            Selection::from_fields(field_names.iter().map(|name| name.to_string()).collect());
+        let columns = select_columns(model, &selection).expect("selected columns");
+        let mapped = columns
+            .into_iter()
+            .map(|column| {
+                let alias = column_result_alias(PERSON_TABLE, &column.column_name);
+                (column, alias.clone(), alias)
+            })
+            .collect::<Vec<_>>();
+
+        render_select_list(PERSON_TABLE, &mapped, &[]).expect("select list")
+    }
+
+    fn where_sql(schema: &RunnerSchema, filter: &Value) -> String {
+        let mut suffixes = Suffixes::new();
+        let compiled = compile_runner_filter(schema, PERSON_TABLE, Some(filter), &mut suffixes)
+            .expect("compiled filter");
+        let clauses = compiled.map(|filter| filter.clauses).unwrap_or_default();
+
+        resolve_where_clauses(schema, PERSON_TABLE, PERSON_TABLE, &clauses).expect("where clause")
+    }
+
+    #[test]
+    fn a_flat_composite_column_selected_by_name_is_projected() {
+        let schema = runner_fixture_schema();
+        let model = schema.object(PERSON_TABLE).expect("person model");
+
+        assert_eq!(
+            select_sql(model, &["id", "nameFirstName", "nameLastName"]),
+            FLAT_NAME_PROJECTION
+        );
+    }
+
+    #[test]
+    fn a_composite_parent_selection_expands_into_the_same_flat_columns() {
+        let schema = runner_fixture_schema();
+        let model = schema.object(PERSON_TABLE).expect("person model");
+
+        assert_eq!(select_sql(model, &["id", "name"]), FLAT_NAME_PROJECTION);
+        assert_eq!(
+            select_sql(model, &["nameFirstName", "name", "nameLastName"]),
+            select_sql(model, &["name"])
+        );
+    }
+
+    #[test]
+    fn a_to_one_relation_name_still_projects_its_join_column() {
+        let schema = runner_fixture_schema();
+        let model = schema.object(PERSON_TABLE).expect("person model");
+
+        assert_eq!(
+            select_sql(model, &["company"]),
+            "\"person\".\"companyId\" AS \"person_companyId\""
+        );
+    }
+
+    #[test]
+    fn an_or_filter_over_composite_sub_fields_compiles_to_flat_columns() {
+        let schema = runner_fixture_schema();
+        let sql = where_sql(
+            &schema,
+            &json!({
+                "or": [
+                    { "name": { "firstName": { "eq": "Alice" } } },
+                    { "name": { "firstName": { "eq": "Bob" } } }
+                ]
+            }),
+        );
+
+        assert_eq!(sql.matches("\"person\".\"nameFirstName\"").count(), 4);
+        assert!(sql.contains(" OR "), "or branches were not joined: {sql}");
+        assert!(sql.contains(":nameFirstName0000000001"));
+        assert!(sql.contains(":nameFirstName0000000003"));
+        assert!(
+            !sql.contains("\"person\".\"name\""),
+            "the composite parent was asked for as a column: {sql}"
+        );
+    }
+
+    #[test]
+    fn an_is_null_filter_compiles_beside_a_flat_composite_projection() {
+        let schema = runner_fixture_schema();
+        let model = schema.object(PERSON_TABLE).expect("person model");
+
+        assert_eq!(
+            where_sql(&schema, &json!({ "position": { "is": "NULL" } })),
+            "(\"person\".\"position\" IS NULL)"
+        );
+        assert_eq!(
+            select_sql(model, &["id", "nameFirstName", "position"]),
+            FLAT_NAME_AND_POSITION_PROJECTION
+        );
+    }
+
+    fn order_fragment(order: &ResolvedOrder) -> String {
+        format!(
+            "{} {} {}",
+            order.expression,
+            order.order.order.as_str(),
+            order.order.nulls.as_str()
+        )
+    }
+
+    #[test]
+    fn ordering_on_a_composite_sub_field_uses_the_flat_column() {
+        let schema = runner_fixture_schema();
+        let mut joins = RelationJoins::default();
+        let orders = parse_order_by(
+            &schema,
+            PERSON_TABLE,
+            PERSON_TABLE,
+            Some(&json!([{ "name": { "lastName": "AscNullsFirst" } }])),
+            &mut joins,
+        )
+        .expect("composite order by");
+
+        assert_eq!(orders.len(), 1);
+        assert_eq!(
+            order_fragment(&orders[0]),
+            "LOWER(\"person\".\"nameLastName\") ASC NULLS FIRST"
+        );
+    }
+
+    #[test]
+    fn a_column_absent_from_the_shape_still_reports_unknown_column() {
+        let schema = runner_fixture_schema();
+        let model = schema.object(PERSON_TABLE).expect("person model");
+        let error = select_columns(
+            model,
+            &Selection::from_fields(vec!["nameMiddleName".to_string()]),
+        )
+        .expect_err("unknown flat column must fail");
+
+        assert_eq!(error.code(), "UNKNOWN_COLUMN");
+        assert_eq!(
+            error.message(),
+            "Column \"nameMiddleName\" does not exist on \"person\""
+        );
+    }
 }
