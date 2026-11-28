@@ -79,10 +79,36 @@ fn can_read_object(
     })
 }
 
+fn effective_is_active(object: &FlatObjectMetadata) -> bool {
+    override_property(object, "isActive")
+        .and_then(Value::as_bool)
+        .unwrap_or(object.is_active)
+}
+
+fn effective_label_singular(object: &FlatObjectMetadata) -> String {
+    override_property(object, "labelSingular")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| object.label_singular.clone())
+}
+
+fn override_property<'a>(object: &'a FlatObjectMetadata, property: &str) -> Option<&'a Value> {
+    let overrides = object.overrides.as_ref()?.as_object()?;
+    if let Some(value) = overrides.get(property) {
+        return Some(value);
+    }
+    let owner = object.application_universal_identifier.as_str();
+    overrides
+        .iter()
+        .filter(|(author, _)| author.as_str() != owner)
+        .find_map(|(_, entry)| entry.get(property))
+        .or_else(|| overrides.get(owner).and_then(|entry| entry.get(property)))
+}
+
 fn select_objects(objects: &[FlatObjectMetadata], args: &SearchArgs) -> Vec<FlatObjectMetadata> {
     objects
         .iter()
-        .filter(|object| object.is_active)
+        .filter(|object| effective_is_active(object))
         .filter(|object| {
             if !args.included_object_name_singulars.is_empty() {
                 return !CHANNEL_VISIBILITY_OBJECTS.contains(&object.name_singular.as_str())
@@ -280,7 +306,7 @@ async fn search_object(
     Ok(records
         .into_iter()
         .map(|mut record| {
-            record.object_label_singular = object.label_singular.clone();
+            record.object_label_singular = effective_label_singular(object);
             record
         })
         .collect())
@@ -1048,6 +1074,27 @@ mod tests {
         assert!(has_cjk_characters("𠮷 神 ﾒ ぁ ᄀ"));
         assert!(!has_cjk_characters("plain ASCII"));
         assert_eq!(escape_for_ilike("50%_\\"), "50\\%\\_\\\\");
+    }
+
+    #[test]
+    fn object_overrides_control_search_activity_and_labels() {
+        let mut object = FlatObjectMetadata {
+            name_singular: String::from("company"),
+            label_singular: String::from("Company"),
+            is_active: true,
+            application_universal_identifier: String::from("owner"),
+            overrides: Some(json!({
+                "owner": {"isActive": false, "labelSingular": "Owner Company"},
+                "custom": {"labelSingular": "Custom Company"}
+            })),
+            ..Default::default()
+        };
+        assert!(!effective_is_active(&object));
+        assert_eq!(effective_label_singular(&object), "Custom Company");
+
+        object.overrides = Some(json!({"isActive": false, "labelSingular": "Legacy Company"}));
+        assert!(!effective_is_active(&object));
+        assert_eq!(effective_label_singular(&object), "Legacy Company");
     }
 
     #[test]
