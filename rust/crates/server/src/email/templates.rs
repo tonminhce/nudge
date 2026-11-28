@@ -76,6 +76,15 @@ pub fn format_medium_long_utc(value: DateTime<Utc>) -> String {
     )
 }
 
+pub fn format_long_date_utc(value: DateTime<Utc>) -> String {
+    format!(
+        "{} {}, {}",
+        value.format("%B"),
+        value.day(),
+        value.format("%Y")
+    )
+}
+
 pub fn format_duration_long(milliseconds: i64) -> String {
     let abs = milliseconds.unsigned_abs();
     let units = [
@@ -903,6 +912,130 @@ Developers https://docs.twenty.com/
 Twenty.com, Public Benefit Corporation
 San Francisco / Paris"##;
 
+pub const BILLING_RENEWING_HTML: &str = r##"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html dir="ltr" lang="{{locale}}"><head><meta content="text/html; charset=UTF-8" http-equiv="Content-Type"/><meta name="x-apple-disable-message-reformatting"/><title>Twenty email</title><style>
+    @font-face {
+      font-family: 'Trebuchet MS';
+      font-style: normal;
+      font-weight: 400;
+      mso-font-alt: 'sans-serif';
+      
+    }
+
+    * {
+      font-family: 'Trebuchet MS', sans-serif;
+    }
+  </style></head><!--$--><!--html--><!--head--><table align="center" width="333" border="0" cellPadding="0" cellSpacing="0" role="presentation" style="max-width:37.5em"><tbody><tr style="width:100%"><td><img alt="Twenty logo" height="40" src="https://app.twenty.com/images/icons/windows11/Square150x150Logo.scale-100.png" style="display:block;outline:none;border:none;text-decoration:none;margin-bottom:40px" width="40"/><h1 style="font-family:Trebuchet MS;font-size:24px;font-weight:600;color:#333333">Your plan renews soon</h1><p style="font-size:13px;line-height:20px;font-family:Trebuchet MS;font-weight:400;color:#666666;margin-top:16px;margin-bottom:16px">{{greeting}}<br/><br/>Just so it&#x27;s never a surprise, here&#x27;s a heads up about your annual plan.<br/><br/>Your annual plan for <b>{{workspace_display_name}}</b> renews on {{renews_at}}.<br/><br/>No action is needed if you&#x27;d like to continue. If you&#x27;d rather not renew, you can cancel anytime before then.</p><br/><a href="{{link}}" style="line-height:100%;text-decoration:none;display:inline-flex;max-width:100%;mso-padding-alt:0px;padding:8px 32px;border-radius:8px;border:1px solid rgba(0, 0, 0, 0.04);background:#333333;box-shadow:0px 2px 4px 0px rgba(0, 0, 0, 0.04), 0px 0px 4px 0px rgba(0, 0, 0, 0.08);color:#ffffff;font-size:13px;font-weight:600;width:auto;padding-top:8px;padding-right:32px;padding-bottom:8px;padding-left:32px" target="_blank"><span><!--[if mso]><i style="mso-font-width:400%;mso-text-raise:12px" hidden>&#8202;&#8202;&#8202;&#8202;</i><![endif]--></span><span style="max-width:100%;display:inline-block;line-height:120%;mso-padding-alt:0px;mso-text-raise:6px">Manage subscription</span><span><!--[if mso]><i style="mso-font-width:400%" hidden>&#8202;&#8202;&#8202;&#8202;&#8203;</i><![endif]--></span></a><br/><br/><table align="center" width="100%" border="0" cellPadding="0" cellSpacing="0" role="presentation" style="max-width:37.5em;margin-top:12px"><tbody><tr style="width:100%"><td><table align="center" width="100%" border="0" cellPadding="0" cellSpacing="0" role="presentation"><tbody style="width:100%"><tr style="width:100%"><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://twenty.com/" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Website</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://github.com/twentyhq/twenty" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Github</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://docs.twenty.com/getting-started/introduction" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">User guide</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://docs.twenty.com/" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Developers</a></p></td></tr></tbody></table><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0">Twenty.com, Public Benefit Corporation<br/>San Francisco / Paris</p></td></tr></tbody></table></td></tr></tbody></table><!--/$--></html>"##;
+pub const BILLING_RENEWING_TEXT: &str = r##"Twenty email
+
+
+YOUR PLAN RENEWS SOON
+
+{{greeting}}
+
+Just so it's never a surprise, here's a heads up about your annual plan.
+
+Your annual plan for {{workspace_display_name}} renews on {{renews_at}}.
+
+No action is needed if you'd like to continue. If you'd rather not renew, you can cancel anytime before then.
+
+
+Manage subscription {{link}}
+
+
+
+Website https://twenty.com/
+
+Github https://github.com/twentyhq/twenty
+
+User guide https://docs.twenty.com/getting-started/introduction
+
+Developers https://docs.twenty.com/
+
+Twenty.com, Public Benefit Corporation
+San Francisco / Paris"##;
+pub const BILLING_CONVERTING_HTML: &str = r##"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html dir="ltr" lang="{{locale}}"><head><meta content="text/html; charset=UTF-8" http-equiv="Content-Type"/><meta name="x-apple-disable-message-reformatting"/><title>Twenty email</title><style>
+    @font-face {
+      font-family: 'Trebuchet MS';
+      font-style: normal;
+      font-weight: 400;
+      mso-font-alt: 'sans-serif';
+      
+    }
+
+    * {
+      font-family: 'Trebuchet MS', sans-serif;
+    }
+  </style></head><!--$--><!--html--><!--head--><table align="center" width="333" border="0" cellPadding="0" cellSpacing="0" role="presentation" style="max-width:37.5em"><tbody><tr style="width:100%"><td><img alt="Twenty logo" height="40" src="https://app.twenty.com/images/icons/windows11/Square150x150Logo.scale-100.png" style="display:block;outline:none;border:none;text-decoration:none;margin-bottom:40px" width="40"/><h1 style="font-family:Trebuchet MS;font-size:24px;font-weight:600;color:#333333">A heads up before your trial ends</h1><p style="font-size:13px;line-height:20px;font-family:Trebuchet MS;font-weight:400;color:#666666;margin-top:16px;margin-bottom:16px">{{greeting}}<br/><br/>We don&#x27;t like surprise charges, so here&#x27;s a friendly heads up.<br/><br/>Your free trial of <b>{{workspace_display_name}}</b> ends on {{trial_ends_at}}. Unless you cancel before then, the card on file will be charged for your {{plan_interval}} plan.<br/><br/>If Twenty is working for you, you&#x27;re all set — there&#x27;s nothing to do. If it&#x27;s not the right fit, you can cancel in one click before then and you won&#x27;t be charged.</p><br/><a href="{{link}}" style="line-height:100%;text-decoration:none;display:inline-flex;max-width:100%;mso-padding-alt:0px;padding:8px 32px;border-radius:8px;border:1px solid rgba(0, 0, 0, 0.04);background:#333333;box-shadow:0px 2px 4px 0px rgba(0, 0, 0, 0.04), 0px 0px 4px 0px rgba(0, 0, 0, 0.08);color:#ffffff;font-size:13px;font-weight:600;width:auto;padding-top:8px;padding-right:32px;padding-bottom:8px;padding-left:32px" target="_blank"><span><!--[if mso]><i style="mso-font-width:400%;mso-text-raise:12px" hidden>&#8202;&#8202;&#8202;&#8202;</i><![endif]--></span><span style="max-width:100%;display:inline-block;line-height:120%;mso-padding-alt:0px;mso-text-raise:6px">Manage subscription</span><span><!--[if mso]><i style="mso-font-width:400%" hidden>&#8202;&#8202;&#8202;&#8202;&#8203;</i><![endif]--></span></a><br/><br/><table align="center" width="100%" border="0" cellPadding="0" cellSpacing="0" role="presentation" style="max-width:37.5em;margin-top:12px"><tbody><tr style="width:100%"><td><table align="center" width="100%" border="0" cellPadding="0" cellSpacing="0" role="presentation"><tbody style="width:100%"><tr style="width:100%"><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://twenty.com/" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Website</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://github.com/twentyhq/twenty" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Github</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://docs.twenty.com/getting-started/introduction" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">User guide</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://docs.twenty.com/" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Developers</a></p></td></tr></tbody></table><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0">Twenty.com, Public Benefit Corporation<br/>San Francisco / Paris</p></td></tr></tbody></table></td></tr></tbody></table><!--/$--></html>"##;
+pub const BILLING_CONVERTING_TEXT: &str = r##"Twenty email
+
+
+A HEADS UP BEFORE YOUR TRIAL ENDS
+
+{{greeting}}
+
+We don't like surprise charges, so here's a friendly heads up.
+
+Your free trial of {{workspace_display_name}} ends on {{trial_ends_at}}. Unless you cancel before then, the card on file will be charged for your {{plan_interval}} plan.
+
+If Twenty is working for you, you're all set — there's nothing to do. If it's not the right fit, you can cancel in one click before then and you won't be charged.
+
+
+Manage subscription {{link}}
+
+
+
+Website https://twenty.com/
+
+Github https://github.com/twentyhq/twenty
+
+User guide https://docs.twenty.com/getting-started/introduction
+
+Developers https://docs.twenty.com/
+
+Twenty.com, Public Benefit Corporation
+San Francisco / Paris"##;
+pub const BILLING_ENDING_HTML: &str = r##"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html dir="ltr" lang="{{locale}}"><head><meta content="text/html; charset=UTF-8" http-equiv="Content-Type"/><meta name="x-apple-disable-message-reformatting"/><title>Twenty email</title><style>
+    @font-face {
+      font-family: 'Trebuchet MS';
+      font-style: normal;
+      font-weight: 400;
+      mso-font-alt: 'sans-serif';
+      
+    }
+
+    * {
+      font-family: 'Trebuchet MS', sans-serif;
+    }
+  </style></head><!--$--><!--html--><!--head--><table align="center" width="333" border="0" cellPadding="0" cellSpacing="0" role="presentation" style="max-width:37.5em"><tbody><tr style="width:100%"><td><img alt="Twenty logo" height="40" src="https://app.twenty.com/images/icons/windows11/Square150x150Logo.scale-100.png" style="display:block;outline:none;border:none;text-decoration:none;margin-bottom:40px" width="40"/><h1 style="font-family:Trebuchet MS;font-size:24px;font-weight:600;color:#333333">Your trial is ending soon</h1><p style="font-size:13px;line-height:20px;font-family:Trebuchet MS;font-weight:400;color:#666666;margin-top:16px;margin-bottom:16px">{{greeting}}<br/><br/>Your free trial of <b>{{workspace_display_name}}</b> ends on {{trial_ends_at}}.<br/><br/>To keep your workspace and everything you&#x27;ve built, add a payment method and pick a plan.<br/><br/>If you do nothing, we&#x27;ll pause your workspace and keep your data safe for {{data_retention_days}} days in case you change your mind — no card will be charged.</p><br/><a href="{{link}}" style="line-height:100%;text-decoration:none;display:inline-flex;max-width:100%;mso-padding-alt:0px;padding:8px 32px;border-radius:8px;border:1px solid rgba(0, 0, 0, 0.04);background:#333333;box-shadow:0px 2px 4px 0px rgba(0, 0, 0, 0.04), 0px 0px 4px 0px rgba(0, 0, 0, 0.08);color:#ffffff;font-size:13px;font-weight:600;width:auto;padding-top:8px;padding-right:32px;padding-bottom:8px;padding-left:32px" target="_blank"><span><!--[if mso]><i style="mso-font-width:400%;mso-text-raise:12px" hidden>&#8202;&#8202;&#8202;&#8202;</i><![endif]--></span><span style="max-width:100%;display:inline-block;line-height:120%;mso-padding-alt:0px;mso-text-raise:6px">Add a payment method</span><span><!--[if mso]><i style="mso-font-width:400%" hidden>&#8202;&#8202;&#8202;&#8202;&#8203;</i><![endif]--></span></a><br/><br/><table align="center" width="100%" border="0" cellPadding="0" cellSpacing="0" role="presentation" style="max-width:37.5em;margin-top:12px"><tbody><tr style="width:100%"><td><table align="center" width="100%" border="0" cellPadding="0" cellSpacing="0" role="presentation"><tbody style="width:100%"><tr style="width:100%"><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://twenty.com/" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Website</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://github.com/twentyhq/twenty" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Github</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://docs.twenty.com/getting-started/introduction" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">User guide</a></p></td><td data-id="__react-email-column"><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0"><a href="https://docs.twenty.com/" style="color:#b3b3b3;text-decoration-line:none;text-decoration:underline" target="_blank">Developers</a></p></td></tr></tbody></table><p style="font-size:12px;line-height:20px;font-weight:400;color:#b3b3b3;margin:0 0 12px 0;margin-top:0;margin-right:0;margin-bottom:12px;margin-left:0">Twenty.com, Public Benefit Corporation<br/>San Francisco / Paris</p></td></tr></tbody></table></td></tr></tbody></table><!--/$--></html>"##;
+pub const BILLING_ENDING_TEXT: &str = r##"Twenty email
+
+
+YOUR TRIAL IS ENDING SOON
+
+{{greeting}}
+
+Your free trial of {{workspace_display_name}} ends on {{trial_ends_at}}.
+
+To keep your workspace and everything you've built, add a payment method and pick a plan.
+
+If you do nothing, we'll pause your workspace and keep your data safe for {{data_retention_days}} days in case you change your mind — no card will be charged.
+
+
+Add a payment method {{link}}
+
+
+
+Website https://twenty.com/
+
+Github https://github.com/twentyhq/twenty
+
+User guide https://docs.twenty.com/getting-started/introduction
+
+Developers https://docs.twenty.com/
+
+Twenty.com, Public Benefit Corporation
+San Francisco / Paris"##;
+
 pub fn send_email_verification_link_email(
     link: &str,
     locale: &str,
@@ -1301,6 +1434,144 @@ pub fn clean_suspended_workspace_email(
     }
 }
 
+pub fn billing_subscription_renewing_email(
+    user_name: &str,
+    workspace_display_name: &str,
+    renews_at: DateTime<Utc>,
+    link: &str,
+    locale: &str,
+) -> RenderedEmail {
+    let (html_greeting, text_greeting) = if user_name.chars().count() > 1 {
+        (
+            format!("Hi {},", escape_react(user_name)),
+            format!("Hi {user_name},"),
+        )
+    } else {
+        (String::from("Hello,"), String::from("Hello,"))
+    };
+    let formatted_date = format_long_date_utc(renews_at);
+    let slots = vec![
+        ("{{greeting}}", html_greeting),
+        (
+            "{{workspace_display_name}}",
+            escape_react(workspace_display_name),
+        ),
+        ("{{renews_at}}", formatted_date.clone()),
+        ("{{link}}", escape_react(link)),
+    ];
+    let text_slots = vec![
+        ("{{greeting}}", text_greeting),
+        (
+            "{{workspace_display_name}}",
+            workspace_display_name.to_string(),
+        ),
+        ("{{renews_at}}", formatted_date),
+        ("{{link}}", link.to_string()),
+    ];
+
+    RenderedEmail {
+        html: fill(BILLING_RENEWING_HTML, &extend(locale_pair(locale), &slots)),
+        text: fill(BILLING_RENEWING_TEXT, &text_slots),
+    }
+}
+
+pub fn billing_trial_converting_email(
+    user_name: &str,
+    workspace_display_name: &str,
+    trial_ends_at: DateTime<Utc>,
+    interval: &str,
+    link: &str,
+    locale: &str,
+) -> RenderedEmail {
+    let (html_greeting, text_greeting) = if user_name.chars().count() > 1 {
+        (
+            format!("Hi {},", escape_react(user_name)),
+            format!("Hi {user_name},"),
+        )
+    } else {
+        (String::from("Hello,"), String::from("Hello,"))
+    };
+    let plan_interval = if interval == "year" {
+        "annual"
+    } else {
+        "monthly"
+    };
+    let formatted_date = format_long_date_utc(trial_ends_at);
+    let slots = vec![
+        ("{{greeting}}", html_greeting),
+        (
+            "{{workspace_display_name}}",
+            escape_react(workspace_display_name),
+        ),
+        ("{{trial_ends_at}}", formatted_date.clone()),
+        ("{{plan_interval}}", plan_interval.to_string()),
+        ("{{link}}", escape_react(link)),
+    ];
+    let text_slots = vec![
+        ("{{greeting}}", text_greeting),
+        (
+            "{{workspace_display_name}}",
+            workspace_display_name.to_string(),
+        ),
+        ("{{trial_ends_at}}", formatted_date),
+        ("{{plan_interval}}", plan_interval.to_string()),
+        ("{{link}}", link.to_string()),
+    ];
+
+    RenderedEmail {
+        html: fill(
+            BILLING_CONVERTING_HTML,
+            &extend(locale_pair(locale), &slots),
+        ),
+        text: fill(BILLING_CONVERTING_TEXT, &text_slots),
+    }
+}
+
+pub fn billing_trial_ending_email(
+    user_name: &str,
+    workspace_display_name: &str,
+    trial_ends_at: DateTime<Utc>,
+    data_retention_days: i64,
+    link: &str,
+    locale: &str,
+) -> RenderedEmail {
+    let (html_greeting, text_greeting) = if user_name.chars().count() > 1 {
+        (
+            format!("Hi {},", escape_react(user_name)),
+            format!("Hi {user_name},"),
+        )
+    } else {
+        (String::from("Hello,"), String::from("Hello,"))
+    };
+    let formatted_date = format_long_date_utc(trial_ends_at);
+    let days_str = data_retention_days.to_string();
+    let slots = vec![
+        ("{{greeting}}", html_greeting),
+        (
+            "{{workspace_display_name}}",
+            escape_react(workspace_display_name),
+        ),
+        ("{{trial_ends_at}}", formatted_date.clone()),
+        ("{{data_retention_days}}", days_str.clone()),
+        ("{{link}}", escape_react(link)),
+    ];
+    let text_slots = vec![
+        ("{{greeting}}", text_greeting),
+        (
+            "{{workspace_display_name}}",
+            workspace_display_name.to_string(),
+        ),
+        ("{{trial_ends_at}}", formatted_date),
+        ("{{data_retention_days}}", days_str),
+        ("{{link}}", link.to_string()),
+    ];
+
+    RenderedEmail {
+        html: fill(BILLING_ENDING_HTML, &extend(locale_pair(locale), &slots)),
+        text: fill(BILLING_ENDING_TEXT, &text_slots),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1453,6 +1724,31 @@ mod tests {
                 "4784f29adf74b3354e772547a5423ead1d12ce8891b120372997ebd5312e8e88",
                 "33430b3aeb7b3bdd4a6444c11de08719fe6376dc400294ef15c6bf7ab9a30151",
             ),
+            (
+                "billingRenewing",
+                "99f9e7812140bfaae081fabc2d40a97e238f262937a7afc5de7c8ec3df46b3fb",
+                "de22952780ea7cc724b17db3f1698813544aa274915084f5496ad60b117cc0e3",
+            ),
+            (
+                "billingRenewingHello",
+                "e4cda71710ecfe51b0573b10e32e4a7cf0693460f199409c7c84bbb01d9d0843",
+                "cb36c474654cf57bc54f9c536603129bb51652c4341ebfab64e7269824582f20",
+            ),
+            (
+                "billingConvertingMonth",
+                "a82844dce89a0c873d280a0d7ac42de462f3c254afc8e4afbd7852f42b3f2188",
+                "ba44bd59c1c2708f9674b6350812d06fe9aac65bec6d54d736413554c5796210",
+            ),
+            (
+                "billingConvertingYear",
+                "b07ab7e01d637f59f75b8a7d0d36c83410a1a7abecfcab0726160b7de60d324b",
+                "765af22f4f8f53e2a5b185ca01e8128a5e7fd49a3a54c6bbd9a3cf2c702444b1",
+            ),
+            (
+                "billingEnding",
+                "d0d7dd6655ab9d48b42550d3b7b9698acab41268da9f5353bd16b4707987e886",
+                "03461f6d899f2a0306a2e342806194c2dc0a9d3e59f1e1fad09906360d92bcb4",
+            ),
         ]
     }
 
@@ -1600,6 +1896,54 @@ mod tests {
             "cleanSuspended" => {
                 clean_suspended_workspace_email(14, "John Doe", "My Workspace", "en")
             }
+            "billingRenewing" => billing_subscription_renewing_email(
+                "John Doe",
+                "Acme Inc.",
+                chrono::DateTime::parse_from_rfc3339("2026-12-01T00:00:00+00:00")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                "https://acme.twenty.com/settings/billing",
+                "en",
+            ),
+            "billingRenewingHello" => billing_subscription_renewing_email(
+                "",
+                "Acme Inc.",
+                chrono::DateTime::parse_from_rfc3339("2026-12-01T00:00:00+00:00")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                "https://acme.twenty.com/settings/billing",
+                "en",
+            ),
+            "billingConvertingMonth" => billing_trial_converting_email(
+                "John Doe",
+                "Acme Inc.",
+                chrono::DateTime::parse_from_rfc3339("2026-12-01T00:00:00+00:00")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                "month",
+                "https://acme.twenty.com/settings/billing",
+                "en",
+            ),
+            "billingConvertingYear" => billing_trial_converting_email(
+                "John Doe",
+                "Acme Inc.",
+                chrono::DateTime::parse_from_rfc3339("2026-12-01T00:00:00+00:00")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                "year",
+                "https://acme.twenty.com/settings/billing",
+                "en",
+            ),
+            "billingEnding" => billing_trial_ending_email(
+                "John Doe",
+                "Acme Inc.",
+                chrono::DateTime::parse_from_rfc3339("2026-12-01T00:00:00+00:00")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                30,
+                "https://acme.twenty.com/settings/billing",
+                "en",
+            ),
             other => panic!("unexpected canonical variant {other}"),
         }
     }

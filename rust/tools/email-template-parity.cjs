@@ -152,6 +152,44 @@ run('cleanSuspended', M.CleanSuspendedWorkspaceEmail({
   workspaceDisplayName: 'My Workspace',
   locale: 'en',
 }));
+run('billingRenewing', M.BillingSubscriptionRenewingEmail({
+  userName: 'John Doe',
+  workspaceDisplayName: 'Acme Inc.',
+  renewsAt: new Date('2026-12-01T00:00:00.000Z'),
+  link: 'https://acme.twenty.com/settings/billing',
+  locale: 'en',
+}));
+run('billingRenewingHello', M.BillingSubscriptionRenewingEmail({
+  userName: '',
+  workspaceDisplayName: 'Acme Inc.',
+  renewsAt: new Date('2026-12-01T00:00:00.000Z'),
+  link: 'https://acme.twenty.com/settings/billing',
+  locale: 'en',
+}));
+run('billingConvertingMonth', M.BillingTrialConvertingEmail({
+  userName: 'John Doe',
+  workspaceDisplayName: 'Acme Inc.',
+  trialEndsAt: new Date('2026-12-01T00:00:00.000Z'),
+  interval: 'month',
+  link: 'https://acme.twenty.com/settings/billing',
+  locale: 'en',
+}));
+run('billingConvertingYear', M.BillingTrialConvertingEmail({
+  userName: 'John Doe',
+  workspaceDisplayName: 'Acme Inc.',
+  trialEndsAt: new Date('2026-12-01T00:00:00.000Z'),
+  interval: 'year',
+  link: 'https://acme.twenty.com/settings/billing',
+  locale: 'en',
+}));
+run('billingEnding', M.BillingTrialEndingEmail({
+  userName: 'John Doe',
+  workspaceDisplayName: 'Acme Inc.',
+  trialEndsAt: new Date('2026-12-01T00:00:00.000Z'),
+  dataRetentionDays: 30,
+  link: 'https://acme.twenty.com/settings/billing',
+  locale: 'en',
+}));
 
 await Promise.all(jobs);
 
