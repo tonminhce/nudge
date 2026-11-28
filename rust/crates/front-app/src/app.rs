@@ -13,12 +13,19 @@ use serde_json::Value;
 
 use crate::auth::AuthPage;
 use crate::command_menu::CommandMenu;
+use crate::head::PageFavicon;
+use crate::head::PageHead;
+use crate::head::PageTitle;
+use crate::head::RoutePageTitle;
+use crate::head::WorkspaceLogoEffect;
 use crate::layout::WorkspaceLayout;
 use crate::pages::NotFoundPage;
 use crate::pages::RecordShowPage;
 use crate::pages::SettingsPage;
 use crate::pages::StubPage;
 use crate::record_index::RecordIndexPage;
+
+const FALLBACK_SERVER_URL: &str = "http://127.0.0.1:3000";
 
 #[derive(Clone)]
 pub struct AuthState {
@@ -77,8 +84,27 @@ pub fn remove_storage(key: &str) {
     }
 }
 
+pub fn current_origin() -> String {
+    web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .filter(|origin| !origin.is_empty())
+        .unwrap_or_default()
+}
+
+pub fn resolve_server_url(stored: Option<String>, origin: &str) -> String {
+    stored
+        .filter(|stored| !stored.trim().is_empty())
+        .unwrap_or_else(|| {
+            if origin.is_empty() {
+                FALLBACK_SERVER_URL.to_string()
+            } else {
+                origin.to_string()
+            }
+        })
+}
+
 pub fn server_url() -> String {
-    read_storage("nudge.serverUrl").unwrap_or_else(|| "http://127.0.0.1:3000".to_string())
+    resolve_server_url(read_storage("nudge.serverUrl"), &current_origin())
 }
 
 #[component]
@@ -99,6 +125,7 @@ pub fn App() -> impl IntoView {
     provide_context(auth.clone());
     provide_context(theme);
     provide_context(RwSignal::new(false));
+    PageHead::new().provide();
 
     Effect::new(move |_| {
         let class = match theme.get() {
@@ -115,6 +142,9 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Router>
+            <RoutePageTitle />
+            <PageFavicon />
+            <WorkspaceLogoEffect />
             <Routes fallback=NotFoundPage>
                 <Route path=path!("/welcome") view=AuthPage />
                 <Route path=path!("/verify-email") view=|| view! { <StubPage title="Verify email" /> } />
@@ -133,7 +163,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/objects/:plural") view=RecordIndexPage />
                     <Route path=path!("/object/:singular/:id") view=RecordShowPage />
                     <Route path=path!("/settings/*rest") view=SettingsPage />
-                    <Route path=path!("/getting-started") view=|| view! { <StubPage title="Getting started" /> } />
+                    <Route path=path!("/getting-started") view=|| view! { <PageTitle title="Getting started" /> <StubPage title="Getting started" /> } />
                     <Route path=path!("/workflows") view=|| view! { <StubPage title="Workflows" /> } />
                     <Route path=path!("/workflow/:id") view=|| view! { <StubPage title="Workflow" /> } />
                     <Route path=path!("/agents") view=|| view! { <StubPage title="Agents" /> } />
@@ -178,6 +208,22 @@ fn IndexRedirect() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_server_url_prefers_the_stored_override_then_the_page_origin() {
+        assert_eq!(
+            resolve_server_url(
+                Some(String::from("http://127.0.0.1:3015")),
+                "http://127.0.0.1:3001"
+            ),
+            "http://127.0.0.1:3015"
+        );
+        assert_eq!(
+            resolve_server_url(Some(String::from("  ")), "http://127.0.0.1:3001"),
+            "http://127.0.0.1:3001"
+        );
+        assert_eq!(resolve_server_url(None, ""), FALLBACK_SERVER_URL);
+    }
 
     #[test]
     fn gallery_route_renders_title_link_and_both_themes() {

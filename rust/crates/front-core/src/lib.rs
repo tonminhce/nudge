@@ -1,7 +1,9 @@
 pub mod client;
 pub mod client_config;
+pub mod favicon;
 pub mod metadata_store;
 pub mod optimistic;
+pub mod page_title;
 pub mod projection;
 pub mod query_builder;
 pub mod query_cache;

@@ -287,6 +287,8 @@ mod tests {
         ObjectMetadata {
             name_singular: name_singular.to_string(),
             name_plural: format!("{name_singular}s"),
+            label_singular: name_singular.to_string(),
+            label_plural: format!("{name_singular}s"),
             duplicate_criteria: None,
             fields_list: fields,
         }

@@ -33,6 +33,7 @@ use crate::app::read_storage;
 use crate::app::server_url;
 use crate::app::write_storage;
 use crate::app::AuthState;
+use crate::head::PageTitle;
 use crate::record_order::get_order_by_field_for_object;
 use crate::record_order::turn_sorts_into_order_by;
 use crate::record_order::RecordSortField;
@@ -576,6 +577,10 @@ pub fn RecordIndexPage() -> impl IntoView {
 
     view! {
         <div class="record-index">
+            {move || metadata.get().map(|object| {
+                let label = object.label_plural;
+                view! { <PageTitle title=move || label.clone() /> }
+            })}
             <header class="record-index-header">
                 <div class="record-title">{move || icon()}<h1>{title}</h1><span class="record-count">{move || total_count.get()}</span></div>
                 <div class="record-actions">
@@ -841,6 +846,8 @@ mod tests {
         ObjectMetadata {
             name_singular: String::from("company"),
             name_plural: String::from("companies"),
+            label_singular: String::from("Company"),
+            label_plural: String::from("Companies"),
             duplicate_criteria: None,
             fields_list: vec![
                 metadata_field("name", "TEXT"),
@@ -864,6 +871,8 @@ mod tests {
         ObjectMetadata {
             name_singular: String::from("person"),
             name_plural: String::from("people"),
+            label_singular: String::from("Person"),
+            label_plural: String::from("People"),
             duplicate_criteria: None,
             fields_list: vec![
                 metadata_field("name", "FULL_NAME"),
@@ -994,6 +1003,8 @@ mod tests {
         let note = ObjectMetadata {
             name_singular: String::from("note"),
             name_plural: String::from("notes"),
+            label_singular: String::from("Note"),
+            label_plural: String::from("Notes"),
             duplicate_criteria: None,
             fields_list: vec![
                 metadata_field("title", "TEXT"),
@@ -1011,6 +1022,8 @@ mod tests {
         let application = ObjectMetadata {
             name_singular: String::from("application"),
             name_plural: String::from("applications"),
+            label_singular: String::from("Application"),
+            label_plural: String::from("Applications"),
             duplicate_criteria: None,
             fields_list: vec![metadata_field("id", "UUID")],
         };

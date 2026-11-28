@@ -8,7 +8,7 @@ use front_core::query_builder::pascal_case;
 use front_core::query_builder::FindManyArgs;
 use serde_json::Value;
 
-const OBJECTS_QUERY: &str = r#"query { objects(paging: { first: 100 }, filter: {}) { edges { node { nameSingular namePlural duplicateCriteria fieldsList { id name type settings relation { type targetObjectMetadata { nameSingular namePlural fieldsList { name type } } } morphId } } } } }"#;
+const OBJECTS_QUERY: &str = r#"query { objects(paging: { first: 100 }, filter: {}) { edges { node { nameSingular namePlural labelSingular labelPlural duplicateCriteria fieldsList { id name type settings relation { type targetObjectMetadata { nameSingular namePlural fieldsList { name type } } } morphId } } } } }"#;
 
 pub async fn load_object_metadata(token: &str) -> Result<Vec<ObjectMetadata>, String> {
     let response = BrowserGraphQLClient::new()

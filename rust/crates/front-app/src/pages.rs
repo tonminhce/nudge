@@ -1,4 +1,5 @@
 use front_core::client::GraphQLClient;
+use front_core::page_title::record_show_title;
 use front_ui::icons::Icon;
 use front_ui::icons::IconSettings;
 use leptos::prelude::*;
@@ -9,6 +10,7 @@ use serde_json::Value;
 use wasm_bindgen::JsCast;
 
 use crate::app::AuthState;
+use crate::head::PageTitle;
 use crate::records::load_object_metadata;
 use crate::records::records_from_response;
 use crate::records::update_record;
@@ -308,6 +310,15 @@ pub fn RecordShowPage() -> impl IntoView {
 
     view! {
         <div class="record-show">
+            {move || object.get().map(|object| {
+                let label = object.label_singular;
+                view! {
+                    <PageTitle title=move || {
+                        let name = record.get().map(|record| display_name(&record)).unwrap_or_default();
+                        record_show_title(&name, &label)
+                    } />
+                }
+            })}
             <header class="record-show-header">
                 <A href="/objects/people" attr:class="breadcrumb">"People"</A>
                 <span>" / "</span>
@@ -529,6 +540,7 @@ pub fn StubPage(title: &'static str) -> impl IntoView {
 #[component]
 pub fn NotFoundPage() -> impl IntoView {
     view! {
+        <PageTitle title="Page Not Found | Nudge" />
         <div class="not-found">
             <h1>"Page not found"</h1>
             <A href="/" attr:class="">"Return to workspace"</A>

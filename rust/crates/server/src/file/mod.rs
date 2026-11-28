@@ -56,7 +56,7 @@ impl FileUrlSigner {
         }
     }
 
-    async fn signed_url(&self, file_id: Uuid, workspace_id: Uuid) -> AuthResult<String> {
+    pub(crate) async fn signed_url(&self, file_id: Uuid, workspace_id: Uuid) -> AuthResult<String> {
         self.signed_url_in_folder(file_id, workspace_id, FileFolder::CorePicture)
             .await
     }

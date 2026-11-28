@@ -6,6 +6,7 @@ use leptos::prelude::*;
 mod app;
 mod auth;
 mod command_menu;
+mod head;
 mod layout;
 mod pages;
 mod record_index;

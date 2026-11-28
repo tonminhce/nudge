@@ -7,6 +7,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::errors::GraphQlError;
+use super::graphql::FieldSelection;
 use super::input::optional_string;
 use super::service::build_options;
 use super::service::compute_api_from_to_maps;
@@ -33,6 +34,7 @@ use super::service::valid_metadata_name_shape;
 use super::service::CreateFieldTranspilation;
 use super::service::OperationContext;
 use super::service::OptionOperation;
+use crate::file::FileUrlSigner;
 use crate::metadata::actions::MetadataName;
 use crate::metadata::actions::UniversalFlatEntity;
 use crate::metadata::builders::build_workspace_migration;
@@ -45,6 +47,7 @@ use crate::metadata::flat::UniversalFlatIndexFieldMetadata;
 use crate::metadata::flat::UniversalFlatIndexMetadata;
 use crate::metadata::flat::UniversalFlatObjectMetadata;
 use crate::permissions::current_user_workspace_permissions_for_auth;
+use crate::state::AppState;
 use crate::webhook::signature::generate_webhook_secret;
 use crate::workspace_migrations::runner::run_workspace_migration;
 use crate::workspace_migrations::runner::RunnerInput;
@@ -1047,6 +1050,122 @@ async fn delete_one_index(ctx: &OperationContext<'_>) -> Result<Value, GraphQlEr
     Ok(index_dto(index))
 }
 
+pub const PUBLIC_WORKSPACE_DATA_FIELD: &str = "getPublicWorkspaceDataByDomain";
+
+pub fn is_public_metadata_root_field(name: &str) -> bool {
+    name == PUBLIC_WORKSPACE_DATA_FIELD
+}
+
+pub async fn dispatch_public(
+    state: &AppState,
+    selection: &FieldSelection,
+    variables: &Value,
+) -> ResponsePayload {
+    if selection.name != PUBLIC_WORKSPACE_DATA_FIELD {
+        return ResponsePayload::errors(vec![GraphQlError::validation(format!(
+            "Cannot query field \"{}\" on type.",
+            selection.name
+        ))]);
+    }
+    match public_workspace_data(state, selection, variables).await {
+        Ok(node) => ResponsePayload::data(json!({
+            selection.response_key(): project(&node, &selection.selection)
+        })),
+        Err(error) => ResponsePayload::errors(vec![error]),
+    }
+}
+
+fn origin_hostname(origin: &str) -> Option<String> {
+    let authority = origin
+        .trim()
+        .split("://")
+        .nth(1)
+        .unwrap_or(origin.trim())
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("");
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    let hostname = match authority.split_once(':') {
+        Some((host, port)) if port.chars().all(|character| character.is_ascii_digit()) => host,
+        _ => authority,
+    };
+    let hostname = hostname.trim_matches(|character| character == '[' || character == ']');
+    if hostname.is_empty() {
+        return None;
+    }
+    Some(hostname.to_lowercase())
+}
+
+pub fn workspace_labels_from_origin(origin: &str) -> (Option<String>, Option<String>) {
+    let Some(hostname) = origin_hostname(origin) else {
+        return (None, None);
+    };
+    if hostname == "localhost" || hostname.parse::<std::net::IpAddr>().is_ok() {
+        return (None, None);
+    }
+    let Some((first_label, _)) = hostname.split_once('.') else {
+        return (None, None);
+    };
+    if first_label.starts_with("ws-") {
+        (Some(first_label.to_string()), None)
+    } else {
+        (None, Some(hostname))
+    }
+}
+
+async fn public_workspace_data(
+    state: &AppState,
+    selection: &FieldSelection,
+    variables: &Value,
+) -> Result<Value, GraphQlError> {
+    let origin = variables
+        .get("origin")
+        .and_then(Value::as_str)
+        .or_else(|| selection.argument("origin").and_then(Value::as_str))
+        .unwrap_or_default();
+    let (subdomain, custom_domain) = workspace_labels_from_origin(origin);
+    let row = if subdomain.is_some() || custom_domain.is_some() {
+        sqlx::query_as::<_, (Uuid, String, Option<Uuid>)>(
+            "SELECT id, \"displayName\", \"logoFileId\" FROM core.\"workspace\" \
+             WHERE subdomain = $1 OR \"customDomain\" = $2 LIMIT 1",
+        )
+        .bind(&subdomain)
+        .bind(&custom_domain)
+        .fetch_optional(&state.core_pool)
+        .await
+        .map_err(|error| GraphQlError::internal(error.to_string()))?
+    } else {
+        sqlx::query_as::<_, (Uuid, String, Option<Uuid>)>(
+            "SELECT id, \"displayName\", \"logoFileId\" FROM core.\"workspace\" \
+             ORDER BY \"createdAt\" DESC LIMIT 1",
+        )
+        .fetch_optional(&state.core_pool)
+        .await
+        .map_err(|error| GraphQlError::internal(error.to_string()))?
+    };
+    let (workspace_id, display_name, logo_file_id) =
+        row.ok_or_else(|| GraphQlError::not_found("Workspace not found"))?;
+    let logo = match logo_file_id {
+        Some(file_id) => {
+            let signer = FileUrlSigner::new(
+                state.jwt.clone(),
+                state.config.server_url.clone(),
+                state.config.file_token_expires_in_secs,
+            );
+            signer
+                .signed_url(file_id, workspace_id)
+                .await
+                .map_err(|error| GraphQlError::from_auth_error(&error))?
+        }
+        None => String::new(),
+    };
+    Ok(json!({
+        "id": workspace_id,
+        "displayName": display_name,
+        "logo": logo,
+    }))
+}
+
 async fn current_user(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
     let auth = ctx
         .auth
@@ -1987,13 +2106,74 @@ mod tests {
 
     use super::add_to_create;
     use super::field_entity;
+    use super::is_public_metadata_root_field;
     use super::object_entity;
+    use super::origin_hostname;
+    use super::workspace_labels_from_origin;
     use crate::metadata::actions::MetadataName;
     use crate::metadata::actions::UniversalAction;
     use crate::metadata::actions::UniversalFlatEntity;
     use crate::metadata::api::service::build_options;
     use crate::metadata::api::service::compute_api_from_to_maps;
     use crate::metadata::api::service::infer_deletion_for_deletes;
+
+    #[test]
+    fn the_public_workspace_field_is_the_only_unauthenticated_root() {
+        assert!(is_public_metadata_root_field(
+            "getPublicWorkspaceDataByDomain"
+        ));
+        assert!(!is_public_metadata_root_field("currentUser"));
+        assert!(!is_public_metadata_root_field("objects"));
+    }
+
+    #[test]
+    fn origin_hostnames_drop_scheme_port_and_path() {
+        assert_eq!(
+            origin_hostname("http://127.0.0.1:3001/objects/people").as_deref(),
+            Some("127.0.0.1")
+        );
+        assert_eq!(
+            origin_hostname("https://App.Example.COM:8443/x").as_deref(),
+            Some("app.example.com")
+        );
+        assert_eq!(
+            origin_hostname("not-an-origin").as_deref(),
+            Some("not-an-origin")
+        );
+        assert_eq!(origin_hostname("").as_deref(), None);
+        assert_eq!(origin_hostname("http://").as_deref(), None);
+    }
+
+    #[test]
+    fn workspace_subdomain_origins_resolve_the_workspace_subdomain() {
+        assert_eq!(
+            workspace_labels_from_origin("http://ws-abc.localhost:3001"),
+            (Some("ws-abc".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn bare_hosts_fall_back_to_the_default_workspace_lookup() {
+        for origin in [
+            "http://127.0.0.1:3001",
+            "http://localhost:3001",
+            "http://localhost",
+        ] {
+            assert_eq!(workspace_labels_from_origin(origin), (None, None));
+        }
+    }
+
+    #[test]
+    fn non_workspace_hosts_are_treated_as_custom_domains() {
+        assert_eq!(
+            workspace_labels_from_origin("https://crm.acme.com/welcome"),
+            (None, Some("crm.acme.com".to_string()))
+        );
+        assert_eq!(
+            workspace_labels_from_origin("https://acme.com"),
+            (None, Some("acme.com".to_string()))
+        );
+    }
     use crate::metadata::api::service::normalize_create_action_entities;
     use crate::metadata::api::service::transpile_create_object;
     use crate::metadata::api::service::ResolvedApplications;
