@@ -690,6 +690,54 @@ async fn fetch_user_info(userinfo_endpoint: &str, access_token: &str) -> AuthRes
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn discovery_refuses_an_issuer_on_the_loopback_interface() {
+        let error = fetch_discovery_document("http://127.0.0.1:9456")
+            .await
+            .expect_err("a private issuer cannot be discovered");
+
+        assert_eq!(error.code, "INVALID_ISSUER_URL");
+        assert_eq!(
+            error.messages,
+            vec![
+                "Invalid issuer: Request to internal IP address 127.0.0.1 is not allowed."
+                    .to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_refuses_a_hostname_resolving_into_the_blocked_ranges() {
+        let error = fetch_discovery_document("http://localhost:9456")
+            .await
+            .expect_err("a hostname answer inside the ranges is refused");
+
+        assert_eq!(error.code, "INVALID_ISSUER_URL");
+        assert!(
+            error.messages[0].starts_with("Invalid issuer: Connection to internal IP address ")
+                && error.messages[0].ends_with(" is not allowed."),
+            "{:?}",
+            error.messages
+        );
+    }
+
+    #[tokio::test]
+    async fn jwks_and_userinfo_endpoints_refuse_private_addresses() {
+        let jwks_error = fetch_jwks("http://169.254.169.254/latest/jwks")
+            .await
+            .expect_err("the metadata address stays closed for jwks");
+
+        assert_eq!(
+            jwks_error.messages[0],
+            "Request to internal IP address 169.254.169.254 is not allowed."
+        );
+        assert!(fetch_user_info("http://192.168.7.9/userinfo", "token")
+            .await
+            .expect_err("a private userinfo endpoint is refused")
+            .messages[0]
+            .contains("internal IP address 192.168.7.9 is not allowed"));
+    }
+
     const DISCOVERY_FIXTURE: &str = r#"{
         "issuer": "https://idp.example.com",
         "authorization_endpoint": "https://idp.example.com/authorize",

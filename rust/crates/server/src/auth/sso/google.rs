@@ -231,6 +231,25 @@ async fn redirect_from_google(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn token_and_userinfo_fetches_run_on_the_guarded_client() {
+        let client = http_client().await.expect("guarded google client");
+
+        assert!(client.policy().is_enforced());
+        assert!(client
+            .get("http://127.0.0.1:9/o/oauth2/token")
+            .send()
+            .await
+            .expect_err("loopback token endpoint is refused")
+            .is_blocked());
+        assert!(client
+            .get("http://169.254.169.254/latest/meta-data/userinfo")
+            .send()
+            .await
+            .expect_err("metadata endpoint is refused")
+            .is_blocked());
+    }
+
     #[test]
     fn verified_userinfo_maps_into_the_social_profile() {
         let fixture: Value = serde_json::from_str(

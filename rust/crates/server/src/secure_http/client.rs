@@ -714,6 +714,44 @@ connection: close
     }
 
     #[tokio::test]
+    async fn the_system_resolver_answer_is_validated_before_dialing() {
+        let client = SecureHttpClient::with_lookup(
+            GuardPolicy::public_hosts_only(),
+            test_config(),
+            Arc::new(SystemLookup),
+        )
+        .expect("building the guard");
+        let error = client
+            .get("http://localhost:9/private")
+            .send()
+            .await
+            .expect_err("localhost resolves into the blocked range");
+        let message = error.message();
+        assert!(
+            message.starts_with("Connection to internal IP address ")
+                && message.ends_with(" is not allowed."),
+            "{message}"
+        );
+        assert!(
+            message.contains("127.0.0.1") || message.contains("::1"),
+            "{message}"
+        );
+        assert_eq!(error.outcome(), OutboundRequestOutcome::Blocked);
+        assert!(
+            client.dns_cache().is_empty(),
+            "a refused answer is never cached"
+        );
+        assert!(matches!(
+            client
+                .get("ftp://localhost:21/private")
+                .send()
+                .await
+                .expect_err("ftp is refused"),
+            SecureHttpError::Blocked(_)
+        ));
+    }
+
+    #[tokio::test]
     async fn validated_addresses_are_pinned_and_the_host_header_is_preserved() {
         let stub = spawn_stub(StubMode::Ok).await;
         let lookup = StubLookup::new(&[("pinned.example", "127.0.0.1")]);

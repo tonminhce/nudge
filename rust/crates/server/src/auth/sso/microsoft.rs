@@ -192,6 +192,25 @@ async fn redirect_from_microsoft(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn token_and_graph_fetches_run_on_the_guarded_client() {
+        let client = http_client().await.expect("guarded microsoft client");
+
+        assert!(client.policy().is_enforced());
+        assert!(client
+            .get("http://10.1.2.3/common/oauth2/v2.0/token")
+            .send()
+            .await
+            .expect_err("rfc1918 token endpoint is refused")
+            .is_blocked());
+        assert!(client
+            .get("http://[fd00::1]:443/v1.0/me")
+            .send()
+            .await
+            .expect_err("unique local endpoint is refused")
+            .is_blocked());
+    }
+
     #[test]
     fn user_principal_name_becomes_the_email() {
         let fixture: Value = serde_json::from_str(
