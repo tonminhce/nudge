@@ -359,40 +359,16 @@ async fn run_mutation_inner(
         }
     }
 
-    for (index, (column_name, _)) in expanded_columns.iter().enumerate() {
-        let column = model
-            .shape
-            .column(column_name)
-            .ok_or_else(|| RunnerError::unknown_column(column_name, &model.object.name_singular))?;
-        let placeholder = format!(":ormSet_{index}");
-        let cast = match column.field_metadata_type {
-            crate::metadata::flat::FieldMetadataType::Uuid
-            | crate::metadata::flat::FieldMetadataType::Relation
-            | crate::metadata::flat::FieldMetadataType::MorphRelation => {
-                format!("{placeholder}::uuid")
-            }
-            crate::metadata::flat::FieldMetadataType::RawJson => format!("{placeholder}::jsonb"),
-            crate::metadata::flat::FieldMetadataType::DateTime => {
-                format!("{placeholder}::timestamptz")
-            }
-            crate::metadata::flat::FieldMetadataType::Date => format!("{placeholder}::date"),
-            crate::metadata::flat::FieldMetadataType::Select
-                if matches!(column_name.as_str(), "createdBySource" | "updatedBySource") =>
-            {
-                let enum_name = crate::metadata::names::compute_postgres_enum_name(
-                    &model.shape.table_name,
-                    column_name,
-                );
-                format!(
-                    "{placeholder}::text::{}.{}",
-                    crate::query::repository::quote_identifier(&model.shape.schema_name)?,
-                    crate::query::repository::quote_identifier(&enum_name)?
-                )
-            }
-            _ => continue,
-        };
-        statement_sql = statement_sql.replace(&placeholder, &cast);
-    }
+    let set_column_names = expanded_columns
+        .iter()
+        .map(|(column_name, _)| column_name.clone())
+        .collect::<Vec<_>>();
+    statement_sql = crate::query::repository::cast_set_parameters(
+        &statement_sql,
+        &model.shape,
+        &set_column_names,
+    )
+    .map_err(RunnerError::from_repository)?;
 
     let statement = crate::query::repository::MutationStatement {
         sql: statement_sql,

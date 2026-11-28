@@ -6,7 +6,7 @@ import secrets
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CAPTURE_DIR = os.path.join(HERE, "e2e-capture")
+CAPTURE_DIR = os.environ.get("PARITY_CAPTURE_DIR") or os.path.join(HERE, "e2e-capture")
 
 
 def _load_parity_compare():

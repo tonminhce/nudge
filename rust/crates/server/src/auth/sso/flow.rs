@@ -627,7 +627,7 @@ async fn sso_idp_sign_in_up(
         Uuid::parse_str(request.identity_provider_id).map_err(|_| idp_not_found_error())?;
 
     let idp_row: Option<(Uuid, Uuid, String)> = sqlx::query_as(
-        "SELECT id, \"workspaceId\", status FROM core.\"workspaceSSOIdentityProvider\" WHERE id = $1",
+        "SELECT id, \"workspaceId\", status::text FROM core.\"workspaceSSOIdentityProvider\" WHERE id = $1",
     )
     .bind(idp_id)
     .fetch_optional(&state.core_pool)
