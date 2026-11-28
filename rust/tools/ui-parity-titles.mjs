@@ -12,7 +12,7 @@ import {
 const STATE_PATH = process.env.NUDGE_TITLE_STATE ?? '/tmp/nudge-locale-parity-state.json';
 const REFERENCE_BASE = process.env.NUDGE_REFERENCE_BASE ?? 'http://locale-f315f4672f6e.localhost:3001';
 const REFERENCE_API = process.env.NUDGE_REFERENCE_API ?? 'http://127.0.0.1:3001';
-const NUDGE_BASE = process.env.NUDGE_FRONT_BASE ?? 'http://127.0.0.1:8083';
+const NUDGE_BASE = process.env.NUDGE_FRONT_BASE ?? 'http://127.0.0.1:3018';
 const NUDGE_API = process.env.NUDGE_SERVER_BASE ?? 'http://127.0.0.1:3018';
 const RECORD_ID = process.env.NUDGE_RECORD_ID ?? '56e27a4a-e9f1-4376-9d62-3b8909ebb8af';
 
@@ -66,25 +66,24 @@ async function referenceLoginToken(state) {
 }
 
 async function nudgeToken(state) {
-  const signedIn = await gql(
-    NUDGE_API,
-    '/metadata',
-    `mutation signIn($email: String!, $password: String!) { signIn(email: $email, password: $password) { availableWorkspaces { availableWorkspacesForSignIn { id loginToken } } } }`,
-    { email: state.email, password: state.password },
-  );
-  const workspaces =
-    signedIn?.data?.signIn?.availableWorkspaces?.availableWorkspacesForSignIn ?? [];
-  if (!workspaces.length) throw new Error('nudge signIn returned no workspace');
-  const exchanged = await gql(
-    NUDGE_API,
-    '/metadata',
-    `mutation ex($loginToken: String!, $origin: String!) { getAuthTokensFromLoginToken(loginToken: $loginToken, origin: $origin) { tokens { accessOrWorkspaceAgnosticToken { token } } } }`,
-    { loginToken: workspaces[0].loginToken, origin: NUDGE_API },
-  );
-  const token =
-    exchanged?.data?.getAuthTokensFromLoginToken?.tokens?.accessOrWorkspaceAgnosticToken?.token;
-  if (!token) throw new Error('nudge token exchange failed');
-  return { token, workspaceId: workspaces[0].id };
+  const workspaceId = state.workspaceId;
+  const login = await fetch(`${NUDGE_API}/auth/login-token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: state.email,
+      password: state.password,
+      workspaceId,
+    }),
+  }).then((response) => response.json());
+  if (!login?.loginToken) throw new Error('nudge login token request failed');
+  const exchanged = await fetch(`${NUDGE_API}/auth/tokens`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ loginToken: login.loginToken, workspaceId }),
+  }).then((response) => response.json());
+  if (!exchanged?.accessToken) throw new Error('nudge token exchange failed');
+  return { token: exchanged.accessToken, workspaceId };
 }
 
 function surfaces() {

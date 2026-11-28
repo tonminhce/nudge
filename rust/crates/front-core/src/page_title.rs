@@ -62,6 +62,14 @@ pub fn resolve_document_title(route_title: &str, stack: &[(u64, String)]) -> Str
         .unwrap_or_else(|| route_title.to_string())
 }
 
+pub fn record_show_title(record_name: &str, label_singular: &str) -> String {
+    if record_name.trim().is_empty() {
+        label_singular.to_string()
+    } else {
+        format!("{record_name} - {label_singular}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +184,20 @@ mod tests {
     fn title_ids_are_unique_and_start_at_one() {
         assert_eq!(next_page_title_id(), 1);
         assert_eq!(next_page_title_id(), 2);
+    }
+
+    #[test]
+    fn a_named_record_title_is_the_name_and_the_singular_label() {
+        assert_eq!(record_show_title("Bob Diaz", "Person"), "Bob Diaz - Person");
+        assert_eq!(
+            record_show_title(" Acme Corp ", "Company"),
+            " Acme Corp  - Company"
+        );
+    }
+
+    #[test]
+    fn an_unnamed_record_title_falls_back_to_the_singular_label() {
+        assert_eq!(record_show_title("", "Person"), "Person");
+        assert_eq!(record_show_title("   ", "Person"), "Person");
     }
 }

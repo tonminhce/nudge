@@ -1,4 +1,5 @@
 use front_core::client::GraphQLClient;
+use front_core::page_title::record_show_title;
 use front_ui::icons::Icon;
 use front_ui::icons::IconSettings;
 use leptos::prelude::*;
@@ -314,7 +315,7 @@ pub fn RecordShowPage() -> impl IntoView {
                 view! {
                     <PageTitle title=move || {
                         let name = record.get().map(|record| display_name(&record)).unwrap_or_default();
-                        if name.trim().is_empty() { label.clone() } else { format!("{name} - {label}") }
+                        record_show_title(&name, &label)
                     } />
                 }
             })}

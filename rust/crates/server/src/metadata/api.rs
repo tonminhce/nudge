@@ -192,6 +192,13 @@ async fn execute_metadata_request(
             }),
         );
     }
+    if selected.kind == OperationKind::Query
+        && handlers::is_public_metadata_root_field(&selected.field.name)
+    {
+        let payload =
+            handlers::dispatch_public(&state, &selected.field, &execution_request.variables).await;
+        return graphql_json_response(StatusCode::OK, &parts.headers, payload.to_json());
+    }
     let auth = match AuthContext::from_request_parts(&mut parts, &state).await {
         Ok(context) => context,
         Err(error) => {
@@ -261,6 +268,7 @@ fn is_metadata_root_field(name: &str) -> bool {
             | "object"
             | "field"
             | "currentUser"
+            | handlers::PUBLIC_WORKSPACE_DATA_FIELD
             | "addQueryToEventStream"
             | "removeQueryFromEventStream"
     )

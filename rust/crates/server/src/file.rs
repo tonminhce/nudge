@@ -83,7 +83,7 @@ impl FileUrlSigner {
         }
     }
 
-    async fn signed_url(&self, file_id: Uuid, workspace_id: Uuid) -> AuthResult<String> {
+    pub(crate) async fn signed_url(&self, file_id: Uuid, workspace_id: Uuid) -> AuthResult<String> {
         let token = self
             .jwt
             .sign(

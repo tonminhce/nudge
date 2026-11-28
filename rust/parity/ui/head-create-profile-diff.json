@@ -1,0 +1,67 @@
+{
+  "matched": false,
+  "tolerance": 0,
+  "visualOnly": false,
+  "ignored": [
+    "document.bodyBackground",
+    "document.bodyFont",
+    "document.scrollHeight",
+    "document.scrollWidth",
+    "document.url",
+    "selectors.appleTouchIcon.animations",
+    "selectors.appleTouchIcon.children",
+    "selectors.appleTouchIcon.rect",
+    "selectors.appleTouchIcon.style",
+    "selectors.appleTouchIcon.svg",
+    "selectors.appleTouchIcon.tag",
+    "selectors.appleTouchIcon.text",
+    "selectors.favicon.animations",
+    "selectors.favicon.children",
+    "selectors.favicon.rect",
+    "selectors.favicon.style",
+    "selectors.favicon.svg",
+    "selectors.favicon.tag",
+    "selectors.favicon.text",
+    "viewport"
+  ],
+  "capture": {
+    "reference": {
+      "selectors": {
+        "favicon": "link[rel=\"icon\"]",
+        "appleTouchIcon": "link[rel=\"apple-touch-icon\"]"
+      },
+      "settleMs": 400,
+      "screenshot": false,
+      "format": "png",
+      "fullPage": false
+    },
+    "nudge": {
+      "selectors": {
+        "favicon": "link[rel=\"icon\"]",
+        "appleTouchIcon": "link[rel=\"apple-touch-icon\"]"
+      },
+      "settleMs": 400,
+      "screenshot": false,
+      "format": "png",
+      "fullPage": false
+    }
+  },
+  "differenceCount": 3,
+  "differences": [
+    {
+      "path": "document.title",
+      "reference": "Twenty",
+      "nudge": "Nudge"
+    },
+    {
+      "path": "selectors.appleTouchIcon.attributes.href",
+      "reference": "/images/icons/ios/192.png",
+      "nudge": "/icons/nudge-mark-192.png"
+    },
+    {
+      "path": "selectors.favicon.attributes.href",
+      "reference": "/images/icons/android/android-launchericon-48-48.png",
+      "nudge": "/icons/nudge-mark-48.png"
+    }
+  ]
+}

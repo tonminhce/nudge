@@ -25,6 +25,8 @@ use crate::pages::SettingsPage;
 use crate::pages::StubPage;
 use crate::record_index::RecordIndexPage;
 
+const FALLBACK_SERVER_URL: &str = "http://127.0.0.1:3000";
+
 #[derive(Clone)]
 pub struct AuthState {
     pub token: RwSignal<Option<String>>,
@@ -82,8 +84,27 @@ pub fn remove_storage(key: &str) {
     }
 }
 
+pub fn current_origin() -> String {
+    web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .filter(|origin| !origin.is_empty())
+        .unwrap_or_default()
+}
+
+pub fn resolve_server_url(stored: Option<String>, origin: &str) -> String {
+    stored
+        .filter(|stored| !stored.trim().is_empty())
+        .unwrap_or_else(|| {
+            if origin.is_empty() {
+                FALLBACK_SERVER_URL.to_string()
+            } else {
+                origin.to_string()
+            }
+        })
+}
+
 pub fn server_url() -> String {
-    read_storage("nudge.serverUrl").unwrap_or_else(|| "http://127.0.0.1:3000".to_string())
+    resolve_server_url(read_storage("nudge.serverUrl"), &current_origin())
 }
 
 #[component]
@@ -187,6 +208,22 @@ fn IndexRedirect() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_server_url_prefers_the_stored_override_then_the_page_origin() {
+        assert_eq!(
+            resolve_server_url(
+                Some(String::from("http://127.0.0.1:3015")),
+                "http://127.0.0.1:3001"
+            ),
+            "http://127.0.0.1:3015"
+        );
+        assert_eq!(
+            resolve_server_url(Some(String::from("  ")), "http://127.0.0.1:3001"),
+            "http://127.0.0.1:3001"
+        );
+        assert_eq!(resolve_server_url(None, ""), FALLBACK_SERVER_URL);
+    }
 
     #[test]
     fn gallery_route_renders_title_link_and_both_themes() {

@@ -13,6 +13,7 @@ use leptos_router::hooks::use_location;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 
+use crate::app::current_origin;
 use crate::app::server_url;
 
 #[derive(Clone, Copy)]
@@ -111,12 +112,6 @@ pub fn PageFavicon() -> impl IntoView {
             let _ = link.set_attribute("data-rh", "true");
         }
     });
-}
-
-fn current_origin() -> String {
-    web_sys::window()
-        .and_then(|window| window.location().origin().ok())
-        .unwrap_or_default()
 }
 
 async fn fetch_workspace_logo(base_url: &str, origin: &str) -> Option<String> {

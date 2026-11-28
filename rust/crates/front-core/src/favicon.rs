@@ -109,4 +109,18 @@ mod tests {
             "http://127.0.0.1:3000/files/logo.png"
         );
     }
+
+    #[test]
+    fn a_signed_workspace_logo_url_becomes_the_favicon() {
+        let signed = "http://127.0.0.1:3015/file/core-picture/2f2a7c1e-3b64-4b1a-9f0e-7c1d2e3f4a5b?token=eyJhbGci";
+        assert_eq!(favicon_href(Some(signed), "http://127.0.0.1:3001"), signed);
+    }
+
+    #[test]
+    fn a_blank_workspace_logo_keeps_the_default_favicon() {
+        assert_eq!(
+            favicon_href(Some(""), "http://127.0.0.1:3015"),
+            DEFAULT_WORKSPACE_LOGO
+        );
+    }
 }
