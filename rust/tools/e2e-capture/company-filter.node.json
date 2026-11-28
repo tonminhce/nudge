@@ -9,27 +9,9 @@
                 "id": "<uuid>",
                 "name": "Acme Corp"
               }
-            },
-            {
-              "node": {
-                "id": "<uuid>",
-                "name": "Acme Corp"
-              }
-            },
-            {
-              "node": {
-                "id": "<uuid>",
-                "name": "Acme Corp"
-              }
-            },
-            {
-              "node": {
-                "id": "<uuid>",
-                "name": "Acme Corp"
-              }
             }
           ],
-          "totalCount": 4
+          "totalCount": 1
         }
       }
     }

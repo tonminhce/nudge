@@ -17,32 +17,29 @@
     },
     "childAfter": {
       "data": {
-        "person": null
-      },
-      "errors": [
-        {
-          "extensions": {
-            "code": "BAD_USER_INPUT",
-            "subCode": "INVALID_ARGS_FILTER",
-            "userFriendlyMessage": "Invalid value for UUID: \"''\""
+        "person": {
+          "company": {
+            "name": "MergePrimary<tag>"
           },
-          "message": "Invalid UUID value '' for field \"id\""
+          "id": "<uuid>",
+          "name": {
+            "firstName": "MergeChild"
+          }
         }
-      ]
+      }
     },
     "childBefore": {
       "data": {
-        "createPerson": null
-      },
-      "errors": [
-        {
-          "extensions": {
-            "code": "BAD_USER_INPUT",
-            "userFriendlyMessage": "An error occurred."
+        "createPerson": {
+          "company": {
+            "name": "MergeSecondary<tag>"
           },
-          "message": "Column \"company\" does not exist on \"person\""
+          "id": "<uuid>",
+          "name": {
+            "firstName": "MergeChild"
+          }
         }
-      ]
+      }
     },
     "create": {
       "count": 2
