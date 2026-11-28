@@ -9,6 +9,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::metadata::flat::FieldMetadataType;
+use crate::metadata::flat::FlatFieldMetadata;
 use crate::metadata::names::compute_composite_column_name;
 use crate::permissions::ObjectRecordsOperationType;
 use crate::permissions::RowLevelRecordsPermissions;
@@ -21,6 +22,7 @@ use crate::query::filter::Suffixes;
 use crate::query::filter::WhereClause;
 use crate::query::repository::quote_identifier;
 
+use super::base::ObjectModel;
 use super::base::RunnerSchema;
 use super::RunnerError;
 
@@ -270,6 +272,11 @@ impl AccessCompiler<'_> {
                 return Ok(unsatisfiable_filter());
             }
         }
+        let value = if field.field_type == FieldMetadataType::MorphRelation {
+            morph_filter_value(value)?
+        } else {
+            value
+        };
         if !matches!(
             operand,
             "IS_NOT_NULL"
@@ -328,10 +335,7 @@ impl AccessCompiler<'_> {
         if let Some(filter) = top_level_filter {
             return self.compile_value_filter(object_name, alias, filter);
         }
-        let filter = if matches!(
-            field.field_type,
-            FieldMetadataType::Relation | FieldMetadataType::MorphRelation
-        ) {
+        let filter = if field.field_type == FieldMetadataType::Relation {
             let model = self.schema.object(object_name)?;
             let join_column = model
                 .shape
@@ -339,6 +343,17 @@ impl AccessCompiler<'_> {
                 .and_then(|relation| relation.join_column_name.clone())
                 .ok_or_else(|| invalid("Relation join column not found for row-level predicate"))?;
             json!({ (join_column): raw_filter.expect("relation filter") })
+        } else if field.field_type == FieldMetadataType::MorphRelation {
+            let model = self.schema.object(object_name)?;
+            morph_relation_filter(
+                model,
+                field,
+                raw_filter.expect("morph relation filter"),
+                !matches!(
+                    operand,
+                    "IS_EMPTY" | "IS_NOT_EMPTY" | "IS_NULL" | "IS_NOT_NULL"
+                ),
+            )?
         } else if full_name {
             full_name_filter(&field.name, operand, value)?
         } else {
@@ -906,6 +921,7 @@ fn operand_filter(
             | FieldMetadataType::MultiSelect
             | FieldMetadataType::Uuid
             | FieldMetadataType::Relation
+            | FieldMetadataType::MorphRelation
     );
     if set_field && operand == "IS_NOT" {
         return Ok(json!({ "not": { "in": as_array(value) } }));
@@ -918,6 +934,71 @@ fn operand_filter(
     };
     let _ = sub_field_name;
     Ok(json!({ (operator): value }))
+}
+
+fn morph_filter_value(value: Value) -> Result<Value, RunnerError> {
+    if let Some(selected) = value.get("selectedRecordIds") {
+        return Ok(as_array(selected.clone()));
+    }
+    if value.is_object() {
+        return Err(invalid(
+            "Morph relation row-level predicates require selectedRecordIds",
+        ));
+    }
+    Ok(value)
+}
+
+fn morph_relation_filter(
+    model: &ObjectModel,
+    field: &FlatFieldMetadata,
+    raw_filter: Value,
+    include_siblings: bool,
+) -> Result<Value, RunnerError> {
+    let is_head =
+        field.morph_id.map(|id| id.to_string()) == Some(field.universal_identifier.clone());
+    if !include_siblings && !is_head {
+        let join_column = model
+            .shape
+            .relation(&field.name)
+            .and_then(|relation| relation.join_column_name.clone())
+            .ok_or_else(|| {
+                invalid("Morph relation join column not found for row-level predicate")
+            })?;
+        return Ok(json!({ (join_column): raw_filter }));
+    }
+    let morph_id = field
+        .morph_id
+        .ok_or_else(|| invalid("Morph relation metadata not found for row-level predicate"))?;
+    let mut join_columns = model
+        .fields_by_name
+        .values()
+        .filter(|candidate| {
+            candidate.field_type == FieldMetadataType::MorphRelation
+                && candidate.morph_id == Some(morph_id)
+        })
+        .filter_map(|candidate| {
+            model
+                .shape
+                .relation(&candidate.name)
+                .and_then(|relation| relation.join_column_name.clone())
+        })
+        .collect::<Vec<_>>();
+    join_columns.sort();
+    join_columns.dedup();
+    if join_columns.is_empty() {
+        return Err(invalid(
+            "Morph relation join columns not found for row-level predicate",
+        ));
+    }
+    if join_columns.len() == 1 {
+        return Ok(json!({ (join_columns[0].clone()): raw_filter }));
+    }
+    Ok(json!({
+        "or": join_columns
+            .into_iter()
+            .map(|column| json!({ (column): raw_filter.clone() }))
+            .collect::<Vec<_>>()
+    }))
 }
 
 fn full_name_filter(field_name: &str, operand: &str, value: Value) -> Result<Value, RunnerError> {
@@ -1220,6 +1301,215 @@ mod tests {
             .unwrap(),
             json!({ "not": { "isEmptyArray": true } })
         );
+    }
+
+    #[tokio::test]
+    async fn morph_operands_use_selected_ids_and_the_correct_join_columns() {
+        let workspace_id = Uuid::new_v4();
+        let object_id = Uuid::new_v4();
+        let morph_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4().to_string();
+        let mut head = field(object_id, "owner");
+        head.field_type = FieldMetadataType::MorphRelation;
+        head.universal_identifier = morph_id.to_string();
+        head.morph_id = Some(morph_id);
+        head.settings = Some(json!({"relationType": "MANY_TO_ONE"}));
+        let mut company = field(object_id, "ownerCompany");
+        company.field_type = FieldMetadataType::MorphRelation;
+        company.morph_id = Some(morph_id);
+        company.settings = Some(json!({"relationType": "MANY_TO_ONE"}));
+        let mut person = field(object_id, "ownerPerson");
+        person.field_type = FieldMetadataType::MorphRelation;
+        person.morph_id = Some(morph_id);
+        person.settings = Some(json!({"relationType": "MANY_TO_ONE"}));
+        let fields = vec![
+            field(object_id, "id"),
+            head.clone(),
+            company.clone(),
+            person.clone(),
+        ];
+        let mut field_maps = crate::metadata::flat::FlatEntityMaps::default();
+        for field in &fields {
+            field_maps.add(
+                field.id.to_string(),
+                field.clone(),
+                field.id.to_string(),
+                workspace_id.to_string(),
+            );
+        }
+        let object = object(workspace_id, object_id, "item", &fields);
+        let schema = RunnerSchema::build(
+            &workspace_id,
+            std::slice::from_ref(&object),
+            &field_maps,
+            &crate::metadata::flat::FlatEntityMaps::default(),
+        )
+        .expect("morph schema");
+        let model = schema.object("item").expect("morph model");
+        let raw = json!({"in": [owner_id]});
+        let expected = json!({
+            "or": [
+                {"ownerCompanyId": {"in": [owner_id]}},
+                {"ownerPersonId": {"in": [owner_id]}}
+            ]
+        });
+
+        assert_eq!(
+            morph_filter_value(json!({"selectedRecordIds": [owner_id]})).unwrap(),
+            json!([owner_id])
+        );
+        assert_eq!(
+            operand_filter(
+                FieldMetadataType::MorphRelation,
+                "IS",
+                None,
+                json!([owner_id])
+            )
+            .unwrap(),
+            json!({"in": [owner_id]})
+        );
+        assert_eq!(
+            morph_relation_filter(model, &head, raw.clone(), true).unwrap(),
+            expected
+        );
+        assert_eq!(
+            morph_relation_filter(model, &company, raw.clone(), true).unwrap(),
+            expected
+        );
+        assert_eq!(
+            morph_relation_filter(model, &company, json!({"is": "NULL"}), false).unwrap(),
+            json!({"ownerCompanyId": {"is": "NULL"}})
+        );
+        assert_eq!(
+            morph_relation_filter(model, &company, json!({"is": "NOT_NULL"}), false).unwrap(),
+            json!({"ownerCompanyId": {"is": "NOT_NULL"}})
+        );
+
+        let predicate = json!({
+            "id": Uuid::new_v4().to_string(),
+            "fieldMetadataId": company.id.to_string(),
+            "objectMetadataId": object_id.to_string(),
+            "operand": "IS",
+            "value": {"selectedRecordIds": [owner_id]}
+        });
+        let mut permissions = crate::permissions::RoleRecordsPermissions {
+            objects: [(object_id.to_string(), Default::default())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let object_permission = permissions
+            .objects
+            .get_mut(&object_id.to_string())
+            .expect("object permission");
+        object_permission.can_read_some_records = true;
+        object_permission.row_level_records_permissions = Some(vec![rule(vec![predicate])]);
+        let schema = RunnerSchema::build_with_permissions(
+            &workspace_id,
+            std::slice::from_ref(&object),
+            &field_maps,
+            &crate::metadata::flat::FlatEntityMaps::default(),
+            permissions,
+            None,
+        )
+        .expect("permission schema");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/nudge")
+            .expect("lazy morph pool");
+        let filter = row_access_filter(
+            &pool,
+            &schema,
+            "item",
+            ObjectRecordsOperationType::Read,
+            &mut Suffixes::new(),
+        )
+        .await
+        .expect("morph access filter")
+        .expect("morph rule");
+        let sql = filter.render();
+
+        assert!(sql.contains("ownerCompanyId"), "{sql}");
+        assert!(sql.contains("ownerPersonId"), "{sql}");
+        assert!(sql.contains(" OR "), "{sql}");
+        assert!(filter
+            .params
+            .iter()
+            .any(|(_, value)| value.to_string().contains(&owner_id)));
+
+        if let Ok(url) = std::env::var("NUDGE_TEST_DATABASE_URL") {
+            use sqlx::Row;
+
+            let _guard = crate::query::runner::test_support::DB_TEST_LOCK
+                .lock()
+                .await;
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&url)
+                .await
+                .expect("morph test database");
+            let schema_name = nudge_core::ids::workspace_schema_name(&Uuid::new_v4());
+            let schema_sql = quote_identifier(&schema_name).expect("schema identifier");
+            let table_sql = format!(
+                "{}.{}",
+                schema_sql,
+                quote_identifier("item").expect("table")
+            );
+            sqlx::query(&format!("CREATE SCHEMA {}", schema_sql))
+                .execute(&pool)
+                .await
+                .expect("create morph schema");
+            sqlx::query(&format!(
+                "CREATE TABLE {} (id uuid PRIMARY KEY, \"ownerCompanyId\" uuid, \"ownerPersonId\" uuid)",
+                table_sql
+            ))
+            .execute(&pool)
+            .await
+            .expect("create morph table");
+            let owner_uuid = Uuid::parse_str(&owner_id).expect("owner uuid");
+            let company_match = Uuid::new_v4();
+            let person_match = Uuid::new_v4();
+            let no_match = Uuid::new_v4();
+            for (id, company_id, person_id) in [
+                (company_match, Some(owner_uuid), None),
+                (person_match, None, Some(owner_uuid)),
+                (no_match, None, None),
+            ] {
+                sqlx::query(&format!(
+                    "INSERT INTO {} (id, \"ownerCompanyId\", \"ownerPersonId\") VALUES ($1, $2, $3)",
+                    table_sql
+                ))
+                .bind(id)
+                .bind(company_id)
+                .bind(person_id)
+                .execute(&pool)
+                .await
+                .expect("insert morph row");
+            }
+            let parameters = filter.params.into_iter().collect::<Map<_, _>>();
+            let compiled = crate::query::compile::compile_named_parameters(
+                &format!("SELECT id FROM {} WHERE {}", table_sql, sql),
+                &parameters,
+            )
+            .expect("compile morph query");
+            let mut query = sqlx::query(&compiled.text);
+            for value in &compiled.values {
+                query =
+                    super::super::base::bind_json_value(query, value).expect("bind morph value");
+            }
+            let rows = query.fetch_all(&pool).await.expect("query morph rows");
+            let mut ids = rows
+                .iter()
+                .map(|row| row.try_get::<Uuid, _>(0).expect("morph row id"))
+                .collect::<Vec<_>>();
+            ids.sort();
+            sqlx::query(&format!("DROP SCHEMA {} CASCADE", schema_sql))
+                .execute(&pool)
+                .await
+                .expect("drop morph schema");
+            let mut expected = vec![company_match, person_match];
+            expected.sort();
+            assert_eq!(ids, expected);
+        }
     }
 
     #[test]

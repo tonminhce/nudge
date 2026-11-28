@@ -348,7 +348,10 @@ impl FilterSchema for RunnerSchema {
             }
 
             if column.composite_parent_field_name.is_none()
-                && matches!(column.field_metadata_type, FieldMetadataType::Relation)
+                && matches!(
+                    column.field_metadata_type,
+                    FieldMetadataType::Relation | FieldMetadataType::MorphRelation
+                )
             {
                 return Some(FilterKeyInfo::Scalar(FieldMetadataType::Uuid));
             }
