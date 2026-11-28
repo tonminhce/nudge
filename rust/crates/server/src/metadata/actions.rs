@@ -881,6 +881,7 @@ pub const OBJECT_COMPARABLE_PROPERTIES: &[&str] = &[
     "disabledObjectPermissionActions",
     "isUICreatable",
     "isSearchable",
+    "duplicateCriteria",
     "imageIdentifierFieldMetadataUniversalIdentifier",
 ];
 

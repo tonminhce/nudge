@@ -551,6 +551,7 @@ pub fn transpile_create_object(
         is_active: true,
         is_system: false,
         is_searchable: true,
+        duplicate_criteria: sanitized.get("duplicateCriteria").cloned(),
         is_audit_logged: true,
         is_ui_editable: true,
         is_ui_creatable: true,

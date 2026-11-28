@@ -41,12 +41,14 @@ use crate::query::runner::find_duplicates;
 use crate::query::runner::find_many;
 use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
+use crate::query::runner::merge_many;
 use crate::query::runner::run_mutation_one;
 use crate::query::runner::search;
 use crate::query::runner::ActorContext;
 use crate::query::runner::CreateArgs;
 use crate::query::runner::FilteredMutationKind;
 use crate::query::runner::FindManyArgs;
+use crate::query::runner::MergeManyArgs;
 use crate::query::runner::NestedRelationSelection;
 use crate::query::runner::RunnerSchema;
 use crate::query::runner::SearchArgs;
@@ -659,6 +661,9 @@ async fn execute_workspace(
             )
             .await
         }
+        ResolverMethod::MergeMany => {
+            merge_many_root(state, schema, &runner_schema, field, resolver).await
+        }
         ResolverMethod::GroupBy => Err(GraphQlError::user_input(
             "GroupBy is executed by the group-by runner endpoint in a following slice",
         )),
@@ -1101,16 +1106,24 @@ fn project_record(record: &Value, selections: &[FieldSelection], type_name: &str
             if child.is_object() {
                 project_record(&child, &selection.selection, selection.name.as_str())
             } else if child.is_array() {
-                Value::Array(
-                    child
+                if selection.selection.is_empty()
+                    || child
                         .as_array()
-                        .expect("array checked")
-                        .iter()
-                        .map(|item| {
-                            project_record(item, &selection.selection, selection.name.as_str())
-                        })
-                        .collect(),
-                )
+                        .is_some_and(|items| items.iter().any(|item| !item.is_object()))
+                {
+                    child
+                } else {
+                    Value::Array(
+                        child
+                            .as_array()
+                            .expect("array checked")
+                            .iter()
+                            .map(|item| {
+                                project_record(item, &selection.selection, selection.name.as_str())
+                            })
+                            .collect(),
+                    )
+                }
             } else {
                 child
             },
@@ -1178,6 +1191,51 @@ async fn find_duplicates_root(
             .flatten()
             .map(|connection| project_connection(connection, &field.selection, &object_type))
             .collect(),
+    ))
+}
+
+async fn merge_many_root(
+    state: &AppState,
+    schema: &WorkspaceSchema,
+    runner_schema: &RunnerSchema,
+    field: &FieldSelection,
+    resolver: &super::schema::RootResolver,
+) -> Result<Value, GraphQlError> {
+    let ids = field
+        .argument("ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| GraphQlError::user_input("ids is required"))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .ok_or_else(|| GraphQlError::user_input("ids must contain UUIDs"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let conflict_priority_index = field
+        .argument("conflictPriorityIndex")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| GraphQlError::user_input("conflictPriorityIndex is required"))?;
+    let record = merge_many(
+        &state.core_pool,
+        runner_schema,
+        &resolver.object_name_singular,
+        &MergeManyArgs {
+            ids,
+            conflict_priority_index,
+            dry_run: optional_bool_arg(field, "dryRun"),
+        },
+        root_record_fields_schemaless(field),
+        nested_relations(schema, field, resolver),
+    )
+    .await
+    .map_err(runner_graphql_error)?;
+    Ok(project_record(
+        &record,
+        &field.selection,
+        &pascal_case(&resolver.object_name_singular),
     ))
 }
 
@@ -1829,6 +1887,17 @@ fn schema_type_specs(schema: &WorkspaceSchema) -> Vec<Value> {
             &format!("create{plural_pascal}"),
             non_null(list(non_null(named_type(&type_name)))),
         ));
+        let mut merge = field_entry(
+            &format!("merge{plural_pascal}"),
+            non_null(named_type(&type_name)),
+        );
+        merge["args"] = Value::Array(vec![
+            input_value_entry("ids", non_null(list(non_null(scalar_type("UUID"))))),
+            input_value_entry("conflictPriorityIndex", non_null(scalar_type("Int"))),
+            input_value_entry("dryRun", scalar_type("Boolean")),
+        ]);
+        merge["args"][2]["defaultValue"] = Value::String(String::from("false"));
+        mutation_fields.push(merge);
     }
 
     specs.push(json!({

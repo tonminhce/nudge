@@ -18,6 +18,7 @@ pub enum ResolverMethod {
     DestroyOne,
     RestoreOne,
     GroupBy,
+    MergeMany,
 }
 
 impl ResolverMethod {
@@ -40,6 +41,7 @@ impl ResolverMethod {
             Self::DestroyOne => "destroyOne",
             Self::RestoreOne => "restoreOne",
             Self::GroupBy => "groupBy",
+            Self::MergeMany => "mergeMany",
         }
     }
 }
@@ -113,6 +115,10 @@ impl WorkspaceSchema {
                 (
                     ResolverMethod::GroupBy,
                     format!("{}GroupBy", camel_case(&object.name_plural)),
+                ),
+                (
+                    ResolverMethod::MergeMany,
+                    format!("merge{}", pascal_case(&object.name_plural)),
                 ),
             ] {
                 resolvers_by_root.insert(
@@ -194,6 +200,7 @@ impl WorkspaceSchema {
                     format!("delete{}", pascal_case(&object.name_singular)),
                     format!("destroy{}", pascal_case(&object.name_singular)),
                     format!("restore{}", pascal_case(&object.name_singular)),
+                    format!("merge{}", pascal_case(&object.name_plural)),
                 ]
             })
             .collect()
@@ -319,6 +326,9 @@ impl WorkspaceSchema {
             sdl.push_str(&format!(
                 "  {name}(data: [JSON!]!, upsert: Boolean): [{type_name}!]!\n"
             ));
+            sdl.push_str(&format!(
+                "  merge{plural}(ids: [UUID!]!, conflictPriorityIndex: Int!, dryRun: Boolean = false): {type_name}!\n"
+            ));
         }
 
         sdl.push_str("}\n");
@@ -419,6 +429,7 @@ mod tests {
             ("destroyPerson", ResolverMethod::DestroyOne),
             ("restorePerson", ResolverMethod::RestoreOne),
             ("peopleGroupBy", ResolverMethod::GroupBy),
+            ("mergePeople", ResolverMethod::MergeMany),
         ] {
             let resolver = schema
                 .resolver(root)
@@ -466,6 +477,9 @@ mod tests {
         assert!(sdl.contains("person(filter: JSON!"));
         assert!(sdl.contains(
             "personDuplicates(ids: [UUID], data: [PersonCreateInput]): [PersonConnection!]"
+        ));
+        assert!(sdl.contains(
+            "mergePeople(ids: [UUID!]!, conflictPriorityIndex: Int!, dryRun: Boolean = false): Person!"
         ));
         assert!(sdl.contains("type SearchResultConnection"));
         assert!(sdl.contains("input ObjectRecordFilterInput"));

@@ -37,6 +37,7 @@ use crate::query::runner::find_many;
 use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
 use crate::query::runner::group_by;
+use crate::query::runner::merge_many;
 use crate::query::runner::require_filtered_mutation;
 use crate::query::runner::run_mutation;
 use crate::query::runner::run_mutation_one;
@@ -46,6 +47,7 @@ use crate::query::runner::FilteredMutationKind;
 use crate::query::runner::FindManyArgs;
 use crate::query::runner::Granularity;
 use crate::query::runner::GroupByDefinition;
+use crate::query::runner::MergeManyArgs;
 use crate::query::runner::NestedRelationSelection;
 use crate::query::runner::RunnerSchema;
 use crate::state::AppState;
@@ -522,11 +524,45 @@ async fn dispatch_rest(
                 return Ok(Json(json!({"data": output})).into_response());
             }
             "duplicates" => return Err(RestError::method_not_allowed()),
-            "merge" => {
-                return Err(RestError::bad_request(
-                    "mergeMany is deferred to the record merge slice",
-                ));
+            "merge" if *method == Method::PATCH => {
+                let ids = body
+                    .get("ids")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| RestError::bad_request("ids is required"))?
+                    .iter()
+                    .map(|value| {
+                        value
+                            .as_str()
+                            .and_then(|value| Uuid::parse_str(value).ok())
+                            .ok_or_else(|| RestError::bad_request("ids must contain UUIDs"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let conflict_priority_index = body
+                    .get("conflictPriorityIndex")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| RestError::bad_request("conflictPriorityIndex is required"))?;
+                let mut record = merge_many(
+                    &state.core_pool,
+                    runner_schema,
+                    object,
+                    &MergeManyArgs {
+                        ids,
+                        conflict_priority_index,
+                        dry_run: body.get("dryRun").and_then(Value::as_bool).unwrap_or(false),
+                    },
+                    picked_fields.clone().unwrap_or_default(),
+                    nested.clone(),
+                )
+                .await
+                .map_err(rest_runner_error)?;
+                if let Some(record) = record.as_object_mut() {
+                    pick_fields(record, picked_fields.as_deref());
+                }
+                let key = format!("merge{}", pascal_case(object));
+                return Ok(Json(json!({"data": {key: record}})).into_response());
             }
+            "merge" => return Err(RestError::method_not_allowed()),
             "restore" if *method == Method::PATCH => {
                 return restore_records(
                     state,
