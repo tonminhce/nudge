@@ -213,11 +213,17 @@ pub fn CommandMenu() -> impl IntoView {
         search_error.set(None);
         leptos::task::spawn_local(async move {
             TimeoutFuture::new(200).await;
+            if !open.get_untracked()
+                || query.get_untracked().trim() != current_query.as_str()
+                || search_revision.get_untracked() != revision
+            {
+                return;
+            }
             let result = load_search_records(
                 &base_url,
                 &token,
                 SearchQueryArgs {
-                    search_input: current_query,
+                    search_input: current_query.clone(),
                     limit: MAX_SEARCH_RESULTS,
                     after: None,
                     included_object_name_singulars: None,
@@ -234,7 +240,10 @@ pub fn CommandMenu() -> impl IntoView {
                     .collect::<Vec<_>>()
             })
             .map_err(|error| error.to_string());
-            if search_revision.get_untracked() != revision {
+            if search_revision.get_untracked() != revision
+                || !open.get_untracked()
+                || query.get_untracked().trim() != current_query.as_str()
+            {
                 return;
             }
             match result {

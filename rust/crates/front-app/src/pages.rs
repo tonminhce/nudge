@@ -52,6 +52,9 @@ pub fn RecordShowPage() -> impl IntoView {
         duplicates_error.set(None);
         duplicates_searched.set(false);
         editing.set(false);
+        record.set(None);
+        object.set(None);
+        singular_name.set(String::new());
         let Some(token) = auth.token.get() else {
             return;
         };
@@ -224,6 +227,9 @@ pub fn RecordShowPage() -> impl IntoView {
     };
 
     let find_duplicates = move || {
+        if loading.get_untracked() || duplicates_loading.get_untracked() {
+            return;
+        }
         let Some(token) = auth.token.get_untracked() else {
             return;
         };
@@ -241,6 +247,7 @@ pub fn RecordShowPage() -> impl IntoView {
             .unwrap_or_default()
             .to_string();
         let requested_singular = object.name_singular.clone();
+        let requested_record_generation = record_generation.get_untracked();
         duplicate_generation.set(duplicate_generation.get_untracked() + 1);
         let generation = duplicate_generation.get_untracked();
         duplicates.set(Vec::new());
@@ -278,6 +285,7 @@ pub fn RecordShowPage() -> impl IntoView {
                 .get_untracked()
                 .and_then(|record| record["id"].as_str().map(str::to_string));
             if duplicate_generation.get_untracked() != generation
+                || record_generation.get_untracked() != requested_record_generation
                 || current_id.as_deref() != Some(id.as_str())
                 || singular_name.get_untracked() != requested_singular
             {
@@ -314,7 +322,7 @@ pub fn RecordShowPage() -> impl IntoView {
                 </Show>
                 <Show when=move || object.get().and_then(|object| object.duplicate_criteria).is_some() fallback=|| view! { <span /> }>
                     <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
-                        on:click=move |_| find_duplicates() disabled=move || duplicates_loading.get()>
+                        on:click=move |_| find_duplicates() disabled=move || loading.get() || duplicates_loading.get()>
                         {move || if duplicates_loading.get() { "Finding duplicates..." } else { "Find duplicates" }}
                     </button>
                 </Show>

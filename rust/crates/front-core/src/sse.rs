@@ -267,12 +267,14 @@ pub async fn unregister_event_query(
 #[derive(Clone)]
 pub struct EventStreamCancellation {
     handle: futures_util::future::AbortHandle,
+    controller: web_sys::AbortController,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl EventStreamCancellation {
     pub fn cancel(&self) {
         self.handle.abort();
+        self.controller.abort();
     }
 }
 
@@ -282,10 +284,13 @@ pub fn subscribe_event_stream<F>(
     token: &str,
     event_stream_id: &str,
     on_event: F,
-) -> (
-    EventStreamCancellation,
-    impl std::future::Future<Output = Result<(), ClientError>>,
-)
+) -> Result<
+    (
+        EventStreamCancellation,
+        impl std::future::Future<Output = Result<(), ClientError>>,
+    ),
+    ClientError,
+>
 where
     F: FnMut(SseEvent),
 {
@@ -294,6 +299,9 @@ where
     use futures_util::StreamExt;
 
     let (handle, registration) = AbortHandle::new_pair();
+    let controller = web_sys::AbortController::new()
+        .map_err(|error| ClientError::Transport(format!("{error:?}")))?;
+    let request_controller = controller.clone();
     let base_url = base_url.trim_end_matches('/').to_string();
     let token = token.to_string();
     let event_stream_id = event_stream_id.to_string();
@@ -303,6 +311,7 @@ where
             let response = gloo_net::http::Request::post(&url)
                 .header("Authorization", &format!("Bearer {token}"))
                 .header("Accept", "text/event-stream")
+                .abort_signal(Some(&request_controller.signal()))
                 .json(&serde_json::json!({
                     "query": ON_EVENT_SUBSCRIPTION_QUERY,
                     "variables": {"eventStreamId": event_stream_id},
@@ -334,7 +343,7 @@ where
             Err(_) => Ok(()),
         }
     };
-    (EventStreamCancellation { handle }, future)
+    Ok((EventStreamCancellation { handle, controller }, future))
 }
 
 #[cfg(target_arch = "wasm32")]

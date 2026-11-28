@@ -235,7 +235,7 @@ pub fn RecordIndexPage() -> impl IntoView {
         let callback_token = token.clone();
         let callback_event_stream_id = event_stream_id.clone();
         let (stream_cancellation, subscription) =
-            subscribe_event_stream(&base_url, &token, &event_stream_id, move |event| {
+            match subscribe_event_stream(&base_url, &token, &event_stream_id, move |event| {
                 if !active.get_untracked() {
                     return;
                 }
@@ -260,7 +260,9 @@ pub fn RecordIndexPage() -> impl IntoView {
                             )
                             .await
                             {
-                                Ok(true) => {}
+                                Ok(true) => {
+                                    revision.update(|revision| *revision += 1);
+                                }
                                 Ok(false) => {
                                     if active.get_untracked() {
                                         error.set(Some(
@@ -285,7 +287,13 @@ pub fn RecordIndexPage() -> impl IntoView {
                     }
                     _ => {}
                 }
-            });
+            }) {
+                Ok(subscription) => subscription,
+                Err(message) => {
+                    error.set(Some(message.to_string()));
+                    return;
+                }
+            };
         cancellation.set(Some(stream_cancellation));
         leptos::task::spawn_local(async move {
             let result = subscription.await;
