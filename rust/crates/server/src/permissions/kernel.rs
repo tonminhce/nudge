@@ -462,20 +462,19 @@ pub fn compute_context_records_permissions(
     if main_role_ids.is_empty() {
         main_role_ids = context.role_ids().into_iter().collect();
     }
-    let mut main = compute_permission_union(
-        &main_role_ids
-            .iter()
-            .filter_map(|role_id| workspace.role(*role_id))
-            .collect::<Vec<_>>(),
-    );
+    let (Some(main_roles), Some(limiting_roles)) = (
+        cached_role_permissions(workspace, &main_role_ids),
+        cached_role_permissions(workspace, &context.limiting_role_ids),
+    ) else {
+        return attach_company_access(RoleRecordsPermissions::empty(), workspace, context);
+    };
+    let mut main = compute_permission_union(&main_roles);
     main.relation_hop_enabled = workspace.relation_hop_enabled();
-    if context.limiting_role_ids.is_empty() {
+    if limiting_roles.is_empty() {
         return attach_company_access(main, workspace, context);
     }
-    let limiting_permissions = context
-        .limiting_role_ids
-        .iter()
-        .filter_map(|role_id| workspace.role(*role_id))
+    let limiting_permissions = limiting_roles
+        .into_iter()
         .cloned()
         .map(to_limiting_role_records_permissions)
         .collect::<Vec<_>>();
@@ -484,6 +483,16 @@ pub fn compute_context_records_permissions(
     let mut permissions = compute_permission_intersection(&[&main, &limiting]);
     permissions.relation_hop_enabled = main.relation_hop_enabled;
     attach_company_access(permissions, workspace, context)
+}
+
+fn cached_role_permissions<'a>(
+    workspace: &'a WorkspacePermissionSet,
+    role_ids: &[Uuid],
+) -> Option<Vec<&'a RoleRecordsPermissions>> {
+    role_ids
+        .iter()
+        .map(|role_id| workspace.role(*role_id))
+        .collect()
 }
 
 fn attach_company_access(
@@ -558,7 +567,9 @@ fn dedup_preserving_order(values: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::error::PermissionErrorCode;
     use super::super::model::FieldPermissionDefinition;
+    use super::super::model::ObjectPermissionDefinition;
     use super::super::model::PermissionPrincipalKind;
     use super::super::model::RecordsAccessSource;
     use super::super::model::RowLevelPermissionPredicateDefinition;
@@ -1423,5 +1434,520 @@ mod tests {
             error.message,
             "Entity performing the request does not have permission"
         );
+    }
+
+    fn role_with_object_read_grant(role_id: Uuid, object_id: Uuid) -> RoleDefinition {
+        let mut role = RoleDefinition::empty(role_id);
+        role.can_read_all_object_records = true;
+        role.object_permissions.insert(
+            object_id,
+            ObjectPermissionDefinition {
+                object_metadata_id: object_id,
+                can_read_object_records: Some(true),
+                can_update_object_records: None,
+                can_soft_delete_object_records: None,
+                can_destroy_object_records: None,
+                can_create_object_records: None,
+            },
+        );
+        role
+    }
+
+    fn criteria_limiting_role(role_id: Uuid, object_id: Uuid, rule_id: Uuid) -> RoleDefinition {
+        let mut role = role_with_read_rule(role_id, object_id, rule_id);
+        role.can_read_all_object_records = false;
+        role.object_permissions.insert(
+            object_id,
+            ObjectPermissionDefinition {
+                object_metadata_id: object_id,
+                can_read_object_records: Some(false),
+                can_update_object_records: None,
+                can_soft_delete_object_records: None,
+                can_destroy_object_records: None,
+                can_create_object_records: None,
+            },
+        );
+        role
+    }
+
+    fn workspace_with_roles(roles: Vec<(Uuid, RoleRecordsPermissions)>) -> WorkspacePermissionSet {
+        WorkspacePermissionSet {
+            roles: roles.into_iter().collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_criteria_limiting_role_denies_the_whole_object_read() {
+        let object_id = Uuid::new_v4();
+        let main_role_id = Uuid::new_v4();
+        let limiting_role_id = Uuid::new_v4();
+        let limiting_rule_id = Uuid::new_v4();
+        let main = compute_role_records_permissions(
+            &role_with_object_read_grant(main_role_id, object_id),
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let limiting = compute_role_records_permissions(
+            &criteria_limiting_role(limiting_role_id, object_id, limiting_rule_id),
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let workspace =
+            workspace_with_roles(vec![(main_role_id, main), (limiting_role_id, limiting)]);
+        let permissions = compute_context_records_permissions(
+            &workspace,
+            &context_with_roles(vec![main_role_id], vec![limiting_role_id]),
+        );
+        let object = permissions.object(object_id).expect("company entry");
+        assert!(!object.can_read_all_records);
+        assert!(!object.can_read_some_records());
+        assert!(!permissions.can_read_some_records);
+        let error =
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read)
+                .expect_err("criteria limiting role denies the read");
+        assert_eq!(error.code, PermissionErrorCode::PermissionDenied);
+        assert_eq!(
+            error.message,
+            "Entity performing the request does not have permission"
+        );
+    }
+
+    #[test]
+    fn an_all_records_limiting_role_leaves_the_read_unfiltered() {
+        let object_id = Uuid::new_v4();
+        let main_role_id = Uuid::new_v4();
+        let limiting_role_id = Uuid::new_v4();
+        let limiting_rule_id = Uuid::new_v4();
+        let main = compute_role_records_permissions(
+            &role_with_object_read_grant(main_role_id, object_id),
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let mut limiting_definition =
+            criteria_limiting_role(limiting_role_id, object_id, limiting_rule_id);
+        limiting_definition.can_read_all_object_records = true;
+        limiting_definition
+            .object_permissions
+            .get_mut(&object_id)
+            .expect("company object permission")
+            .can_read_object_records = Some(true);
+        let limiting = compute_role_records_permissions(
+            &limiting_definition,
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let workspace =
+            workspace_with_roles(vec![(main_role_id, main), (limiting_role_id, limiting)]);
+        let permissions = compute_context_records_permissions(
+            &workspace,
+            &context_with_roles(vec![main_role_id], vec![limiting_role_id]),
+        );
+        let object = permissions.object(object_id).expect("company entry");
+        assert!(object.can_read_all_records);
+        assert!(object.can_read_some_records());
+        assert!(permissions.can_read_some_records);
+        assert!(assert_operation_allowed(
+            &permissions,
+            object_id,
+            ObjectRecordsOperationType::Read
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_missing_main_role_denies_every_object() {
+        let object_id = Uuid::new_v4();
+        let unknown_role_id = Uuid::new_v4();
+        let workspace = workspace_with_roles(vec![]);
+        let permissions = compute_context_records_permissions(
+            &workspace,
+            &context_with_roles(vec![unknown_role_id], vec![]),
+        );
+        assert!(permissions.objects.is_empty());
+        assert!(!permissions.can_read_some_records);
+        let error =
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read)
+                .expect_err("a missing main role denies the read");
+        assert_eq!(error.code, PermissionErrorCode::PermissionDenied);
+        assert_eq!(
+            error.message,
+            "Entity performing the request does not have permission"
+        );
+    }
+
+    #[test]
+    fn a_missing_limiting_role_denies_even_alongside_an_all_records_main_role() {
+        let object_id = Uuid::new_v4();
+        let main_role_id = Uuid::new_v4();
+        let unknown_role_id = Uuid::new_v4();
+        let main = compute_role_records_permissions(
+            &role_with_object_read_grant(main_role_id, object_id),
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let workspace = workspace_with_roles(vec![(main_role_id, main)]);
+        let permissions = compute_context_records_permissions(
+            &workspace,
+            &context_with_roles(vec![main_role_id], vec![unknown_role_id]),
+        );
+        assert!(permissions.objects.is_empty());
+        assert!(!permissions.can_read_some_records);
+    }
+
+    #[test]
+    fn a_limiting_role_without_the_object_entry_denies_the_read() {
+        let object_id = Uuid::new_v4();
+        let main_role_id = Uuid::new_v4();
+        let limiting_role_id = Uuid::new_v4();
+        let main = compute_role_records_permissions(
+            &role_with_object_read_grant(main_role_id, object_id),
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let workspace = workspace_with_roles(vec![
+            (main_role_id, main),
+            (
+                limiting_role_id,
+                RoleRecordsPermissions {
+                    can_read_all_records: false,
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let permissions = compute_context_records_permissions(
+            &workspace,
+            &context_with_roles(vec![main_role_id], vec![limiting_role_id]),
+        );
+        assert!(!permissions
+            .object(object_id)
+            .is_some_and(|object| object.can_read_some_records()));
+    }
+
+    fn criteria_probe_role(
+        role_id: Uuid,
+        object_id: Uuid,
+        rule_id: Uuid,
+        can_read_records: bool,
+    ) -> RoleDefinition {
+        let mut role = role_with_read_rule(role_id, object_id, rule_id);
+        role.can_read_all_object_records = true;
+        role.row_level_permission_rules[0].can_read_records = can_read_records;
+        role.object_permissions.insert(
+            object_id,
+            ObjectPermissionDefinition {
+                object_metadata_id: object_id,
+                can_read_object_records: Some(false),
+                can_update_object_records: Some(false),
+                can_soft_delete_object_records: Some(false),
+                can_destroy_object_records: Some(false),
+                can_create_object_records: Some(false),
+            },
+        );
+        role
+    }
+
+    fn criteria_probe_permissions(
+        role_id: Uuid,
+        object_id: Uuid,
+        rule_id: Uuid,
+        can_read_records: bool,
+    ) -> RoleRecordsPermissions {
+        let permissions = compute_role_records_permissions(
+            &criteria_probe_role(role_id, object_id, rule_id, can_read_records),
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        compute_context_records_permissions(
+            &workspace_with_roles(vec![(role_id, permissions)]),
+            &context_with_roles(vec![role_id], vec![]),
+        )
+    }
+
+    #[test]
+    fn a_criteria_rule_keeps_the_company_read_allowed_and_filtered() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let rule_id = Uuid::new_v4();
+        let permissions = criteria_probe_permissions(role_id, object_id, rule_id, true);
+        let object = permissions
+            .object(object_id)
+            .expect("company entry with criteria");
+        assert!(!object.can_read_all_records);
+        assert_eq!(
+            object
+                .row_level_records_permissions
+                .as_ref()
+                .expect("criteria attached")
+                .len(),
+            1
+        );
+        assert!(object.can_read_some_records());
+        assert!(matches!(
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read),
+            Ok(())
+        ));
+    }
+
+    #[test]
+    fn the_same_role_without_a_readable_rule_denies_the_company_read() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let rule_id = Uuid::new_v4();
+        let permissions = criteria_probe_permissions(role_id, object_id, rule_id, false);
+        let object = permissions
+            .object(object_id)
+            .expect("company entry without readable criteria");
+        assert!(!object.can_read_all_records);
+        assert!(!object.can_read_some_records());
+        let error =
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read)
+                .expect_err("the read is denied once the rule stops allowing it");
+        assert_eq!(error.code, PermissionErrorCode::PermissionDenied);
+        assert_eq!(
+            error.message,
+            "Entity performing the request does not have permission"
+        );
+    }
+}
+
+#[cfg(test)]
+mod db_tests {
+    use super::super::error::PermissionErrorCode;
+    use super::super::validate::assert_operation_allowed;
+    use super::*;
+    use crate::auth::jwt_service::TokenType;
+    use crate::auth::middleware::AuthContext;
+    use crate::query::runner::test_support::DB_TEST_LOCK;
+
+    async fn grant_company_read(
+        pool: &sqlx::PgPool,
+        role_id: Uuid,
+        workspace_id: Uuid,
+        application_id: Uuid,
+        company_object_id: Uuid,
+    ) {
+        sqlx::query("UPDATE core.role SET \"canReadAllObjectRecords\" = true WHERE id = $1")
+            .bind(role_id)
+            .execute(pool)
+            .await
+            .expect("granting all records read");
+        sqlx::query(
+            "INSERT INTO core.\"objectPermission\" \
+             (id, \"roleId\", \"objectMetadataId\", \"workspaceId\", \"applicationId\", \
+              \"canReadObjectRecords\") \
+             VALUES ($1, $2, $3, $4, $5, true)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(role_id)
+        .bind(company_object_id)
+        .bind(workspace_id)
+        .bind(application_id)
+        .execute(pool)
+        .await
+        .expect("granting company read");
+    }
+
+    struct Member {
+        user_id: Uuid,
+        user_workspace_id: Uuid,
+        role_target_id: Uuid,
+    }
+
+    async fn seed_member(
+        pool: &sqlx::PgPool,
+        workspace_id: Uuid,
+        application_id: Uuid,
+        role_id: Uuid,
+    ) -> Member {
+        let user_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO core.user (id, email) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(format!("kernel-{}@example.test", user_id.simple()))
+            .execute(pool)
+            .await
+            .expect("inserting kernel member user");
+        let user_workspace_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO core.\"userWorkspace\" (\"userId\", \"workspaceId\") \
+             VALUES ($1, $2) RETURNING id",
+        )
+        .bind(user_id)
+        .bind(workspace_id)
+        .fetch_one(pool)
+        .await
+        .expect("inserting kernel membership");
+        let role_target_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO core.\"roleTarget\" \
+             (\"workspaceId\", \"roleId\", \"userWorkspaceId\", \"universalIdentifier\", \
+              \"applicationId\") \
+             VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        )
+        .bind(workspace_id)
+        .bind(role_id)
+        .bind(user_workspace_id)
+        .bind(Uuid::new_v4())
+        .bind(application_id)
+        .fetch_one(pool)
+        .await
+        .expect("inserting kernel role target");
+        Member {
+            user_id,
+            user_workspace_id,
+            role_target_id,
+        }
+    }
+
+    async fn seed_foreign_role(pool: &sqlx::PgPool) -> Uuid {
+        let workspace_id = Uuid::new_v4();
+        let application_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO core.\"workspace\" \
+             (id, \"displayName\", \"inviteHash\", \"activationStatus\", subdomain, \
+              \"workspaceCustomApplicationId\", \"isPasswordAuthEnabled\", \"databaseSchema\") \
+             VALUES ($1, 'Kernel Foreign', $2, 'CREATED', $3, $4, true, $5)",
+        )
+        .bind(workspace_id)
+        .bind(Uuid::new_v4())
+        .bind(format!(
+            "kernel-{}",
+            &workspace_id.simple().to_string()[..8]
+        ))
+        .bind(application_id)
+        .bind(nudge_core::ids::workspace_schema_name(&workspace_id))
+        .execute(pool)
+        .await
+        .expect("inserting foreign workspace");
+        sqlx::query(
+            "INSERT INTO core.\"application\" \
+             (id, \"universalIdentifier\", name, \"sourceType\", state, \"sourcePath\", \"workspaceId\") \
+             VALUES ($1, $2, 'Kernel Foreign Application', 'LOCAL', 'INSTALLED', '', $3)",
+        )
+        .bind(application_id)
+        .bind(Uuid::new_v4())
+        .bind(workspace_id)
+        .execute(pool)
+        .await
+        .expect("inserting foreign application");
+        sqlx::query(
+            "INSERT INTO core.\"role\" \
+             (id, \"universalIdentifier\", label, \"applicationId\", \"workspaceId\", \
+              \"canReadAllObjectRecords\") \
+             VALUES ($1, $2, 'Kernel Foreign Role', $3, $4, true)",
+        )
+        .bind(role_id)
+        .bind(Uuid::new_v4())
+        .bind(application_id)
+        .bind(workspace_id)
+        .execute(pool)
+        .await
+        .expect("inserting foreign role");
+        role_id
+    }
+
+    #[tokio::test]
+    async fn a_role_outside_the_cached_maps_denies_an_otherwise_readable_company() {
+        let Some(url) = std::env::var("NUDGE_TEST_DATABASE_URL").ok() else {
+            return;
+        };
+        let _guard = DB_TEST_LOCK.lock().await;
+        let seeded = crate::query::runner::test_support::seeded_workspace(&url)
+            .await
+            .expect("seeded kernel workspace");
+        let (role_id, application_id): (Uuid, Uuid) = sqlx::query_as(
+            "SELECT id, \"applicationId\" FROM core.role WHERE \"workspaceId\" = $1 ORDER BY id LIMIT 1",
+        )
+        .bind(seeded.workspace_id)
+        .fetch_one(&seeded.state.core_pool)
+        .await
+        .expect("loading kernel fixture role");
+        let company_object_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM core.\"objectMetadata\" WHERE \"workspaceId\" = $1 AND \"nameSingular\" = $2",
+        )
+        .bind(seeded.workspace_id)
+        .bind("company")
+        .fetch_one(&seeded.state.core_pool)
+        .await
+        .expect("loading company object metadata");
+        grant_company_read(
+            &seeded.state.core_pool,
+            role_id,
+            seeded.workspace_id,
+            application_id,
+            company_object_id,
+        )
+        .await;
+        let member = seed_member(
+            &seeded.state.core_pool,
+            seeded.workspace_id,
+            application_id,
+            role_id,
+        )
+        .await;
+        let auth = AuthContext {
+            token_type: TokenType::Access,
+            user_id: Some(member.user_id),
+            workspace_id: Some(seeded.workspace_id),
+            user_workspace_id: Some(member.user_workspace_id),
+            workspace_member_id: None,
+            api_key_id: None,
+            agent_id: None,
+            auth_provider: None,
+            is_impersonating: false,
+        };
+        let readable =
+            crate::permissions::settings::records_permissions_for_auth(&seeded.state, &auth)
+                .await
+                .expect("loading readable permissions")
+                .expect("readable permissions");
+        assert!(readable
+            .object(company_object_id)
+            .is_some_and(|object| object.can_read_all_records));
+        assert_operation_allowed(
+            &readable,
+            company_object_id,
+            ObjectRecordsOperationType::Read,
+        )
+        .expect("company read is allowed while the role is cached");
+        let foreign_role_id = seed_foreign_role(&seeded.state.core_pool).await;
+        sqlx::query("UPDATE core.\"roleTarget\" SET \"roleId\" = $2 WHERE id = $1")
+            .bind(member.role_target_id)
+            .bind(foreign_role_id)
+            .execute(&seeded.state.core_pool)
+            .await
+            .expect("repointing the role target outside the workspace");
+        seeded
+            .state
+            .permission_cache
+            .invalidate_workspace(seeded.workspace_id);
+        let denied =
+            crate::permissions::settings::records_permissions_for_auth(&seeded.state, &auth)
+                .await
+                .expect("loading denied permissions")
+                .expect("denied permissions");
+        assert!(!denied.can_read_some_records);
+        let error =
+            assert_operation_allowed(&denied, company_object_id, ObjectRecordsOperationType::Read)
+                .expect_err("a role outside the cached maps denies the read");
+        assert_eq!(error.code, PermissionErrorCode::PermissionDenied);
+        assert_eq!(
+            error.message,
+            "Entity performing the request does not have permission"
+        );
+        crate::query::runner::test_support::drop_workspace(&seeded).await;
     }
 }
