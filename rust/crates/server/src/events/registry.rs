@@ -929,6 +929,34 @@ mod tests {
     }
 
     #[test]
+    fn heartbeats_hold_a_stream_past_the_ttl_and_keep_delivery() {
+        let clock = Arc::new(ManualClock::new(0));
+        let registry = EventStreamRegistry::with_clock(clock.clone());
+        let workspace_id = Uuid::new_v4();
+        let user_workspace_id = Uuid::new_v4();
+        let auth = auth_with(principal(Some(user_workspace_id)));
+        let mut stream = registry
+            .open(workspace_id, "stream-1".into(), &auth)
+            .expect("stream");
+        let mut last_refresh = 0_u64;
+
+        for _ in 0..6 {
+            clock.advance(ttl_refresh_interval_ms() + 1);
+            registry
+                .heartbeat(workspace_id, "stream-1", &mut last_refresh)
+                .expect("heartbeat");
+        }
+        assert!(clock.now_ms() > EVENT_STREAM_TTL_MS);
+        assert_eq!(registry.active_stream_count(workspace_id), 1);
+
+        registry.publish_queue_job(workspace_id, None, &queue_job("late-job"));
+        let delivered = (0..10)
+            .filter_map(|_| stream.try_recv().ok())
+            .any(|payload| payload["queueJobEvents"][0]["jobId"] == "late-job");
+        assert!(delivered);
+    }
+
+    #[test]
     fn removing_a_stream_stops_delivery() {
         let clock = Arc::new(ManualClock::new(0));
         let registry = EventStreamRegistry::with_clock(clock);

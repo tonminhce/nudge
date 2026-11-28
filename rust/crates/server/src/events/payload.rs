@@ -173,3 +173,42 @@ pub fn queue_job_payload(event_stream_id: &str, event: &QueueJobEvent) -> Value 
 pub fn empty_payload(event_stream_id: &str) -> Value {
     payload_with(event_stream_id, Vec::new(), Vec::new(), Vec::new())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn driver_states_map_to_the_upstream_job_state_enum() {
+        let cases = [
+            ("completed", "COMPLETED"),
+            ("failed", "FAILED"),
+            ("active", "ACTIVE"),
+            ("waiting", "WAITING"),
+            ("delayed", "DELAYED"),
+            ("prioritized", "PRIORITIZED"),
+            ("waiting-children", "WAITING_CHILDREN"),
+        ];
+
+        for (driver_state, expected) in cases {
+            assert_eq!(
+                QueueJobState::from_driver_state(driver_state).map(QueueJobState::as_str),
+                Some(expected)
+            );
+        }
+        assert_eq!(QueueJobState::from_driver_state("moved"), None);
+        assert_eq!(QueueJobState::from_driver_state(""), None);
+    }
+
+    #[test]
+    fn progress_rounds_into_the_upstream_zero_to_hundred_percent_band() {
+        assert_eq!(queue_job_progress_percentage(Some(12.4)), Some(12));
+        assert_eq!(queue_job_progress_percentage(Some(12.6)), Some(13));
+        assert_eq!(queue_job_progress_percentage(Some(0.5)), Some(1));
+        assert_eq!(queue_job_progress_percentage(Some(-3.0)), Some(0));
+        assert_eq!(queue_job_progress_percentage(Some(140.0)), Some(100));
+        assert_eq!(queue_job_progress_percentage(Some(f64::NAN)), None);
+        assert_eq!(queue_job_progress_percentage(Some(f64::INFINITY)), None);
+        assert_eq!(queue_job_progress_percentage(None), None);
+    }
+}
