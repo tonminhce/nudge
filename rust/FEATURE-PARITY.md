@@ -60,7 +60,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | `createOne`/`createMany`, `updateOne`/`updateMany` | **done** | 4 | mutation round-trip capture matches live, including actor fields and upsert |
 | `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
 | `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
-| Full text search | **part** | 4→6 | cross-object ranking, filters, cursors, CJK fallback, favicons, metadata overrides, 39 standard labels across 35 locales and signed core-picture avatars are implemented; Files ownership guards, application-specific catalogs and replica routing remain |
+| Full text search | **part** | 4→6 | cross-object ranking, filters, cursors, CJK fallback, favicons, metadata overrides, standard/application label catalogs and signed core-picture avatars are implemented; Files ownership guards and replica routing remain |
 | Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope, upstream relative-date ranges and relation-hop feature gating. Access-group synchronization and sharing remain. |
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |

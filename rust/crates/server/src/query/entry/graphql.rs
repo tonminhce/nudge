@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -34,6 +35,7 @@ use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::names::camel_case;
 use crate::metadata::names::compute_composite_column_name;
 use crate::metadata::names::pascal_case;
+use crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER;
 use crate::permissions::current_user_workspace_permissions_for_auth;
 use crate::permissions::records_permissions_for_auth;
 use crate::query::cursor::encode_cursor_data;
@@ -549,6 +551,28 @@ async fn search_locale(
     Ok(normalize_locale(header_locale))
 }
 
+async fn search_application_catalogs(
+    pool: &sqlx::PgPool,
+    workspace_id: Uuid,
+    locale: &str,
+) -> Result<BTreeMap<Uuid, Value>, GraphQlError> {
+    let rows = sqlx::query_as::<_, (Uuid, Value)>(
+        "SELECT a.id, t.messages FROM core.application a \
+         JOIN core.\"applicationTranslation\" t \
+         ON t.\"applicationRegistrationId\" = a.\"applicationRegistrationId\" \
+         WHERE a.\"workspaceId\" = $1 AND t.locale = $2 \
+         AND a.\"deletedAt\" IS NULL AND t.\"deletedAt\" IS NULL \
+         AND a.\"universalIdentifier\"::text <> $3",
+    )
+    .bind(workspace_id)
+    .bind(locale)
+    .bind(TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+    Ok(rows.into_iter().collect())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_workspace(
     state: &AppState,
@@ -599,11 +623,13 @@ async fn execute_workspace(
             ));
         }
         let locale = search_locale(&state.core_pool, auth, headers).await?;
+        let application_catalogs =
+            search_application_catalogs(&state.core_pool, workspace_id, &locale).await?;
         let mut result = search(
             &state.core_pool,
             runner_schema.clone(),
             schema.objects(),
-            &parse_search_args(field, locale)?,
+            &parse_search_args(field, locale, application_catalogs)?,
             state.config.search_ilike_fallback_timeout_ms,
             state.config.allow_requests_to_twenty_icons,
         )
@@ -849,7 +875,11 @@ async fn find_many_root(
     ))
 }
 
-fn parse_search_args(field: &FieldSelection, locale: String) -> Result<SearchArgs, GraphQlError> {
+fn parse_search_args(
+    field: &FieldSelection,
+    locale: String,
+    application_catalogs: BTreeMap<Uuid, Value>,
+) -> Result<SearchArgs, GraphQlError> {
     let search_input = field
         .argument("searchInput")
         .and_then(Value::as_str)
@@ -874,6 +904,7 @@ fn parse_search_args(field: &FieldSelection, locale: String) -> Result<SearchArg
         excluded_object_name_singulars: optional_string_list(field, "excludedObjectNameSingulars")?,
         filter: filter.cloned(),
         locale,
+        application_catalogs,
     })
 }
 
@@ -2379,6 +2410,67 @@ mod tests {
     use crate::metadata::flat::FlatFieldMetadata;
     use crate::metadata::flat::FlatObjectMetadata;
     use crate::metadata::flat::FlatWorkspaceMaps;
+    use crate::query::runner::test_support::drop_workspace;
+    use crate::query::runner::test_support::seeded_workspace;
+    use crate::query::runner::test_support::DB_TEST_LOCK;
+
+    #[tokio::test]
+    async fn application_catalogs_load_for_the_workspace_and_locale() {
+        let Ok(url) = std::env::var("NUDGE_TEST_DATABASE_URL") else {
+            return;
+        };
+        let _guard = DB_TEST_LOCK.lock().await;
+        let seeded = seeded_workspace(&url).await.expect("catalog workspace");
+        let registration_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO core.\"applicationRegistration\" \
+             (id, \"universalIdentifier\", name, \"oAuthClientId\", \"workspaceId\") \
+             VALUES ($1, $2, 'Catalog App', 'catalog-client', $3)",
+        )
+        .bind(registration_id)
+        .bind(Uuid::new_v4())
+        .bind(seeded.workspace_id)
+        .execute(&seeded.state.core_pool)
+        .await
+        .expect("inserting application registration");
+        let application_id: (Uuid,) = sqlx::query_as(
+            "SELECT \"workspaceCustomApplicationId\" FROM core.workspace WHERE id = $1",
+        )
+        .bind(seeded.workspace_id)
+        .fetch_one(&seeded.state.core_pool)
+        .await
+        .expect("workspace custom application");
+        sqlx::query("UPDATE core.application SET \"applicationRegistrationId\" = $1 WHERE id = $2")
+            .bind(registration_id)
+            .bind(application_id.0)
+            .execute(&seeded.state.core_pool)
+            .await
+            .expect("linking application registration");
+        sqlx::query(
+            "INSERT INTO core.\"applicationTranslation\" \
+             (\"applicationRegistrationId\", locale, messages) VALUES ($1, 'fr-FR', $2)",
+        )
+        .bind(registration_id)
+        .bind(json!({"Jk7iDd": "Société applicative"}))
+        .execute(&seeded.state.core_pool)
+        .await
+        .expect("inserting application translation");
+        let catalogs =
+            search_application_catalogs(&seeded.state.core_pool, seeded.workspace_id, "fr-FR")
+                .await
+                .expect("loading application catalogs");
+        assert_eq!(
+            catalogs.get(&application_id.0),
+            Some(&json!({"Jk7iDd": "Société applicative"}))
+        );
+        assert!(
+            search_application_catalogs(&seeded.state.core_pool, seeded.workspace_id, "vi-VN",)
+                .await
+                .expect("loading missing locale")
+                .is_empty()
+        );
+        drop_workspace(&seeded).await;
+    }
 
     #[test]
     fn search_locale_header_normalization_matches_upstream() {

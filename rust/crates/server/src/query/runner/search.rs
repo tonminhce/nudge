@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -7,10 +8,12 @@ use serde_json::Map;
 use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
+use uuid::Uuid;
 
 use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::flat::FlatObjectMetadata;
 use crate::metadata::names::compute_composite_column_name;
+use crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER;
 use crate::permissions::assert_operation_allowed;
 use crate::permissions::ObjectRecordsOperationType;
 use crate::query::cursor::decode_cursor;
@@ -55,6 +58,7 @@ pub struct SearchArgs {
     pub excluded_object_name_singulars: Vec<String>,
     pub filter: Option<Value>,
     pub locale: String,
+    pub application_catalogs: BTreeMap<Uuid, Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,19 +94,45 @@ fn effective_is_active(object: &FlatObjectMetadata) -> bool {
         .unwrap_or(object.is_active)
 }
 
-fn effective_label_singular(object: &FlatObjectMetadata, locale: &str) -> String {
+fn effective_label_singular(
+    object: &FlatObjectMetadata,
+    locale: &str,
+    application_catalogs: &BTreeMap<Uuid, Value>,
+) -> String {
     if let Some(translation) =
         override_property_at_path(object, &["translations", locale, "labelSingular"])
             .and_then(Value::as_str)
     {
         return translation.to_string();
     }
-    override_property(object, "labelSingular")
+    if let Some(renamed) = override_property(object, "labelSingular")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
+    {
+        return renamed.to_string();
+    }
+    if object.application_universal_identifier != TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER {
+        if let Some(translation) = application_catalogs
+            .get(&object.application_id)
+            .and_then(|catalog| catalog_label_translation(catalog, &object.label_singular))
+        {
+            return translation.to_string();
+        }
+    }
+    standard_label_translation(&object.label_singular, locale)
         .map(str::to_string)
-        .or_else(|| standard_label_translation(&object.label_singular, locale).map(str::to_string))
         .unwrap_or_else(|| object.label_singular.clone())
+}
+
+fn catalog_label_translation<'a>(catalog: &'a Value, label: &str) -> Option<&'a str> {
+    if label.is_empty() {
+        return None;
+    }
+    let message_id = object_label_message_id(label);
+    catalog
+        .get(message_id.as_str())?
+        .as_str()
+        .filter(|value| !value.is_empty())
 }
 
 fn standard_label_translation(label: &str, locale: &str) -> Option<&'static str> {
@@ -351,7 +381,8 @@ async fn search_object(
     Ok(records
         .into_iter()
         .map(|mut record| {
-            record.object_label_singular = effective_label_singular(object, &args.locale);
+            record.object_label_singular =
+                effective_label_singular(object, &args.locale, &args.application_catalogs);
             record
         })
         .collect())
@@ -859,7 +890,6 @@ mod db_tests {
     use super::*;
     use crate::query::runner::test_support::DB_TEST_LOCK;
     use serde_json::json;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn search_ranks_labels_and_paginates_with_the_upstream_cursor() -> Result<(), RunnerError>
@@ -967,6 +997,7 @@ mod db_tests {
             excluded_object_name_singulars: Vec::new(),
             filter: None,
             locale: String::from("en"),
+            application_catalogs: BTreeMap::new(),
         };
         let first = search(
             &pool,
@@ -1012,7 +1043,6 @@ mod db_tests {
 mod tests {
     use super::*;
     use serde_json::json;
-    use uuid::Uuid;
 
     #[test]
     fn object_filtering_matches_upstream_inclusion_rules() {
@@ -1036,6 +1066,7 @@ mod tests {
             excluded_object_name_singulars: Vec::new(),
             filter: None,
             locale: String::from("en"),
+            application_catalogs: BTreeMap::new(),
         };
         let defaults = select_objects(&objects, &args)
             .into_iter()
@@ -1142,11 +1173,17 @@ mod tests {
             ..Default::default()
         };
         assert!(!effective_is_active(&object));
-        assert_eq!(effective_label_singular(&object, "en"), "Custom Company");
+        assert_eq!(
+            effective_label_singular(&object, "en", &BTreeMap::new()),
+            "Custom Company"
+        );
 
         object.overrides = Some(json!({"isActive": false, "labelSingular": "Legacy Company"}));
         assert!(!effective_is_active(&object));
-        assert_eq!(effective_label_singular(&object, "en"), "Legacy Company");
+        assert_eq!(
+            effective_label_singular(&object, "en", &BTreeMap::new()),
+            "Legacy Company"
+        );
     }
 
     #[test]
@@ -1163,15 +1200,27 @@ mod tests {
             })),
             ..Default::default()
         };
-        assert_eq!(effective_label_singular(&object, "fr-FR"), "Société");
-        assert_eq!(effective_label_singular(&object, "vi-VN"), "Custom Company");
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &BTreeMap::new()),
+            "Société"
+        );
+        assert_eq!(
+            effective_label_singular(&object, "vi-VN", &BTreeMap::new()),
+            "Custom Company"
+        );
 
         object.overrides = Some(json!({
             "labelSingular": "Legacy Company",
             "translations": {"vi-VN": {"labelSingular": "Công ty"}}
         }));
-        assert_eq!(effective_label_singular(&object, "vi-VN"), "Công ty");
-        assert_eq!(effective_label_singular(&object, "en"), "Legacy Company");
+        assert_eq!(
+            effective_label_singular(&object, "vi-VN", &BTreeMap::new()),
+            "Công ty"
+        );
+        assert_eq!(
+            effective_label_singular(&object, "en", &BTreeMap::new()),
+            "Legacy Company"
+        );
     }
 
     #[test]
@@ -1209,20 +1258,62 @@ mod tests {
             overrides: Some(json!({"owner": {"labelSingular": ""}})),
             ..Default::default()
         };
-        assert_eq!(effective_label_singular(&object, "fr-FR"), "Entreprise");
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &BTreeMap::new()),
+            "Entreprise"
+        );
 
         object.overrides = Some(json!({"owner": {"labelSingular": "Custom Company"}}));
-        assert_eq!(effective_label_singular(&object, "fr-FR"), "Custom Company");
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &BTreeMap::new()),
+            "Custom Company"
+        );
 
         object.overrides = Some(json!({
             "owner": {"translations": {"fr-FR": {"labelSingular": "Société"}}}
         }));
-        assert_eq!(effective_label_singular(&object, "fr-FR"), "Société");
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &BTreeMap::new()),
+            "Société"
+        );
 
         object.overrides = Some(json!({
             "owner": {"translations": {"fr-FR": {"labelSingular": ""}}}
         }));
-        assert_eq!(effective_label_singular(&object, "fr-FR"), "");
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &BTreeMap::new()),
+            ""
+        );
+    }
+
+    #[test]
+    fn application_catalogs_precede_standard_labels_only_for_custom_apps() {
+        let application_id = Uuid::new_v4();
+        let mut catalogs =
+            BTreeMap::from([(application_id, json!({"Jk7iDd": "Application Company"}))]);
+        let mut object = FlatObjectMetadata {
+            application_id,
+            application_universal_identifier: String::from("custom-application"),
+            label_singular: String::from("Company"),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &catalogs),
+            "Application Company"
+        );
+
+        catalogs.insert(application_id, json!({"Jk7iDd": ""}));
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &catalogs),
+            "Entreprise"
+        );
+
+        object.application_universal_identifier =
+            TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER.to_string();
+        assert_eq!(
+            effective_label_singular(&object, "fr-FR", &catalogs),
+            "Entreprise"
+        );
     }
 
     #[test]
