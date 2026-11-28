@@ -5,6 +5,7 @@ pub mod optimistic;
 pub mod projection;
 pub mod query_builder;
 pub mod query_cache;
+pub mod search;
 pub mod sse;
 
 pub const UPSTREAM_TAG: &str = "twenty/v2.61.0";

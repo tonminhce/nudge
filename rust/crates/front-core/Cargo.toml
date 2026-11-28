@@ -27,5 +27,5 @@ reqwest = { workspace = true }
 futures-util = "0.3"
 gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
 js-sys = "0.3"
-wasm-streams = "0.4"
+wasm-streams = "0.5"
 web-sys = { version = "0.3", features = ["RequestCredentials"] }
