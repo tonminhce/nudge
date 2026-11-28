@@ -65,7 +65,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
 | Dynamic GraphQL schema generated from metadata | **done** | 4 | direct workspace execution with resolver classification, introspection and connection shaping |
-| Live updates over SSE (`OnEventSubscription`) | **part** | 4→5 | workspace-scoped streams, query registration, named next frames, post-commit `updated` events and browser readiness/cancellation are implemented; create/delete, filter-level matching, metadata/queue events, reconnect, multi-node transport and hooks remain |
+| Live updates over SSE (`OnEventSubscription`) | **part** | 4→5 | workspace-scoped streams, named next frames, typed object/variable signatures, exact-object/empty-filter matching, post-commit create/update/delete/destroy/restore events with writer identity and diffs, and query re-registration are implemented; full record-filter predicates, permission-masked payloads, metadata/queue events, reconnect, multi-node transport and hooks remain |
 | Pre and post query hooks (actor stamping, timeline snapshots) | todo | 4→6 | actor stamping exists in mutations; timeline/post-hook engine remains |
 
 ## C. Auth and access control
