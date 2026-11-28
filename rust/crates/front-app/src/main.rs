@@ -9,6 +9,7 @@ mod command_menu;
 mod layout;
 mod pages;
 mod record_index;
+mod record_order;
 mod record_views;
 mod records;
 mod side_panel;
