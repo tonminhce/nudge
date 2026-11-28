@@ -57,11 +57,13 @@ fn render(value: &Value, depth: usize) -> String {
 }
 
 fn render_key(key: &str) -> String {
-    let identifier = key.chars().next().is_some_and(|first| {
-        first == '_' || first == '$' || first.is_ascii_alphabetic()
-    }) && key.chars().all(|ch| {
-        ch == '_' || ch == '$' || ch.is_ascii_alphanumeric()
-    });
+    let identifier = key
+        .chars()
+        .next()
+        .is_some_and(|first| first == '_' || first == '$' || first.is_ascii_alphabetic())
+        && key
+            .chars()
+            .all(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric());
 
     if identifier {
         key.to_string()
@@ -148,11 +150,15 @@ pub fn render_f64(value: f64) -> String {
         };
         let sign = if exponent < 0 { '-' } else { '+' };
 
-        return format!("{mantissa_head}e{sign}{exp}", mantissa_head = if negative {
-            format!("-{normalized}")
-        } else {
-            normalized
-        }, exp = exponent.abs());
+        return format!(
+            "{mantissa_head}e{sign}{exp}",
+            mantissa_head = if negative {
+                format!("-{normalized}")
+            } else {
+                normalized
+            },
+            exp = exponent.abs()
+        );
     }
 
     if exponent >= 0 {
@@ -255,9 +261,6 @@ mod tests {
         assert_eq!(render_f64(0.1 + 0.2), "0.30000000000000004");
         assert_eq!(render_f64(-0.0), "-0");
         assert_eq!(render_f64(1.0), "1");
-        assert_eq!(
-            render_f64(1.2345678901234568e29),
-            "1.2345678901234568e+29"
-        );
+        assert_eq!(render_f64(1.2345678901234568e29), "1.2345678901234568e+29");
     }
 }

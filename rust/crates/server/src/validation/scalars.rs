@@ -261,10 +261,7 @@ pub fn validate_multi_select_field(
     Ok(())
 }
 
-pub fn validate_overridden_position_field(
-    value: &Value,
-    field_name: &str,
-) -> ValidationResult<()> {
+pub fn validate_overridden_position_field(value: &Value, field_name: &str) -> ValidationResult<()> {
     let invalid = !value.is_number()
         || value
             .as_f64()
@@ -294,7 +291,10 @@ mod tests {
     }
 
     fn friendly(result: ValidationResult<()>) -> String {
-        result.expect_err("validation error").user_friendly_message().to_string()
+        result
+            .expect_err("validation error")
+            .user_friendly_message()
+            .to_string()
     }
 
     #[test]
@@ -421,11 +421,19 @@ mod tests {
             "Invalid value for field \"status\""
         );
         assert_eq!(
-            message(validate_rating_and_select_field(&json!("LOST"), "status", None)),
+            message(validate_rating_and_select_field(
+                &json!("LOST"),
+                "status",
+                None
+            )),
             "Invalid options for field \"status\""
         );
         assert_eq!(
-            friendly(validate_rating_and_select_field(&json!("LOST"), "status", None)),
+            friendly(validate_rating_and_select_field(
+                &json!("LOST"),
+                "status",
+                None
+            )),
             STANDARD_ERROR_MESSAGE.to_string()
         );
     }

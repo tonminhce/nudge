@@ -28,8 +28,8 @@ pub use scalars::validate_multi_select_field;
 pub use scalars::validate_number_field;
 pub use scalars::validate_numeric_field;
 pub use scalars::validate_overridden_position_field;
-pub use scalars::validate_raw_json_field;
 pub use scalars::validate_rating_and_select_field;
+pub use scalars::validate_raw_json_field;
 pub use scalars::validate_text_field;
 pub use scalars::validate_uuid_field;
 
@@ -43,7 +43,10 @@ fn runner_error(error: ValidationError) -> RunnerError {
     RunnerError::from(error)
 }
 
-pub fn validate_for_runner(model: &ObjectModel, records: &[Map<String, Value>]) -> Result<(), RunnerError> {
+pub fn validate_for_runner(
+    model: &ObjectModel,
+    records: &[Map<String, Value>],
+) -> Result<(), RunnerError> {
     validate_records_data(model, records).map_err(runner_error)
 }
 

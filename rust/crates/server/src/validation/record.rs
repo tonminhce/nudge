@@ -6,8 +6,6 @@ use crate::metadata::flat::FlatFieldMetadata;
 use crate::metadata::names::compute_relation_join_column_name;
 use crate::query::runner::base::ObjectModel;
 use crate::validation::error::ValidationError;
-use crate::validation::values::is_null;
-use crate::validation::ValidationResult;
 use crate::validation::validate_actor_field;
 use crate::validation::validate_address_field;
 use crate::validation::validate_array_field;
@@ -24,11 +22,13 @@ use crate::validation::validate_number_field;
 use crate::validation::validate_numeric_field;
 use crate::validation::validate_overridden_position_field;
 use crate::validation::validate_phones_field;
-use crate::validation::validate_raw_json_field;
 use crate::validation::validate_rating_and_select_field;
+use crate::validation::validate_raw_json_field;
 use crate::validation::validate_rich_text_field;
 use crate::validation::validate_text_field;
 use crate::validation::validate_uuid_field;
+use crate::validation::values::is_null;
+use crate::validation::ValidationResult;
 
 const RELATION_NESTED_OPERATIONS: [&str; 3] = ["connect", "create", "disconnect"];
 
@@ -84,7 +84,10 @@ fn join_column_name(model: &ObjectModel, field_name: &str) -> String {
         .unwrap_or_else(|| compute_relation_join_column_name(field_name))
 }
 
-fn field_for_key<'model>(model: &'model ObjectModel, key: &str) -> Option<&'model FlatFieldMetadata> {
+fn field_for_key<'model>(
+    model: &'model ObjectModel,
+    key: &str,
+) -> Option<&'model FlatFieldMetadata> {
     if let Some(field) = model.fields_by_name.get(key) {
         return Some(field);
     }
@@ -102,7 +105,10 @@ fn field_for_key<'model>(model: &'model ObjectModel, key: &str) -> Option<&'mode
 }
 
 fn setting<'field>(field: &'field FlatFieldMetadata, key: &str) -> Option<&'field Value> {
-    field.settings.as_ref().and_then(|settings| settings.get(key))
+    field
+        .settings
+        .as_ref()
+        .and_then(|settings| settings.get(key))
 }
 
 fn validate_field(
@@ -143,11 +149,9 @@ fn validate_field(
         FieldMetadataType::Currency => validate_currency_field(value, key),
         FieldMetadataType::Actor => validate_actor_field(value, key),
         FieldMetadataType::RichText => validate_rich_text_field(value, key),
-        FieldMetadataType::Links => validate_links_field(
-            value,
-            key,
-            setting(field, "type").and_then(Value::as_str),
-        ),
+        FieldMetadataType::Links => {
+            validate_links_field(value, key, setting(field, "type").and_then(Value::as_str))
+        }
         FieldMetadataType::TsVector => Err(ValidationError::standard(format!(
             "{key} {}-typed field does not support write operations",
             field.field_type.as_str()
@@ -161,9 +165,7 @@ fn validate_relation_field(
     key: &str,
     value: &Value,
 ) -> ValidationResult<()> {
-    let one_to_many = setting(field, "relationType")
-        .and_then(Value::as_str)
-        == Some("ONE_TO_MANY");
+    let one_to_many = setting(field, "relationType").and_then(Value::as_str) == Some("ONE_TO_MANY");
 
     if one_to_many {
         return Err(ValidationError::standard(format!(
@@ -234,7 +236,12 @@ mod tests {
     use crate::metadata::flat::FlatObjectMetadata;
     use crate::query::repository::table_shape::build_workspace_table_shape;
 
-    fn field(id: usize, name: &str, field_type: FieldMetadataType, extra: Option<Value>) -> FlatFieldMetadata {
+    fn field(
+        id: usize,
+        name: &str,
+        field_type: FieldMetadataType,
+        extra: Option<Value>,
+    ) -> FlatFieldMetadata {
         let uuid = Uuid::from_u128(id as u128 + 1);
         let mut settings = match extra {
             Some(value) => value,
@@ -316,7 +323,10 @@ mod tests {
         let model = model_with(vec![field(0, "name", FieldMetadataType::Text, None)]);
         let error = validate_record_data(&model, &record(vec![("nope", json!("x"))])).unwrap_err();
 
-        assert_eq!(error.message, "Object person doesn't have any \"nope\" field.");
+        assert_eq!(
+            error.message,
+            "Object person doesn't have any \"nope\" field."
+        );
         assert_eq!(error.sub_code, None);
     }
 
@@ -329,8 +339,14 @@ mod tests {
         let model = model_with(vec![required]);
         let error = validate_record_data(&model, &record(vec![("name", Value::Null)])).unwrap_err();
 
-        assert_eq!(error.message, "Field name is not nullable and has no default value.");
-        assert_eq!(error.user_friendly_message.as_deref(), Some("A required field is missing."));
+        assert_eq!(
+            error.message,
+            "Field name is not nullable and has no default value."
+        );
+        assert_eq!(
+            error.user_friendly_message.as_deref(),
+            Some("A required field is missing.")
+        );
     }
 
     #[test]
@@ -357,7 +373,8 @@ mod tests {
         select.options = Some(json!([{ "value": "NEW" }, { "value": "HOT" }]));
 
         let model = model_with(vec![select]);
-        let error = validate_record_data(&model, &record(vec![("stage", json!("COLD")]))).unwrap_err();
+        let error =
+            validate_record_data(&model, &record(vec![("stage", json!("COLD"))])).unwrap_err();
 
         assert_eq!(error.message, "Invalid option COLD for field \"stage\"");
     }
@@ -378,11 +395,16 @@ mod tests {
             field(1, "company", FieldMetadataType::Relation, None),
         ]);
 
-        assert!(validate_record_data(&model, &record(vec![("companyId", json("not-a-uuid"))])).is_err());
+        assert!(
+            validate_record_data(&model, &record(vec![("companyId", json("not-a-uuid"))])).is_err()
+        );
         assert_eq!(
             error_message(validate_record_data(
                 &model,
-                &record(vec![("companyId", json("3f2504e0-4f89-41d3-9a0c-0305e82c3301"))])
+                &record(vec![(
+                    "companyId",
+                    json("3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+                )])
             )),
             String::new()
         );
@@ -391,13 +413,18 @@ mod tests {
     #[test]
     fn relation_field_requires_a_nested_operation() {
         let model = model_with(vec![field(0, "company", FieldMetadataType::Relation, None)]);
-        let error = validate_record_data(&model, &record(vec![("company", json!("nope"))])).unwrap_err();
+        let error =
+            validate_record_data(&model, &record(vec![("company", json!("nope"))])).unwrap_err();
 
         assert_eq!(
             error.message,
             "Relation \"company\" requires create, connect, or disconnect operation"
         );
-        assert!(validate_record_data(&model, &record(vec![("company", json!({ "connect": { "id": "x" } }))])).is_ok());
+        assert!(validate_record_data(
+            &model,
+            &record(vec![("company", json!({ "connect": { "id": "x" } }))])
+        )
+        .is_ok());
     }
 
     #[test]
@@ -408,16 +435,26 @@ mod tests {
             FieldMetadataType::Relation,
             Some(json!({ "relationType": "ONE_TO_MANY" })),
         )]);
-        let error = validate_record_data(&model, &record(vec![("people", json!({ "create": [] }))])).unwrap_err();
+        let error =
+            validate_record_data(&model, &record(vec![("people", json!({ "create": [] }))]))
+                .unwrap_err();
 
-        assert_eq!(error.message, "One-to-many relation people field does not support write operations.");
+        assert_eq!(
+            error.message,
+            "One-to-many relation people field does not support write operations."
+        );
     }
 
     #[test]
     fn ts_vector_rejects_writes() {
-        let model = model_with(vec![field(0, "searchVector", FieldMetadataType::TsVector, None)]);
-        let error =
-            validate_record_data(&model, &record(vec![("searchVector", json!("'a'"))])).unwrap_err();
+        let model = model_with(vec![field(
+            0,
+            "searchVector",
+            FieldMetadataType::TsVector,
+            None,
+        )]);
+        let error = validate_record_data(&model, &record(vec![("searchVector", json!("'a'"))]))
+            .unwrap_err();
 
         assert_eq!(
             error.message,
@@ -436,11 +473,17 @@ mod tests {
         ]);
 
         assert_eq!(
-            error_message(validate_record_data(&model, &record(vec![("jobTitle", json!(7))]))),
+            error_message(validate_record_data(
+                &model,
+                &record(vec![("jobTitle", json!(7))])
+            )),
             "Invalid string value 7 for text field \"jobTitle\""
         );
         assert_eq!(
-            error_message(validate_record_data(&model, &record(vec![("yearOfBirth", json!("x")])))),
+            error_message(validate_record_data(
+                &model,
+                &record(vec![("yearOfBirth", json!("x"))])
+            )),
             "Invalid number value 'x' for field \"yearOfBirth\""
         );
         assert_eq!(
@@ -453,7 +496,10 @@ mod tests {
         assert_eq!(
             error_message(validate_record_data(
                 &model,
-                &record(vec![("emailAddresses", json!({ "primaryEmail": "not-an-email" }))])
+                &record(vec![(
+                    "emailAddresses",
+                    json!({ "primaryEmail": "not-an-email" })
+                )])
             )),
             "Invalid email \"not-an-email\" for primary email in emails field \"emailAddresses\""
         );
@@ -473,7 +519,10 @@ mod tests {
         .is_ok());
         assert!(validate_records_data(
             &model,
-            &[record(vec![("name", json!("ada"))]), record(vec![("name", json!(1))])]
+            &[
+                record(vec![("name", json!("ada"))]),
+                record(vec![("name", json!(1))])
+            ]
         )
         .is_err());
     }

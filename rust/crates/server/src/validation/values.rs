@@ -11,20 +11,14 @@ pub fn utf16_length(value: &str) -> usize {
 pub fn is_js_whitespace(value: char) -> bool {
     matches!(
         value,
-        '\t' | '\n'
-            | '\u{0b}'
-            | '\u{0c}'
-            | '\r'
-            | ' '
-            | '\u{a0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202f}'
-            | '\u{205f}'
-            | '\u{3000}'
-            | '\u{feff}'
+        '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
     )
 }
 
@@ -56,7 +50,16 @@ pub fn object_entries(value: &Value) -> Vec<(String, Value)> {
         Value::String(text) => text
             .encode_utf16()
             .enumerate()
-            .map(|(index, unit)| (index.to_string(), Value::String(char::from_u32(unit as u32).unwrap_or('\u{fffd}').to_string())))
+            .map(|(index, unit)| {
+                (
+                    index.to_string(),
+                    Value::String(
+                        char::from_u32(unit as u32)
+                            .unwrap_or('\u{fffd}')
+                            .to_string(),
+                    ),
+                )
+            })
             .collect(),
         _ => Vec::new(),
     }
@@ -109,19 +112,28 @@ pub fn js_string_to_number(text: &str) -> f64 {
         return 0.0;
     }
 
-    if let Some(hex) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
         return u64::from_str_radix(hex, 16)
             .map(|value| value as f64)
             .unwrap_or(f64::NAN);
     }
 
-    if let Some(octal) = trimmed.strip_prefix("0o").or_else(|| trimmed.strip_prefix("0O")) {
+    if let Some(octal) = trimmed
+        .strip_prefix("0o")
+        .or_else(|| trimmed.strip_prefix("0O"))
+    {
         return u64::from_str_radix(octal, 8)
             .map(|value| value as f64)
             .unwrap_or(f64::NAN);
     }
 
-    if let Some(binary) = trimmed.strip_prefix("0b").or_else(|| trimmed.strip_prefix("0B")) {
+    if let Some(binary) = trimmed
+        .strip_prefix("0b")
+        .or_else(|| trimmed.strip_prefix("0B"))
+    {
         return u64::from_str_radix(binary, 2)
             .map(|value| value as f64)
             .unwrap_or(f64::NAN);
@@ -175,10 +187,7 @@ mod tests {
     fn entries_follow_object_entries() {
         assert_eq!(
             object_entries(&json!({ "b": 1, "a": 2 })),
-            vec![
-                (String::from("b"), json!(1)),
-                (String::from("a"), json!(2)),
-            ]
+            vec![(String::from("b"), json!(1)), (String::from("a"), json!(2)),]
         );
         assert_eq!(
             object_entries(&json!([10, 20])),

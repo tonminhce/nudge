@@ -8,8 +8,8 @@ use crate::validation::net::is_valid_domain;
 use crate::validation::net::is_valid_email;
 use crate::validation::net::is_valid_uuid_v4;
 use crate::validation::scalars::validate_numeric_field;
-use crate::validation::scalars::validate_raw_json_field;
 use crate::validation::scalars::validate_rating_and_select_field;
+use crate::validation::scalars::validate_raw_json_field;
 use crate::validation::scalars::validate_text_field;
 use crate::validation::scalars::validate_uuid_field;
 use crate::validation::values::is_non_empty_string;
@@ -49,15 +49,7 @@ pub const ACTOR_SOURCES: [&str; 10] = [
 const TEXT_ALIGNMENTS: [&str; 4] = ["left", "center", "right", "justify"];
 
 const COLORS: [&str; 9] = [
-    "gray",
-    "brown",
-    "red",
-    "orange",
-    "yellow",
-    "green",
-    "blue",
-    "purple",
-    "pink",
+    "gray", "brown", "red", "orange", "yellow", "green", "blue", "purple", "pink",
 ];
 
 const BLOCK_NODE_TYPES: [&str; 12] = [
@@ -169,10 +161,9 @@ pub fn validate_emails_field(value: &Value, field_name: &str) -> ValidationResul
 
     for (sub_field, sub_value) in object_entries(value) {
         match sub_field.as_str() {
-            "primaryEmail" => validate_emails_primary_email_subfield(
-                &sub_value,
-                &path(field_name, &sub_field),
-            )?,
+            "primaryEmail" => {
+                validate_emails_primary_email_subfield(&sub_value, &path(field_name, &sub_field))?
+            }
             "additionalEmails" => validate_emails_additional_emails_subfield(
                 &sub_value,
                 &path(field_name, &sub_field),
@@ -291,12 +282,8 @@ pub fn validate_address_field(value: &Value, field_name: &str) -> ValidationResu
         let target = path(field_name, &sub_field);
 
         match sub_field.as_str() {
-            "addressStreet1"
-            | "addressStreet2"
-            | "addressCity"
-            | "addressState"
-            | "addressPostcode"
-            | "addressCountry" => validate_text_field(&sub_value, &target)?,
+            "addressStreet1" | "addressStreet2" | "addressCity" | "addressState"
+            | "addressPostcode" | "addressCountry" => validate_text_field(&sub_value, &target)?,
             "addressLat" | "addressLng" => validate_numeric_field(&sub_value, &target)?,
             _ => return Err(invalid_sub_field("address", &sub_field, field_name)),
         }
@@ -336,7 +323,10 @@ pub fn validate_currency_field(value: &Value, field_name: &str) -> ValidationRes
 
 pub fn validate_actor_field(value: &Value, field_name: &str) -> ValidationResult<()> {
     validate_raw_json_field(value, field_name)?;
-    let sources: Vec<String> = ACTOR_SOURCES.iter().map(|source| (*source).to_string()).collect();
+    let sources: Vec<String> = ACTOR_SOURCES
+        .iter()
+        .map(|source| (*source).to_string())
+        .collect();
 
     for (sub_field, sub_value) in object_entries(value) {
         let target = path(field_name, &sub_field);
@@ -376,7 +366,10 @@ fn file_item_issue(item: &Value, index: usize) -> Option<String> {
         ));
     };
 
-    if let Some(key) = object.keys().find(|key| !matches!(key.as_str(), "fileId" | "label")) {
+    if let Some(key) = object
+        .keys()
+        .find(|key| !matches!(key.as_str(), "fileId" | "label"))
+    {
         return Some(format!("{index}: Unrecognized key: \"{key}\""));
     }
 
@@ -626,27 +619,25 @@ fn validate_inline_node(value: &Value) -> bool {
                 .and_then(Value::as_str)
                 .is_some_and(|text| !text.is_empty());
 
-            valid_text
-                && object
-                    .get("marks")
-                    .map(validate_marks)
-                    .unwrap_or(true)
+            valid_text && object.get("marks").map(validate_marks).unwrap_or(true)
         }
         Some("hardBreak") => true,
-        Some("mentionTag") => object
-            .get("attrs")
-            .and_then(Value::as_object)
-            .map(|attrs| {
-                matches!(attrs.get("recordId"), None | Some(Value::Null))
-                    || attrs
-                        .get("recordId")
-                        .is_some_and(|value| value.is_string())
-            })
-            .unwrap_or(false)
-            && matches!(
-                object.get("attrs").and_then(|attrs| attrs.get("objectNameSingular")),
-                None | Some(Value::Null) | Some(Value::String(_))
-            ),
+        Some("mentionTag") => {
+            object
+                .get("attrs")
+                .and_then(Value::as_object)
+                .map(|attrs| {
+                    matches!(attrs.get("recordId"), None | Some(Value::Null))
+                        || attrs.get("recordId").is_some_and(|value| value.is_string())
+                })
+                .unwrap_or(false)
+                && matches!(
+                    object
+                        .get("attrs")
+                        .and_then(|attrs| attrs.get("objectNameSingular")),
+                    None | Some(Value::Null) | Some(Value::String(_))
+                )
+        }
         Some(other) => INLINE_NODE_TYPES.contains(&other),
         None => false,
     }
@@ -673,10 +664,7 @@ fn validate_marks(value: &Value) -> bool {
                     match object.get("attrs").and_then(|attrs| attrs.get(key)) {
                         None | Some(Value::Null) => {}
                         Some(value) => {
-                            if !value
-                                .as_str()
-                                .is_some_and(|text| COLORS.contains(&text))
-                            {
+                            if !value.as_str().is_some_and(|text| COLORS.contains(&text)) {
                                 return false;
                             }
                         }
@@ -724,12 +712,14 @@ fn validate_block_node(value: &Value) -> bool {
     let attrs = object.get("attrs");
 
     match kind {
-        "paragraph" => valid_block_attrs(attrs.cloned().as_ref().or(None))
-            && valid_block_content(None, false)
-            && object
-                .get("content")
-                .map(valid_inline_content)
-                .unwrap_or(true),
+        "paragraph" => {
+            valid_block_attrs(attrs.cloned().as_ref().or(None))
+                && valid_block_content(None, false)
+                && object
+                    .get("content")
+                    .map(valid_inline_content)
+                    .unwrap_or(true)
+        }
         "heading" => {
             let level_ok = attrs
                 .and_then(|attrs| attrs.get("level"))
@@ -846,9 +836,7 @@ fn validate_tiptap_field(value: &Value, field_name: &str) -> ValidationResult<()
         Value::Object(object) if !object.contains_key("type") => Some(String::from(
             "type: Invalid input: expected \"doc\", received undefined",
         )),
-        Value::Object(object)
-            if object.get("type").and_then(Value::as_str) == Some("doc") =>
-        {
+        Value::Object(object) if object.get("type").and_then(Value::as_str) == Some("doc") => {
             match object.get("content") {
                 None => None,
                 Some(content) => {
@@ -939,7 +927,11 @@ mod tests {
     #[test]
     fn emails_rejects_unknown_subfields_and_null_items() {
         assert_eq!(
-            failure(validate_emails_field(&json!({ "primary": "a@b.co" }), "emails")).0,
+            failure(validate_emails_field(
+                &json!({ "primary": "a@b.co" }),
+                "emails"
+            ))
+            .0,
             "Invalid subfield primary for emails field \"emails\""
         );
         assert_eq!(
@@ -1001,7 +993,11 @@ mod tests {
             "Invalid subfield middle for full name field \"name\""
         );
         assert_eq!(
-            failure(validate_address_field(&json!({ "addressZip": "x" }), "address")).0,
+            failure(validate_address_field(
+                &json!({ "addressZip": "x" }),
+                "address"
+            ))
+            .0,
             "Invalid subfield addressZip for address field \"address\""
         );
         assert_eq!(
@@ -1037,11 +1033,9 @@ mod tests {
 
     #[test]
     fn actor_source_must_be_a_known_source() {
-        assert!(validate_actor_field(
-            &json!({ "source": "MANUAL", "name": "Tony" }),
-            "actor"
-        )
-        .is_ok());
+        assert!(
+            validate_actor_field(&json!({ "source": "MANUAL", "name": "Tony" }), "actor").is_ok()
+        );
         assert_eq!(
             failure(validate_actor_field(&json!({ "source": "ROBOT" }), "actor")).0,
             "Invalid value \"ROBOT\" for field \"actor.source\". Valid values are: EMAIL, CALENDAR, WORKFLOW, AGENT, API, IMPORT, MANUAL, SYSTEM, WEBHOOK, APPLICATION"
@@ -1090,11 +1084,10 @@ mod tests {
         .is_err());
         assert!(validate_rich_text_field(&json!({ "blocknote": "not-json" }), "note").is_err());
         assert!(validate_rich_text_field(&json!({ "blocknote": "{ \"a\": 1 }" }), "note").is_err());
-        assert!(validate_rich_text_field(
-            &json!({ "tiptap": "{\"type\":\"paragraph\"}" }),
-            "note"
-        )
-        .is_err());
+        assert!(
+            validate_rich_text_field(&json!({ "tiptap": "{\"type\":\"paragraph\"}" }), "note")
+                .is_err()
+        );
         assert!(validate_rich_text_field(
             &json!({ "tiptap": "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}]}" }),
             "note"

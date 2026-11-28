@@ -53,8 +53,7 @@ const MONTH_SHORT_NAMES: [&str; 12] = [
     "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
 ];
 
-const MONTH_NARROW_NAMES: [&str; 12] =
-    ["j", "f", "m", "a", "m", "j", "j", "a", "s", "o", "n", "d"];
+const MONTH_NARROW_NAMES: [&str; 12] = ["j", "f", "m", "a", "m", "j", "j", "a", "s", "o", "n", "d"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParsedDate {
@@ -435,10 +434,7 @@ fn match_iso_time(value: &str) -> Option<(u32, u32, u32, &str)> {
 
     let rest = match rest.strip_prefix('.') {
         Some(tail) => {
-            let digits = tail
-                .chars()
-                .take_while(|ch| ch.is_ascii_digit())
-                .count();
+            let digits = tail.chars().take_while(|ch| ch.is_ascii_digit()).count();
 
             if digits == 0 {
                 return None;

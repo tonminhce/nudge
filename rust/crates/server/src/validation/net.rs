@@ -86,9 +86,7 @@ pub fn is_valid_email(value: &str) -> bool {
         return false;
     }
 
-    local
-        .chars()
-        .all(|ch| is_email_code_point(ch) && ch != '"')
+    local.chars().all(|ch| is_email_code_point(ch) && ch != '"')
         && domain.chars().all(is_email_code_point)
 }
 
@@ -117,7 +115,10 @@ fn matches_repeated_label(label: &str) -> bool {
         return true;
     }
 
-    match label.strip_prefix("xn--").or_else(|| label.strip_prefix('_')) {
+    match label
+        .strip_prefix("xn--")
+        .or_else(|| label.strip_prefix('_'))
+    {
         Some(body) => matches_label_body(body, 62),
         None => false,
     }
@@ -204,9 +205,7 @@ fn is_ipv4_like(value: &str) -> bool {
 
     parts.len() == 4
         && parts.iter().all(|part| {
-            !part.is_empty()
-                && part.len() <= 3
-                && part.chars().all(|ch| ch.is_ascii_digit())
+            !part.is_empty() && part.len() <= 3 && part.chars().all(|ch| ch.is_ascii_digit())
         })
 }
 
@@ -337,7 +336,20 @@ fn split_scheme(url: &str) -> Option<(String, &str)> {
 fn is_forbidden_host_char(value: char) -> bool {
     matches!(
         value,
-        '\0'..='\u{20}' | '#' | '%' | '/' | ':' | '<' | '>' | '?' | '@' | '[' | '\\' | ']' | '^' | '|'
+        '\0'..='\u{20}'
+            | '#'
+            | '%'
+            | '/'
+            | ':'
+            | '<'
+            | '>'
+            | '?'
+            | '@'
+            | '['
+            | '\\'
+            | ']'
+            | '^'
+            | '|'
     )
 }
 
@@ -349,12 +361,19 @@ fn strip_url_credentials(host: &str) -> &str {
 }
 
 fn matches_host_authority(value: &str) -> bool {
-    let authority = value.split(['/', '\\', '?', '#']).next().unwrap_or_default();
+    let authority = value
+        .split(['/', '\\', '?', '#'])
+        .next()
+        .unwrap_or_default();
     let host = strip_url_credentials(authority);
 
     let host = match host.strip_prefix('[') {
         Some(rest) => match rest.find(']') {
-            Some(index) => return rest[..index].chars().all(|ch| ch.is_ascii_hexdigit() || ch == ':'),
+            Some(index) => {
+                return rest[..index]
+                    .chars()
+                    .all(|ch| ch.is_ascii_hexdigit() || ch == ':')
+            }
             None => return false,
         },
         None => host,
@@ -459,13 +478,20 @@ mod tests {
 
         assert!(is_valid_email(&format!("{}@x.com", "a".repeat(64))));
         assert!(!is_valid_email(&"x".repeat(253)));
-        assert!(!is_valid_email(&format!("{}@{}", "a".repeat(64), "b".repeat(200))));
+        assert!(!is_valid_email(&format!(
+            "{}@{}",
+            "a".repeat(64),
+            "b".repeat(200)
+        )));
         assert!(is_valid_email("a\u{85}b@x.com"));
     }
 
     #[test]
     fn domain_normalization_strips_scheme_port_www_and_dots() {
-        assert_eq!(normalize_domain("https://www.Twenty.com/path"), "twenty.com");
+        assert_eq!(
+            normalize_domain("https://www.Twenty.com/path"),
+            "twenty.com"
+        );
         assert_eq!(normalize_domain("http://localhost:3000"), "localhost");
         assert_eq!(normalize_domain("twenty.com."), "twenty.com");
         assert_eq!(normalize_domain("user:pass@twenty.com:8080"), "twenty.com");
