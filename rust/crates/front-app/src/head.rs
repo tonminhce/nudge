@@ -43,11 +43,8 @@ impl PageHead {
         )
     }
 
-    pub fn favicon_href(&self) -> String {
-        favicon_href(
-            self.workspace_logo.get_untracked().as_deref(),
-            &server_url(),
-        )
+    pub fn favicon_href(&self, base_url: &str) -> String {
+        favicon_href(self.workspace_logo.get_untracked().as_deref(), base_url)
     }
 }
 
@@ -179,18 +176,18 @@ mod tests {
     fn the_favicon_tracks_the_workspace_logo_and_falls_back_to_the_default() {
         let head = PageHead::new();
         assert_eq!(
-            head.favicon_href(),
+            head.favicon_href("http://127.0.0.1:3011"),
             front_core::favicon::DEFAULT_WORKSPACE_LOGO
         );
         head.workspace_logo
             .set(Some(String::from("uploads/acme-logo.png")));
         assert_eq!(
-            head.favicon_href(),
-            format!("{}/files/uploads/acme-logo.png", server_url())
+            head.favicon_href("http://127.0.0.1:3011"),
+            "http://127.0.0.1:3011/files/uploads/acme-logo.png"
         );
         head.workspace_logo.set(None);
         assert_eq!(
-            head.favicon_href(),
+            head.favicon_href("http://127.0.0.1:3011"),
             front_core::favicon::DEFAULT_WORKSPACE_LOGO
         );
     }
