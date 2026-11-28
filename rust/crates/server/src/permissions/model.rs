@@ -48,6 +48,13 @@ pub const TOOL_PERMISSION_FLAGS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordsAccessSource {
+    AllRecords,
+    Criteria,
+    Denied,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectRecordsOperationType {
     Create,
     Read,
@@ -218,6 +225,16 @@ impl ObjectRecordsPermissions {
 
     pub fn can_read_some_records(&self) -> bool {
         self.can_access_some_records(ObjectRecordsOperationType::Read)
+    }
+
+    pub fn access_source(&self, operation: ObjectRecordsOperationType) -> RecordsAccessSource {
+        if self.operation_allowed(operation) {
+            return RecordsAccessSource::AllRecords;
+        }
+        if self.can_access_some_records(operation) {
+            return RecordsAccessSource::Criteria;
+        }
+        RecordsAccessSource::Denied
     }
 
     pub fn can_access_some_records(&self, operation: ObjectRecordsOperationType) -> bool {
@@ -418,5 +435,57 @@ mod tests {
         assert!(restrictions
             .unreadable_field_metadata_ids
             .contains(&field_id));
+    }
+
+    fn criteria_rule(can_read_records: bool) -> Vec<RowLevelRecordsPermissions> {
+        vec![RowLevelRecordsPermissions {
+            rule_id: Uuid::new_v4().to_string(),
+            can_read_records,
+            predicates: vec![serde_json::json!({ "operand": "IS" })],
+            ..Default::default()
+        }]
+    }
+
+    fn object_with_rules(
+        can_read_all_records: bool,
+        rules: Vec<RowLevelRecordsPermissions>,
+    ) -> ObjectRecordsPermissions {
+        ObjectRecordsPermissions {
+            can_read_all_records,
+            row_level_records_permissions: Some(rules),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_criteria_only_read_keeps_the_row_filter_and_is_not_denied() {
+        let object = object_with_rules(false, criteria_rule(true));
+        assert_eq!(
+            object.access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::Criteria
+        );
+        assert!(!object.operation_allowed(ObjectRecordsOperationType::Read));
+    }
+
+    #[test]
+    fn an_all_records_read_outranks_the_criteria_rule() {
+        let object = object_with_rules(true, criteria_rule(true));
+        assert_eq!(
+            object.access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::AllRecords
+        );
+    }
+
+    #[test]
+    fn a_read_without_all_records_or_an_allow_rule_is_denied() {
+        assert_eq!(
+            ObjectRecordsPermissions::default().access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::Denied
+        );
+        let object = object_with_rules(false, criteria_rule(false));
+        assert_eq!(
+            object.access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::Denied
+        );
     }
 }
