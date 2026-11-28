@@ -41,6 +41,9 @@ pub enum SseEvent {
     },
     Metadata(MetadataEvent),
     QueueJob(QueueJobEvent),
+    Ready {
+        event_stream_id: String,
+    },
     Ping,
 }
 
@@ -108,6 +111,8 @@ struct ObjectRecordEventsWithQueryIds {
 #[serde(rename_all = "camelCase")]
 struct OnEventSubscription {
     #[serde(default)]
+    event_stream_id: Option<String>,
+    #[serde(default)]
     object_record_events_with_query_ids: Vec<ObjectRecordEventsWithQueryIds>,
     #[serde(default)]
     metadata_events: Vec<MetadataEvent>,
@@ -151,7 +156,7 @@ pub fn decode_frames(input: &str) -> Result<Vec<SseEvent>, SseError> {
             }
         }
 
-        if event_name == "next" && !data_lines.is_empty() {
+        if (event_name.is_empty() || event_name == "next") && !data_lines.is_empty() {
             let data = data_lines.join("\n");
             events.extend(decode_event(&data)?);
         }
@@ -167,6 +172,7 @@ fn decode_event(data: &str) -> Result<Vec<SseEvent>, SseError> {
 
     let envelope: EventEnvelope = serde_json::from_str(data)?;
     let subscription = envelope.data.on_event_subscription;
+    let event_stream_id = subscription.event_stream_id.clone();
     let mut events = Vec::new();
 
     events.extend(
@@ -192,6 +198,12 @@ fn decode_event(data: &str) -> Result<Vec<SseEvent>, SseError> {
             .map(SseEvent::QueueJob),
     );
 
+    if events.is_empty() {
+        if let Some(event_stream_id) = event_stream_id {
+            events.push(SseEvent::Ready { event_stream_id });
+        }
+    }
+
     Ok(events)
 }
 
@@ -205,7 +217,7 @@ pub async fn register_event_query(
     let query = r#"mutation AddQueryToEventStream($input: AddQuerySubscriptionInput!) {
       addQueryToEventStream(input: $input)
     }"#;
-    let data = BrowserGraphQLClient::default()
+    let data = BrowserGraphQLClient::new()
         .execute_data(
             base_url,
             query,
@@ -233,7 +245,7 @@ pub async fn unregister_event_query(
     let query = r#"mutation RemoveQueryFromEventStream($input: RemoveQueryFromEventStreamInput!) {
       removeQueryFromEventStream(input: $input)
     }"#;
-    let data = BrowserGraphQLClient::default()
+    let data = BrowserGraphQLClient::new()
         .execute_data(
             base_url,
             query,
@@ -252,45 +264,77 @@ pub async fn unregister_event_query(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn subscribe_event_stream<F>(
+#[derive(Clone)]
+pub struct EventStreamCancellation {
+    handle: futures_util::future::AbortHandle,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl EventStreamCancellation {
+    pub fn cancel(&self) {
+        self.handle.abort();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn subscribe_event_stream<F>(
     base_url: &str,
     token: &str,
     event_stream_id: &str,
-    mut on_event: F,
-) -> Result<(), ClientError>
+    on_event: F,
+) -> (
+    EventStreamCancellation,
+    impl std::future::Future<Output = Result<(), ClientError>>,
+)
 where
     F: FnMut(SseEvent),
 {
+    use futures_util::future::AbortHandle;
+    use futures_util::future::Abortable;
     use futures_util::StreamExt;
 
-    let url = format!("{}/metadata", base_url.trim_end_matches('/'));
-    let response = gloo_net::http::Request::post(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .header("Accept", "text/event-stream")
-        .json(&serde_json::json!({
-            "query": ON_EVENT_SUBSCRIPTION_QUERY,
-            "variables": {"eventStreamId": event_stream_id},
-        }))?
-        .send()
-        .await?;
-    if response.status() != 200 {
-        return Err(ClientError::Response {
-            status: response.status(),
-            message: String::from("event stream request failed"),
-        });
-    }
-    let body = response.body().ok_or(ClientError::MissingData)?;
-    let mut stream = wasm_streams::ReadableStream::from_raw(body).into_stream();
-    let mut buffer = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| ClientError::Transport(format!("{error:?}")))?;
-        buffer.extend_from_slice(&js_sys::Uint8Array::from(chunk).to_vec());
-        consume_event_frames(&mut buffer, &mut on_event)?;
-    }
-    if !buffer.is_empty() {
-        consume_event_frames(&mut buffer, &mut on_event)?;
-    }
-    Ok(())
+    let (handle, registration) = AbortHandle::new_pair();
+    let base_url = base_url.trim_end_matches('/').to_string();
+    let token = token.to_string();
+    let event_stream_id = event_stream_id.to_string();
+    let future = async move {
+        let subscription = async move {
+            let url = format!("{base_url}/metadata");
+            let response = gloo_net::http::Request::post(&url)
+                .header("Authorization", &format!("Bearer {token}"))
+                .header("Accept", "text/event-stream")
+                .json(&serde_json::json!({
+                    "query": ON_EVENT_SUBSCRIPTION_QUERY,
+                    "variables": {"eventStreamId": event_stream_id},
+                }))?
+                .send()
+                .await?;
+            if response.status() != 200 {
+                return Err(ClientError::Response {
+                    status: response.status(),
+                    message: String::from("event stream request failed"),
+                });
+            }
+            let body = response.body().ok_or(ClientError::MissingData)?;
+            let mut stream = wasm_streams::ReadableStream::from_raw(body).into_stream();
+            let mut buffer = Vec::new();
+            let mut on_event = on_event;
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|error| ClientError::Transport(format!("{error:?}")))?;
+                buffer.extend_from_slice(&js_sys::Uint8Array::from(chunk).to_vec());
+                consume_event_frames(&mut buffer, &mut on_event)?;
+            }
+            if !buffer.is_empty() {
+                consume_event_frames(&mut buffer, &mut on_event)?;
+            }
+            Ok(())
+        };
+        match Abortable::new(subscription, registration).await {
+            Ok(result) => result,
+            Err(_) => Ok(()),
+        }
+    };
+    (EventStreamCancellation { handle }, future)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -330,6 +374,17 @@ mod tests {
                     properties: Some(json!({"updatedFields": ["name"]})),
                 },
                 query_ids: vec!["q1".into(), "q2".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn decoder_accepts_unnamed_server_frames_and_signals_stream_readiness() {
+        let frame = "data: {\"data\":{\"onEventSubscription\":{\"eventStreamId\":\"stream-1\",\"objectRecordEventsWithQueryIds\":[],\"metadataEvents\":[],\"queueJobEvents\":[]}}}\n\n";
+        assert_eq!(
+            decode_frames(frame).unwrap(),
+            vec![SseEvent::Ready {
+                event_stream_id: String::from("stream-1")
             }]
         );
     }

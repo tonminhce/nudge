@@ -1,4 +1,14 @@
 use front_core::projection::ObjectMetadata;
+#[cfg(target_arch = "wasm32")]
+use front_core::sse::register_event_query;
+#[cfg(target_arch = "wasm32")]
+use front_core::sse::subscribe_event_stream;
+#[cfg(target_arch = "wasm32")]
+use front_core::sse::unregister_event_query;
+#[cfg(target_arch = "wasm32")]
+use front_core::sse::EventStreamCancellation;
+#[cfg(target_arch = "wasm32")]
+use front_core::sse::SseEvent;
 use front_ui::icons::IconBuildingSkyscraper;
 use front_ui::icons::IconCheck;
 use front_ui::icons::IconChevronDown;
@@ -15,6 +25,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
 use crate::app::read_storage;
+#[cfg(target_arch = "wasm32")]
+use crate::app::server_url;
 use crate::app::write_storage;
 use crate::app::AuthState;
 use crate::record_views::alternate_view;
@@ -90,6 +102,7 @@ pub fn RecordIndexPage() -> impl IntoView {
     let view_type = RwSignal::new(RecordViewType::Table);
     let show_create = RwSignal::new(false);
     let revision = RwSignal::new(0_usize);
+    let load_generation = RwSignal::new(0_usize);
     let first_name = RwSignal::new(String::new());
     let last_name = RwSignal::new(String::new());
     let record_name = RwSignal::new(String::new());
@@ -118,6 +131,8 @@ pub fn RecordIndexPage() -> impl IntoView {
 
     Effect::new(move |_| {
         let plural = params.get().get("plural").unwrap_or_default();
+        load_generation.set(load_generation.get_untracked() + 1);
+        let generation = load_generation.get_untracked();
         if let Some(stored) = read_storage(&format!("nudge.view.{plural}")) {
             view_type.set(RecordViewType::parse(&stored));
         }
@@ -157,6 +172,9 @@ pub fn RecordIndexPage() -> impl IntoView {
                 Ok::<_, String>((object, response))
             }
             .await;
+            if load_generation.get_untracked() != generation {
+                return;
+            }
             match result {
                 Ok((object, response)) => {
                     total_count.set(
@@ -172,6 +190,109 @@ pub fn RecordIndexPage() -> impl IntoView {
                 Err(message) => {
                     error.set(Some(message));
                     loading.set(false);
+                }
+            }
+        });
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    Effect::new(move |_| {
+        let plural = params.get().get("plural").unwrap_or_default();
+        let Some(token) = auth.token.get() else {
+            return;
+        };
+        if plural != "people" {
+            return;
+        }
+        let event_stream_id = format!("nudge-{}-{}", js_sys::Date::now(), js_sys::Math::random());
+        let query_id = format!("people-{event_stream_id}");
+        let base_url = server_url();
+        let active = RwSignal::new(true);
+        let registered = RwSignal::new(false);
+        let cancellation = RwSignal::new(None::<EventStreamCancellation>);
+
+        let cleanup_base_url = base_url.clone();
+        let cleanup_token = token.clone();
+        let cleanup_event_stream_id = event_stream_id.clone();
+        let cleanup_query_id = query_id.clone();
+        on_cleanup(move || {
+            active.set(false);
+            if let Some(cancellation) = cancellation.get_untracked() {
+                cancellation.cancel();
+            }
+            leptos::task::spawn_local(async move {
+                let _ = unregister_event_query(
+                    &cleanup_base_url,
+                    &cleanup_token,
+                    &cleanup_event_stream_id,
+                    &cleanup_query_id,
+                )
+                .await;
+            });
+        });
+
+        let callback_base_url = base_url.clone();
+        let callback_token = token.clone();
+        let callback_event_stream_id = event_stream_id.clone();
+        let (stream_cancellation, subscription) =
+            subscribe_event_stream(&base_url, &token, &event_stream_id, move |event| {
+                if !active.get_untracked() {
+                    return;
+                }
+                match event {
+                    SseEvent::Ready { event_stream_id } => {
+                        if event_stream_id != callback_event_stream_id || registered.get_untracked()
+                        {
+                            return;
+                        }
+                        registered.set(true);
+                        let register_base_url = callback_base_url.clone();
+                        let register_token = callback_token.clone();
+                        let register_event_stream_id = callback_event_stream_id.clone();
+                        let register_query_id = query_id.clone();
+                        leptos::task::spawn_local(async move {
+                            match register_event_query(
+                                &register_base_url,
+                                &register_token,
+                                &register_event_stream_id,
+                                &register_query_id,
+                                "FindManyPeople",
+                            )
+                            .await
+                            {
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    if active.get_untracked() {
+                                        error.set(Some(
+                                            "Event stream query registration failed".to_string(),
+                                        ));
+                                    }
+                                }
+                                Err(message) => {
+                                    if active.get_untracked() {
+                                        error.set(Some(message.to_string()));
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    SseEvent::ObjectRecord { event, query_ids }
+                        if matches!(event.action.as_str(), "created" | "updated" | "deleted")
+                            && event.object_name_singular == "person"
+                            && query_ids.iter().any(|id| id == &query_id) =>
+                    {
+                        revision.update(|revision| *revision += 1);
+                    }
+                    _ => {}
+                }
+            });
+        cancellation.set(Some(stream_cancellation));
+        leptos::task::spawn_local(async move {
+            let result = subscription.await;
+            cancellation.set(None);
+            if active.get_untracked() {
+                if let Err(message) = result {
+                    error.set(Some(message.to_string()));
                 }
             }
         });
@@ -195,6 +316,7 @@ pub fn RecordIndexPage() -> impl IntoView {
         } else {
             0
         };
+        let generation = load_generation.get_untracked();
         loading.set(true);
         leptos::task::spawn_local(async move {
             let result = load_records(
@@ -207,6 +329,9 @@ pub fn RecordIndexPage() -> impl IntoView {
                 false,
             )
             .await;
+            if load_generation.get_untracked() != generation {
+                return;
+            }
             match result {
                 Ok(response) => {
                     records.update(|records| {

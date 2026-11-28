@@ -336,7 +336,7 @@ async fn event_subscription_response(
                 }
             }
         });
-        yield Ok::<Event, Infallible>(Event::default().data(initial.to_string()));
+        yield Ok::<Event, Infallible>(Event::default().event("next").data(initial.to_string()));
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         interval.tick().await;
@@ -347,10 +347,10 @@ async fn event_subscription_response(
                         break;
                     };
                     let data = json!({"data": {"onEventSubscription": payload}});
-                    yield Ok::<Event, Infallible>(Event::default().data(data.to_string()));
+                    yield Ok::<Event, Infallible>(Event::default().event("next").data(data.to_string()));
                 }
                 _ = interval.tick() => {
-                    yield Ok::<Event, Infallible>(Event::default().data("{}"));
+                    yield Ok::<Event, Infallible>(Event::default().event("next").data("{}"));
                 }
             }
         }

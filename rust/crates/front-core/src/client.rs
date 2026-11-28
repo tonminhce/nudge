@@ -252,6 +252,10 @@ pub struct BrowserGraphQLClient;
 
 #[cfg(target_arch = "wasm32")]
 impl BrowserGraphQLClient {
+    pub const fn new() -> Self {
+        Self
+    }
+
     pub async fn post_json(
         &self,
         base_url: &str,
