@@ -34,10 +34,24 @@ pub fn RecordShowPage() -> impl IntoView {
     let companies = RwSignal::new(Vec::<Value>::new());
     let saving = RwSignal::new(false);
     let edit_error = RwSignal::new(None::<String>);
+    let duplicates = RwSignal::new(Vec::<Value>::new());
+    let duplicates_loading = RwSignal::new(false);
+    let duplicates_error = RwSignal::new(None::<String>);
+    let duplicates_searched = RwSignal::new(false);
+    let record_generation = RwSignal::new(0_usize);
+    let duplicate_generation = RwSignal::new(0_usize);
 
     Effect::new(move |_| {
         let singular = params.get().get("singular").unwrap_or_default();
         let id = params.get().get("id").unwrap_or_default();
+        record_generation.set(record_generation.get_untracked() + 1);
+        duplicate_generation.set(duplicate_generation.get_untracked() + 1);
+        let generation = record_generation.get_untracked();
+        duplicates.set(Vec::new());
+        duplicates_loading.set(false);
+        duplicates_error.set(None);
+        duplicates_searched.set(false);
+        editing.set(false);
         let Some(token) = auth.token.get() else {
             return;
         };
@@ -60,7 +74,7 @@ pub fn RecordShowPage() -> impl IntoView {
                     },
                 )
                 .map_err(|error| error.to_string())?;
-                let response = front_core::client::BrowserGraphQLClient::default()
+                let response = front_core::client::BrowserGraphQLClient::new()
                     .execute_data(
                         &crate::app::server_url(),
                         &document.query,
@@ -74,6 +88,9 @@ pub fn RecordShowPage() -> impl IntoView {
                 Ok::<_, String>((object.clone(), records.into_iter().next()))
             }
             .await;
+            if record_generation.get_untracked() != generation {
+                return;
+            }
             match result {
                 Ok((found_object, Some(found))) => {
                     let draft = RecordDraft::from_record(&found);
@@ -189,6 +206,11 @@ pub fn RecordShowPage() -> impl IntoView {
             .await
             {
                 Ok(updated) => {
+                    duplicate_generation.set(duplicate_generation.get_untracked() + 1);
+                    duplicates.set(Vec::new());
+                    duplicates_loading.set(false);
+                    duplicates_error.set(None);
+                    duplicates_searched.set(false);
                     record.set(Some(apply_record_edit(&current_record, &updated, &edit)));
                     saving.set(false);
                     editing.set(false);
@@ -196,6 +218,81 @@ pub fn RecordShowPage() -> impl IntoView {
                 Err(message) => {
                     saving.set(false);
                     edit_error.set(Some(message));
+                }
+            }
+        });
+    };
+
+    let find_duplicates = move || {
+        let Some(token) = auth.token.get_untracked() else {
+            return;
+        };
+        let Some(object) = object.get_untracked() else {
+            return;
+        };
+        let Some(current_record) = record.get_untracked() else {
+            return;
+        };
+        if object.duplicate_criteria.is_none() {
+            return;
+        }
+        let id = current_record["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let requested_singular = object.name_singular.clone();
+        duplicate_generation.set(duplicate_generation.get_untracked() + 1);
+        let generation = duplicate_generation.get_untracked();
+        duplicates.set(Vec::new());
+        duplicates_searched.set(false);
+        duplicates_loading.set(true);
+        duplicates_error.set(None);
+        leptos::task::spawn_local(async move {
+            let result = async {
+                let document =
+                    front_core::query_builder::find_duplicates_query(&object, vec![id.clone()])
+                        .map_err(|error| error.to_string())?;
+                let response = front_core::client::BrowserGraphQLClient::new()
+                    .execute_data(
+                        &crate::app::server_url(),
+                        &document.query,
+                        front_core::client::RequestOptions::new(front_core::client::Endpoint::Core)
+                            .variables(Value::Object(document.variables))
+                            .bearer_token(token),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok::<_, String>(
+                    response[format!("{}Duplicates", object.name_singular).as_str()]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|connection| connection["edges"].as_array().into_iter().flatten())
+                        .filter_map(|edge| edge.get("node"))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            }
+            .await;
+            let current_id = record
+                .get_untracked()
+                .and_then(|record| record["id"].as_str().map(str::to_string));
+            if duplicate_generation.get_untracked() != generation
+                || current_id.as_deref() != Some(id.as_str())
+                || singular_name.get_untracked() != requested_singular
+            {
+                return;
+            }
+            duplicates_searched.set(true);
+            match result {
+                Ok(found) => {
+                    duplicates.set(found);
+                    duplicates_loading.set(false);
+                }
+                Err(message) => {
+                    duplicates.set(Vec::new());
+                    duplicates_loading.set(false);
+                    duplicates_error.set(Some(message));
                 }
             }
         });
@@ -214,6 +311,12 @@ pub fn RecordShowPage() -> impl IntoView {
                 <Show when=move || singular_name.get() == "person" fallback=|| view! { <span /> }>
                     <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
                         on:click=move |_| start_edit()>"Edit"</button>
+                </Show>
+                <Show when=move || object.get().and_then(|object| object.duplicate_criteria).is_some() fallback=|| view! { <span /> }>
+                    <button class="t-button" data-variant="outline" data-color="neutral" data-size="md"
+                        on:click=move |_| find_duplicates() disabled=move || duplicates_loading.get()>
+                        {move || if duplicates_loading.get() { "Finding duplicates..." } else { "Find duplicates" }}
+                    </button>
                 </Show>
             </header>
             {move || error.get().map(|message| view! { <div class="record-error" role="alert">{message}</div> })}
@@ -234,6 +337,28 @@ pub fn RecordShowPage() -> impl IntoView {
                             <dt>"Company"</dt><dd>{record["company"]["name"].as_str().unwrap_or_default().to_string()}</dd>
                             <dt>"Created at"</dt><dd>{created_at(&record)}</dd>
                         </dl>
+                        <Show when=move || duplicates_loading.get() || duplicates_searched.get() || duplicates_error.get().is_some() || !duplicates.get().is_empty() fallback=|| view! { <span /> }>
+                            <section class="record-duplicates" aria-live="polite">
+                                <h3>"Duplicates"</h3>
+                                {move || if duplicates_loading.get() {
+                                    view! { <div class="record-loading">"Finding duplicates..."</div> }.into_any()
+                                } else if let Some(message) = duplicates_error.get() {
+                                    view! { <div class="record-error" role="alert">{message}</div> }.into_any()
+                                } else if duplicates.get().is_empty() {
+                                    view! { <div class="record-duplicates-empty">"No duplicates found"</div> }.into_any()
+                                } else {
+                                    view! {
+                                        <div class="record-duplicates-list">
+                                            <For each=move || duplicates.get() key=|record| record["id"].as_str().unwrap_or_default().to_string() let(record)>
+                                                <A href=format!("/object/{}/{}", singular_name.get(), record["id"].as_str().unwrap_or_default())>
+                                                    {display_name(&record)}
+                                                </A>
+                                            </For>
+                                        </div>
+                                    }.into_any()
+                                }}
+                            </section>
+                        </Show>
                         <Show when=move || editing.get() && singular_name.get() == "person" fallback=|| view! { <span /> }>
                             <form class="record-edit-form" on:submit=move |event| {
                                 event.prevent_default();

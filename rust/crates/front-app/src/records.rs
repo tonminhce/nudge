@@ -8,10 +8,10 @@ use front_core::query_builder::pascal_case;
 use front_core::query_builder::FindManyArgs;
 use serde_json::Value;
 
-const OBJECTS_QUERY: &str = r#"query { objects(paging: { first: 100 }, filter: {}) { edges { node { nameSingular namePlural fieldsList { id name type settings relation { type targetObjectMetadata { nameSingular namePlural fieldsList { name type } } } morphId } } } } }"#;
+const OBJECTS_QUERY: &str = r#"query { objects(paging: { first: 100 }, filter: {}) { edges { node { nameSingular namePlural duplicateCriteria fieldsList { id name type settings relation { type targetObjectMetadata { nameSingular namePlural fieldsList { name type } } } morphId } } } } }"#;
 
 pub async fn load_object_metadata(token: &str) -> Result<Vec<ObjectMetadata>, String> {
-    let response = BrowserGraphQLClient::default()
+    let response = BrowserGraphQLClient::new()
         .execute_data(
             &crate::app::server_url(),
             OBJECTS_QUERY,
@@ -44,7 +44,7 @@ pub async fn load_records(
         },
     )
     .map_err(|error| error.to_string())?;
-    BrowserGraphQLClient::default()
+    BrowserGraphQLClient::new()
         .execute_data(
             &crate::app::server_url(),
             &document.query,
@@ -75,7 +75,7 @@ pub async fn create_record(
 ) -> Result<Value, String> {
     let document = front_core::query_builder::create_one_mutation(object, data)
         .map_err(|error| error.to_string())?;
-    let response = BrowserGraphQLClient::default()
+    let response = BrowserGraphQLClient::new()
         .execute_data(
             &crate::app::server_url(),
             &document.query,
@@ -99,7 +99,7 @@ pub async fn update_record(
 ) -> Result<Value, String> {
     let document = front_core::query_builder::update_one_mutation(object, id.to_string(), data)
         .map_err(|error| error.to_string())?;
-    let response = BrowserGraphQLClient::default()
+    let response = BrowserGraphQLClient::new()
         .execute_data(
             &crate::app::server_url(),
             &document.query,

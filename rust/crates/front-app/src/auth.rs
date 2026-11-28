@@ -282,7 +282,7 @@ struct Session {
 }
 
 async fn check_user(email: &str) -> Result<bool, String> {
-    let response = BrowserGraphQLClient::default()
+    let response = BrowserGraphQLClient::new()
         .post_json(&server_url(), "/auth/check-user", json!({ "email": email }))
         .await
         .map_err(|error| error.to_string())?;
@@ -292,7 +292,7 @@ async fn check_user(email: &str) -> Result<bool, String> {
 }
 
 async fn sign_up(email: &str, password: &str) -> Result<Session, String> {
-    let response = BrowserGraphQLClient::default()
+    let response = BrowserGraphQLClient::new()
         .post_json(
             &server_url(),
             "/auth/sign-up",
@@ -320,7 +320,7 @@ async fn sign_up(email: &str, password: &str) -> Result<Session, String> {
 }
 
 async fn send_password_reset(email: &str) -> Result<(), String> {
-    BrowserGraphQLClient::default()
+    BrowserGraphQLClient::new()
         .post_json(
             &server_url(),
             "/auth/email-password-reset-link",
@@ -333,7 +333,7 @@ async fn send_password_reset(email: &str) -> Result<(), String> {
 
 async fn sign_in(email: &str, password: &str) -> Result<Session, String> {
     let base_url = server_url();
-    let client = BrowserGraphQLClient::default();
+    let client = BrowserGraphQLClient::new();
     let email_json = serde_json::to_string(email).map_err(|error| error.to_string())?;
     let password_json = serde_json::to_string(password).map_err(|error| error.to_string())?;
     let query = format!(
@@ -384,7 +384,7 @@ async fn sign_in(email: &str, password: &str) -> Result<Session, String> {
 }
 
 async fn fetch_current_user(token: &str) -> Result<serde_json::Value, String> {
-    let client = BrowserGraphQLClient::default();
+    let client = BrowserGraphQLClient::new();
     client
         .execute_data(
             &server_url(),

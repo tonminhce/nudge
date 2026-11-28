@@ -50,7 +50,7 @@ pub async fn load_search_records(
     args: SearchQueryArgs,
 ) -> Result<SearchConnection, ClientError> {
     let document = search_query(args);
-    let data = BrowserGraphQLClient::default()
+    let data = BrowserGraphQLClient::new()
         .execute_data(
             base_url,
             &document.query,
