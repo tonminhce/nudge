@@ -257,6 +257,7 @@ async fn execute_graphql(
                 &auth,
                 &selected.field,
                 &execution_request,
+                &parts.headers,
                 selected.kind == OperationKind::Query,
             )
             .await
@@ -457,6 +458,95 @@ fn data_response(_headers: &HeaderMap, key: &str, value: Value) -> Response {
         .into_response()
 }
 
+const SUPPORTED_LOCALES: &[&str] = &[
+    "en",
+    "pseudo-en",
+    "af-ZA",
+    "ar-SA",
+    "ca-ES",
+    "cs-CZ",
+    "da-DK",
+    "de-DE",
+    "el-GR",
+    "es-ES",
+    "fa-IR",
+    "fi-FI",
+    "fr-FR",
+    "he-IL",
+    "hu-HU",
+    "hy-AM",
+    "it-IT",
+    "ja-JP",
+    "ko-KR",
+    "nl-NL",
+    "no-NO",
+    "pl-PL",
+    "pt-BR",
+    "pt-PT",
+    "ro-RO",
+    "ru-RU",
+    "sr-Cyrl",
+    "sr-Latn",
+    "sv-SE",
+    "tr-TR",
+    "uk-UA",
+    "uz-UZ",
+    "vi-VN",
+    "zh-CN",
+    "zh-TW",
+];
+
+fn normalize_locale(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return String::from("en");
+    };
+    if let Some(locale) = SUPPORTED_LOCALES
+        .iter()
+        .find(|locale| locale.eq_ignore_ascii_case(value))
+    {
+        return (*locale).to_string();
+    }
+    let language = value
+        .trim()
+        .split('-')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    SUPPORTED_LOCALES
+        .iter()
+        .find(|locale| {
+            locale
+                .split('-')
+                .next()
+                .unwrap_or_default()
+                .eq_ignore_ascii_case(&language)
+        })
+        .unwrap_or(&"en")
+        .to_string()
+}
+
+async fn search_locale(
+    pool: &sqlx::PgPool,
+    auth: &AuthContext,
+    headers: &HeaderMap,
+) -> Result<String, GraphQlError> {
+    let header_locale = headers
+        .get("x-locale")
+        .and_then(|value| value.to_str().ok());
+    if let Some(user_workspace_id) = auth.user_workspace_id {
+        let locale: Option<Option<String>> =
+            sqlx::query_scalar("SELECT locale FROM core.\"userWorkspace\" WHERE id = $1")
+                .bind(user_workspace_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|error| GraphQlError::internal(error.to_string()))?;
+        if let Some(locale) = locale.flatten() {
+            return Ok(locale);
+        }
+    }
+    Ok(normalize_locale(header_locale))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_workspace(
     state: &AppState,
@@ -466,6 +556,7 @@ async fn execute_workspace(
     auth: &AuthContext,
     field: &FieldSelection,
     request: &ExecutionRequest,
+    headers: &HeaderMap,
     is_query: bool,
 ) -> Result<Value, GraphQlError> {
     let _ = request;
@@ -505,11 +596,12 @@ async fn execute_workspace(
                 "Operation kind does not match the workspace resolver.",
             ));
         }
+        let locale = search_locale(&state.core_pool, auth, headers).await?;
         let result = search(
             &state.core_pool,
             runner_schema.clone(),
             schema.objects(),
-            &parse_search_args(field)?,
+            &parse_search_args(field, locale)?,
             state.config.search_ilike_fallback_timeout_ms,
             state.config.allow_requests_to_twenty_icons,
         )
@@ -747,7 +839,7 @@ async fn find_many_root(
     ))
 }
 
-fn parse_search_args(field: &FieldSelection) -> Result<SearchArgs, GraphQlError> {
+fn parse_search_args(field: &FieldSelection, locale: String) -> Result<SearchArgs, GraphQlError> {
     let search_input = field
         .argument("searchInput")
         .and_then(Value::as_str)
@@ -771,6 +863,7 @@ fn parse_search_args(field: &FieldSelection) -> Result<SearchArgs, GraphQlError>
         included_object_name_singulars: optional_string_list(field, "includedObjectNameSingulars")?,
         excluded_object_name_singulars: optional_string_list(field, "excludedObjectNameSingulars")?,
         filter: filter.cloned(),
+        locale,
     })
 }
 
@@ -2276,6 +2369,25 @@ mod tests {
     use crate::metadata::flat::FlatFieldMetadata;
     use crate::metadata::flat::FlatObjectMetadata;
     use crate::metadata::flat::FlatWorkspaceMaps;
+
+    #[test]
+    fn search_locale_header_normalization_matches_upstream() {
+        assert_eq!(normalize_locale(None), "en");
+        assert_eq!(normalize_locale(Some("fr")), "fr-FR");
+        assert_eq!(normalize_locale(Some("FR-fr")), "fr-FR");
+        assert_eq!(normalize_locale(Some(" fr ")), "fr-FR");
+        assert_eq!(normalize_locale(Some("pt")), "pt-BR");
+        assert_eq!(normalize_locale(Some("sr")), "sr-Cyrl");
+        assert_eq!(normalize_locale(Some("zh-HK")), "zh-CN");
+        assert_eq!(normalize_locale(Some("unknown")), "en");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-locale", "vi".parse().expect("locale header"));
+        assert_eq!(
+            normalize_locale(headers.get("x-locale").and_then(|v| v.to_str().ok())),
+            "vi-VN"
+        );
+    }
 
     #[test]
     fn search_introspection_exposes_the_upstream_filter_contract() {

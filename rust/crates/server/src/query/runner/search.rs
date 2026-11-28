@@ -50,6 +50,7 @@ pub struct SearchArgs {
     pub included_object_name_singulars: Vec<String>,
     pub excluded_object_name_singulars: Vec<String>,
     pub filter: Option<Value>,
+    pub locale: String,
 }
 
 #[derive(Debug, Clone)]
@@ -85,24 +86,46 @@ fn effective_is_active(object: &FlatObjectMetadata) -> bool {
         .unwrap_or(object.is_active)
 }
 
-fn effective_label_singular(object: &FlatObjectMetadata) -> String {
+fn effective_label_singular(object: &FlatObjectMetadata, locale: &str) -> String {
+    if let Some(translation) =
+        override_property_at_path(object, &["translations", locale, "labelSingular"])
+            .and_then(Value::as_str)
+    {
+        return translation.to_string();
+    }
     override_property(object, "labelSingular")
         .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| object.label_singular.clone())
 }
 
-fn override_property<'a>(object: &'a FlatObjectMetadata, property: &str) -> Option<&'a Value> {
-    let overrides = object.overrides.as_ref()?.as_object()?;
-    if let Some(value) = overrides.get(property) {
+fn override_property_at_path<'a>(
+    object: &'a FlatObjectMetadata,
+    path: &[&str],
+) -> Option<&'a Value> {
+    let overrides_value = object.overrides.as_ref()?;
+    let overrides = overrides_value.as_object()?;
+    let read_path = |value: &'a Value| {
+        let mut current = Some(value);
+        for key in path {
+            current = current.and_then(|entry| entry.get(*key));
+        }
+        current
+    };
+    if let Some(value) = read_path(overrides_value) {
         return Some(value);
     }
     let owner = object.application_universal_identifier.as_str();
     overrides
         .iter()
         .filter(|(author, _)| author.as_str() != owner)
-        .find_map(|(_, entry)| entry.get(property))
-        .or_else(|| overrides.get(owner).and_then(|entry| entry.get(property)))
+        .find_map(|(_, entry)| read_path(entry))
+        .or_else(|| overrides.get(owner).and_then(read_path))
+}
+
+fn override_property<'a>(object: &'a FlatObjectMetadata, property: &str) -> Option<&'a Value> {
+    override_property_at_path(object, &[property])
 }
 
 fn select_objects(objects: &[FlatObjectMetadata], args: &SearchArgs) -> Vec<FlatObjectMetadata> {
@@ -306,7 +329,7 @@ async fn search_object(
     Ok(records
         .into_iter()
         .map(|mut record| {
-            record.object_label_singular = effective_label_singular(object);
+            record.object_label_singular = effective_label_singular(object, &args.locale);
             record
         })
         .collect())
@@ -916,6 +939,7 @@ mod db_tests {
             included_object_name_singulars: Vec::new(),
             excluded_object_name_singulars: Vec::new(),
             filter: None,
+            locale: String::from("en"),
         };
         let first = search(
             &pool,
@@ -984,6 +1008,7 @@ mod tests {
             included_object_name_singulars: Vec::new(),
             excluded_object_name_singulars: Vec::new(),
             filter: None,
+            locale: String::from("en"),
         };
         let defaults = select_objects(&objects, &args)
             .into_iter()
@@ -1090,11 +1115,36 @@ mod tests {
             ..Default::default()
         };
         assert!(!effective_is_active(&object));
-        assert_eq!(effective_label_singular(&object), "Custom Company");
+        assert_eq!(effective_label_singular(&object, "en"), "Custom Company");
 
         object.overrides = Some(json!({"isActive": false, "labelSingular": "Legacy Company"}));
         assert!(!effective_is_active(&object));
-        assert_eq!(effective_label_singular(&object), "Legacy Company");
+        assert_eq!(effective_label_singular(&object, "en"), "Legacy Company");
+    }
+
+    #[test]
+    fn translated_labels_take_precedence_and_fall_back_to_the_rename() {
+        let mut object = FlatObjectMetadata {
+            label_singular: String::from("Company"),
+            application_universal_identifier: String::from("owner"),
+            overrides: Some(json!({
+                "owner": {"labelSingular": "Owner Company"},
+                "custom": {
+                    "labelSingular": "Custom Company",
+                    "translations": {"fr-FR": {"labelSingular": "Société"}}
+                }
+            })),
+            ..Default::default()
+        };
+        assert_eq!(effective_label_singular(&object, "fr-FR"), "Société");
+        assert_eq!(effective_label_singular(&object, "vi-VN"), "Custom Company");
+
+        object.overrides = Some(json!({
+            "labelSingular": "Legacy Company",
+            "translations": {"vi-VN": {"labelSingular": "Công ty"}}
+        }));
+        assert_eq!(effective_label_singular(&object, "vi-VN"), "Công ty");
+        assert_eq!(effective_label_singular(&object, "en"), "Legacy Company");
     }
 
     #[test]
