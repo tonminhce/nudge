@@ -2,6 +2,8 @@ use axum::extract::{Query, State};
 use axum::response::Response;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
 use super::super::error::{AuthError, AuthResult};
 use super::super::tokens::AuthProvider;
@@ -10,11 +12,13 @@ use super::flow::{self, SocialProfile};
 use super::google::social_state_from_query;
 use super::state_store::SocialSsoState;
 use super::{optional_query_string, redirect_response};
+use crate::secure_http::client::SecureHttpClient;
 use crate::state::AppState;
 
 const AUTHORIZATION_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const USER_INFO_URL: &str = "https://graph.microsoft.com/v1.0/me";
+const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn profile_from_graph_user(user: &Value) -> AuthResult<SocialProfile> {
     let user_principal_name = user
@@ -46,17 +50,15 @@ pub fn build_authorize_url(config: &MicrosoftSsoConfig, state: &SocialSsoState) 
     )
 }
 
-async fn http_client() -> AuthResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|error| AuthError::internal(error.to_string()))
+async fn http_client() -> AuthResult<Arc<SecureHttpClient>> {
+    SecureHttpClient::shared().map_err(|error| AuthError::internal(error.message()))
 }
 
 async fn exchange_code_for_tokens(config: &MicrosoftSsoConfig, code: &str) -> AuthResult<String> {
     let response = http_client()
         .await?
         .post(TOKEN_URL)
+        .timeout(EXCHANGE_TIMEOUT)
         .form(&[
             ("code", code),
             ("client_id", config.client_id.as_str()),
@@ -97,7 +99,8 @@ async fn fetch_user_info(access_token: &str) -> AuthResult<Value> {
     let response = http_client()
         .await?
         .get(USER_INFO_URL)
-        .header("Authorization", format!("Bearer {access_token}"))
+        .timeout(EXCHANGE_TIMEOUT)
+        .bearer_auth(access_token)
         .send()
         .await
         .map_err(|error| AuthError::internal(error.to_string()))?;

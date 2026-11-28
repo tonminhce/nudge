@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -19,12 +19,14 @@ use super::state_store::{
     pkce_code_challenge_s256, pkce_code_verifier, take_state, OidcStatePayload,
 };
 use super::{optional_query_string, redirect_response};
+use crate::secure_http::client::SecureHttpClient;
 use crate::state::AppState;
 
 const OIDC_SCOPE: &str = "openid email profile";
 const PREFERRED_ID_TOKEN_SIGNING_ALGORITHM: &str = "RS256";
 const DISCOVERY_CACHE_TTL_SECS: u64 = 600;
 const JWKS_CACHE_TTL_SECS: u64 = 600;
+const ENDPOINT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveryDocument {
@@ -170,11 +172,8 @@ fn jwks_cache() -> &'static Mutex<HashMap<String, (Instant, JsonWebKeySet)>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-async fn http_client() -> AuthResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|error| AuthError::internal(error.to_string()))
+async fn http_client() -> AuthResult<Arc<SecureHttpClient>> {
+    SecureHttpClient::shared().map_err(|error| AuthError::internal(error.message()))
 }
 
 async fn fetch_discovery_document(issuer: &str) -> AuthResult<DiscoveryDocument> {
@@ -194,6 +193,7 @@ async fn fetch_discovery_document(issuer: &str) -> AuthResult<DiscoveryDocument>
     let response = http_client()
         .await?
         .get(&url)
+        .timeout(ENDPOINT_TIMEOUT)
         .send()
         .await
         .map_err(|error| idp_issuer_invalid_error(&format!("Invalid issuer: {}", error)))?;
@@ -244,6 +244,7 @@ async fn fetch_jwks(jwks_uri: &str) -> AuthResult<JsonWebKeySet> {
     let response = http_client()
         .await?
         .get(jwks_uri)
+        .timeout(ENDPOINT_TIMEOUT)
         .send()
         .await
         .map_err(|error| AuthError::internal(error.to_string()))?;
@@ -613,18 +614,22 @@ async fn exchange_code_for_tokens(
         })
         .unwrap_or(true);
 
-    let mut request = http_client().await?.post(&discovery.token_endpoint).form(&[
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", callback_url(state).as_str()),
-        ("code_verifier", code_verifier),
-        ("client_id", identity_provider.client_id.as_str()),
-    ]);
+    let client = http_client().await?;
+    let mut request = client
+        .post(&discovery.token_endpoint)
+        .timeout(ENDPOINT_TIMEOUT)
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", callback_url(state).as_str()),
+            ("code_verifier", code_verifier),
+            ("client_id", identity_provider.client_id.as_str()),
+        ]);
 
     if use_basic_auth {
         request = request.basic_auth(
             &identity_provider.client_id,
-            Some(&identity_provider.client_secret),
+            &identity_provider.client_secret,
         );
     } else {
         request = request.form(&[("client_secret", identity_provider.client_secret.as_str())]);
@@ -661,7 +666,8 @@ async fn fetch_user_info(userinfo_endpoint: &str, access_token: &str) -> AuthRes
     let response = http_client()
         .await?
         .get(userinfo_endpoint)
-        .header("Authorization", format!("Bearer {access_token}"))
+        .timeout(ENDPOINT_TIMEOUT)
+        .bearer_auth(access_token)
         .send()
         .await
         .map_err(|error| AuthError::internal(error.to_string()))?;

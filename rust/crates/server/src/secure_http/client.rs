@@ -77,6 +77,10 @@ impl SecureHttpClientConfig {
                 defaults.dns_cache_capacity as u64,
             )
             .max(1)) as usize,
+            respect_env_proxy: crate::secure_http::policy::env_flag(
+                "OUTBOUND_HTTP_RESPECT_ENV_PROXY",
+                true,
+            ),
             ..defaults
         }
     }

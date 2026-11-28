@@ -126,7 +126,7 @@ fn env_optional(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn env_flag(key: &str, default: bool) -> bool {
+pub fn env_flag(key: &str, default: bool) -> bool {
     match env_optional(key) {
         Some(value) => {
             let lower = value.to_lowercase();
