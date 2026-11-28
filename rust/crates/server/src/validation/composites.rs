@@ -555,15 +555,12 @@ fn invalid_url_reason(value: &Value) -> Option<&'static str> {
 fn optional_int(value: &Value, minimum: u64, maximum: u64) -> bool {
     match value {
         Value::Null => true,
-        Value::Number(number) => number
-            .as_f64()
-            .is_some_and(|inner| inner.fract() == 0.0 && inner >= 0.0)
-            .then(|| {
-                number
-                    .as_f64()
-                    .is_some_and(|inner| inner >= minimum as f64 && inner <= maximum as f64)
-            })
-            .unwrap_or(false),
+        Value::Number(number) => match number.as_f64() {
+            Some(inner) if inner.fract() == 0.0 && inner >= 0.0 => {
+                inner >= minimum as f64 && inner <= maximum as f64
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -855,9 +852,9 @@ fn validate_tiptap_field(value: &Value, field_name: &str) -> ValidationResult<()
                 }
             }
         }
-        Value::Object(_) => Some(format!(
-            "type: Invalid input: expected \"doc\", received string"
-        )),
+        Value::Object(_) => {
+            Some("type: Invalid input: expected \"doc\", received string".to_string())
+        }
         other => Some(format!(
             "Invalid input: expected object, received {}",
             zod_received(other)

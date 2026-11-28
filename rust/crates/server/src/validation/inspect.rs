@@ -142,7 +142,7 @@ pub fn render_f64(value: f64) -> String {
     let negative = mantissa.starts_with('-');
     let digits = mantissa.trim_start_matches(['-', '+']).replace('.', "");
 
-    if exponent >= 21 || exponent < -6 {
+    if !(-6..21).contains(&exponent) {
         let normalized = if digits.len() == 1 {
             digits.clone()
         } else {

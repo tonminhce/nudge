@@ -244,7 +244,7 @@ pub fn parse_with_format(value: &str, format: &str) -> Option<ParsedDate> {
             Token::Year => {
                 let (digits, tail) = take_digits(rest, 4)?;
 
-                if digits < 1 || digits > 9999 {
+                if !(1..=9999).contains(&digits) {
                     return None;
                 }
 
@@ -254,7 +254,7 @@ pub fn parse_with_format(value: &str, format: &str) -> Option<ParsedDate> {
             Token::MonthNumeric => {
                 let (digits, tail) = take_digits(rest, 2)?;
 
-                if digits < 1 || digits > 12 {
+                if !(1..=12).contains(&digits) {
                     return None;
                 }
 
@@ -324,7 +324,7 @@ pub fn parse_with_format(value: &str, format: &str) -> Option<ParsedDate> {
                 rest = tail;
             }
             Token::Literal(ch) => {
-                if rest.chars().next() != Some(ch) {
+                if !rest.starts_with(ch) {
                     return None;
                 }
 

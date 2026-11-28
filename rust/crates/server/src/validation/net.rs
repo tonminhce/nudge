@@ -58,7 +58,7 @@ pub fn is_valid_uuid_v4(value: &str) -> bool {
         }
     }
 
-    bytes[14].to_ascii_lowercase() == b'4'
+    bytes[14].eq_ignore_ascii_case(&b'4')
         && matches!(bytes[19].to_ascii_lowercase(), b'8' | b'9' | b'a' | b'b')
 }
 
@@ -157,8 +157,7 @@ fn matches_tld_pair_body(body: &str) -> bool {
 
     let head_count = head.chars().count();
 
-    head_count >= 1
-        && head_count <= 30
+    (1..=30).contains(&head_count)
         && head.chars().all(is_label_char)
         && tail.chars().count() >= 2
         && tail.chars().all(|ch| ch.is_ascii_lowercase())
@@ -192,8 +191,7 @@ fn matches_hostname_regex(value: &str) -> bool {
         return true;
     }
 
-    label_count >= 3
-        && label_count <= 12
+    (3..=12).contains(&label_count)
         && labels[..label_count - 2]
             .iter()
             .all(|label| matches_repeated_label(label))

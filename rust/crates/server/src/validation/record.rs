@@ -228,11 +228,14 @@ pub fn validate_records_data(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use serde_json::json;
     use uuid::Uuid;
 
     use super::*;
-    use crate::metadata::flat::entity_maps::FlatEntityMaps;
+    use crate::metadata::flat::FlatEntityMaps;
     use crate::metadata::flat::FlatObjectMetadata;
     use crate::query::repository::table_shape::build_workspace_table_shape;
 
@@ -327,7 +330,7 @@ mod tests {
             error.message,
             "Object person doesn't have any \"nope\" field."
         );
-        assert_eq!(error.sub_code, None);
+        assert_eq!(error.code, crate::validation::error::INVALID_ARGS_DATA);
     }
 
     #[test]
@@ -344,8 +347,8 @@ mod tests {
             "Field name is not nullable and has no default value."
         );
         assert_eq!(
-            error.user_friendly_message.as_deref(),
-            Some("A required field is missing.")
+            error.user_friendly_message.as_str(),
+            "A required field is missing."
         );
     }
 
@@ -383,7 +386,7 @@ mod tests {
     fn missing_options_rejects_every_value() {
         let select = field(0, "stage", FieldMetadataType::Select, None);
         let model = model_with(vec![select]);
-        let error = validate_record_data(&model, &record(vec![("stage", json("x"))])).unwrap_err();
+        let error = validate_record_data(&model, &record(vec![("stage", json!("x"))])).unwrap_err();
 
         assert_eq!(error.message, "Invalid options for field \"stage\"");
     }
@@ -396,14 +399,15 @@ mod tests {
         ]);
 
         assert!(
-            validate_record_data(&model, &record(vec![("companyId", json("not-a-uuid"))])).is_err()
+            validate_record_data(&model, &record(vec![("companyId", json!("not-a-uuid"))]))
+                .is_err()
         );
         assert_eq!(
             error_message(validate_record_data(
                 &model,
                 &record(vec![(
                     "companyId",
-                    json("3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+                    json!("3f2504e0-4f89-41d3-9a0c-0305e82c3301")
                 )])
             )),
             String::new()

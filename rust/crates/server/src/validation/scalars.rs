@@ -150,10 +150,7 @@ pub fn validate_date_field(value: &Value, field_name: &str) -> ValidationResult<
         return Ok(());
     }
 
-    if value
-        .as_str()
-        .is_some_and(|text| is_valid_date_format(text))
-    {
+    if value.as_str().is_some_and(is_valid_date_format) {
         return Ok(());
     }
 
