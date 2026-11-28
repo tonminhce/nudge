@@ -58,7 +58,7 @@ pub struct SearchArgs {
     pub excluded_object_name_singulars: Vec<String>,
     pub filter: Option<Value>,
     pub locale: String,
-    pub application_catalogs: BTreeMap<Uuid, Value>,
+    pub application_catalogs: Arc<BTreeMap<Uuid, Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -378,11 +378,12 @@ async fn search_object(
         .await?;
     }
 
+    let object_label =
+        effective_label_singular(object, &args.locale, args.application_catalogs.as_ref());
     Ok(records
         .into_iter()
         .map(|mut record| {
-            record.object_label_singular =
-                effective_label_singular(object, &args.locale, &args.application_catalogs);
+            record.object_label_singular = object_label.clone();
             record
         })
         .collect())
@@ -997,7 +998,7 @@ mod db_tests {
             excluded_object_name_singulars: Vec::new(),
             filter: None,
             locale: String::from("en"),
-            application_catalogs: BTreeMap::new(),
+            application_catalogs: Arc::new(BTreeMap::new()),
         };
         let first = search(
             &pool,
@@ -1066,7 +1067,7 @@ mod tests {
             excluded_object_name_singulars: Vec::new(),
             filter: None,
             locale: String::from("en"),
-            application_catalogs: BTreeMap::new(),
+            application_catalogs: Arc::new(BTreeMap::new()),
         };
         let defaults = select_objects(&objects, &args)
             .into_iter()

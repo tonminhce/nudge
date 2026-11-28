@@ -904,7 +904,7 @@ fn parse_search_args(
         excluded_object_name_singulars: optional_string_list(field, "excludedObjectNameSingulars")?,
         filter: filter.cloned(),
         locale,
-        application_catalogs,
+        application_catalogs: Arc::new(application_catalogs),
     })
 }
 
