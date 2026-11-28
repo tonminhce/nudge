@@ -30,6 +30,7 @@ use crate::metadata::api::graphql::OperationKind;
 use crate::metadata::api::service::load_flat_maps;
 use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::names::camel_case;
+use crate::metadata::names::compute_composite_column_name;
 use crate::metadata::names::pascal_case;
 use crate::permissions::current_user_workspace_permissions_for_auth;
 use crate::permissions::records_permissions_for_auth;
@@ -1231,18 +1232,45 @@ fn root_record_fields(
     field: &FieldSelection,
     resolver: &super::schema::RootResolver,
 ) -> Vec<String> {
-    let record_selection = node_selection(field);
-    let mut names = root_record_fields_schemaless(field);
+    let metadata_fields = schema.fields(&resolver.object_name_singular);
+    let mut names = Vec::new();
 
-    if schema
-        .fields(&resolver.object_name_singular)
-        .iter()
-        .any(|field| field.field_type == FieldMetadataType::Relation)
-    {
-        names.push(String::from("id"));
+    for selection in node_selection(field) {
+        if selection.name == "__typename" {
+            continue;
+        }
+        let Some(metadata) = metadata_fields
+            .iter()
+            .find(|metadata| metadata.name == selection.name)
+        else {
+            names.push(selection.name.clone());
+            continue;
+        };
+        if matches!(
+            metadata.field_type,
+            FieldMetadataType::Relation | FieldMetadataType::MorphRelation
+        ) {
+            continue;
+        }
+        if crate::workspace_migrations::column_defs::composite_types::is_composite_field_metadata_type(
+            crate::workspace_migrations::runner::ddl_field_type(metadata.field_type),
+        ) {
+            for sub_field in &selection.selection {
+                if sub_field.name != "__typename" {
+                    names.push(compute_composite_column_name(
+                        &metadata.name,
+                        &sub_field.name,
+                    ));
+                }
+            }
+        } else {
+            names.push(selection.name.clone());
+        }
     }
 
-    let _ = record_selection;
+    if !names.iter().any(|name| name == "id") {
+        names.insert(0, String::from("id"));
+    }
     names
 }
 
@@ -2052,6 +2080,8 @@ fn unused_camel_marker(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::flat::FlatFieldMetadata;
+    use crate::metadata::flat::FlatObjectMetadata;
     use crate::metadata::flat::FlatWorkspaceMaps;
 
     #[test]
@@ -2160,5 +2190,78 @@ mod tests {
         assert!(validate_search_filter(&json!({"createdAt": {"eq": "yesterday"}})).is_err());
         assert!(validate_search_filter(&json!({"id": {"is": "EMPTY"}})).is_err());
         assert!(validate_search_filter(&json!({"and": {"id": {"eq": id}}})).is_err());
+    }
+
+    #[test]
+    fn mutation_returning_fields_flatten_composite_selections() {
+        let workspace_id = Uuid::new_v4();
+        let object_id = Uuid::new_v4();
+        let fields = vec![
+            FlatFieldMetadata {
+                id: Uuid::new_v4(),
+                object_metadata_id: object_id,
+                field_type: FieldMetadataType::Uuid,
+                name: String::from("id"),
+                label: String::from("id"),
+                ..Default::default()
+            },
+            FlatFieldMetadata {
+                id: Uuid::new_v4(),
+                object_metadata_id: object_id,
+                field_type: FieldMetadataType::Links,
+                name: String::from("domainName"),
+                label: String::from("domainName"),
+                ..Default::default()
+            },
+        ];
+        let mut maps = FlatWorkspaceMaps::default();
+        for field in &fields {
+            maps.field_metadata_maps.add(
+                field.id.to_string(),
+                field.clone(),
+                field.id.to_string(),
+                workspace_id.to_string(),
+            );
+        }
+        let object = FlatObjectMetadata {
+            id: object_id,
+            workspace_id,
+            name_singular: String::from("company"),
+            name_plural: String::from("companies"),
+            field_ids: fields.iter().map(|field| field.id.to_string()).collect(),
+            ..Default::default()
+        };
+        maps.object_metadata_maps.add(
+            object.id.to_string(),
+            object.clone(),
+            object.universal_identifier.clone(),
+            workspace_id.to_string(),
+        );
+        let schema = WorkspaceSchema::build(&maps);
+        let resolver = super::super::schema::RootResolver {
+            method: super::super::schema::ResolverMethod::UpdateOne,
+            object_name_singular: String::from("company"),
+        };
+        let selection = |name: &str, selection: Vec<FieldSelection>| FieldSelection {
+            alias: None,
+            name: name.to_string(),
+            line: 1,
+            column: 1,
+            arguments: Vec::new(),
+            selection,
+            spreads: Vec::new(),
+        };
+        let field = selection(
+            "updateCompany",
+            vec![selection(
+                "domainName",
+                vec![selection("primaryLinkUrl", Vec::new())],
+            )],
+        );
+
+        assert_eq!(
+            root_record_fields(&schema, &field, &resolver),
+            ["id", "domainNamePrimaryLinkUrl"]
+        );
     }
 }
