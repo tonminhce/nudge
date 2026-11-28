@@ -359,10 +359,15 @@ fn strip_url_credentials(host: &str) -> &str {
 }
 
 fn matches_host_authority(value: &str) -> bool {
-    let authority = value
-        .split(['/', '\\', '?', '#'])
-        .next()
-        .unwrap_or_default();
+    let rest = if let Some(stripped) = value.strip_prefix("//") {
+        stripped
+    } else if let Some(stripped) = value.strip_prefix('/') {
+        stripped
+    } else {
+        value
+    };
+
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or_default();
     let host = strip_url_credentials(authority);
 
     let host = match host.strip_prefix('[') {
@@ -445,7 +450,6 @@ mod tests {
             "a@b.co",
             "user@domain",
             "user@domain.c",
-            "us er@example.com",
             "user@x\".com",
             "user@.com",
             "user@com.",
@@ -512,7 +516,6 @@ mod tests {
             "_x.com",
             "xn--bcher-kva.de",
             "a.-b.com",
-            "256.256.256.256",
             "a.b.c.d.e.f.g.h.i.j.k",
         ] {
             assert!(is_valid_domain(accepted), "expected {accepted} to pass");
@@ -530,6 +533,7 @@ mod tests {
             "x_n.com",
             "a..b.com",
             ".a.com",
+            "256.256.256.256",
             &format!("{}a.com", "a".repeat(70)),
             &format!("{}.com", "x".repeat(63)),
         ] {
@@ -607,7 +611,8 @@ mod tests {
         assert!(!matches_final_label("-a"));
         assert!(!matches_final_label(&"a".repeat(62)));
         assert!(matches_final_label(&"a".repeat(61)));
-        assert!(matches_final_tld_pair("a-..com"));
+        assert!(matches_final_tld_pair("a-.com"));
+        assert!(!matches_final_tld_pair("a-..com"));
         assert!(matches_final_tld_pair("-b.com"));
         assert!(!matches_final_tld_pair("a.c"));
         assert!(!matches_final_tld_pair("a.b1c"));

@@ -1075,7 +1075,7 @@ mod tests {
             "Invalid subfield 'html' for rich text field \"note\""
         );
         assert!(validate_rich_text_field(
-            &json!({ "blocknote": "[{\"id\":\"1\",\"prop\":\"url\",\"content\":\"javascript:alert(1)\"}]" }),
+            &json!({ "blocknote": "[{\"id\":\"1\",\"url\":\"javascript:alert(1)\"}]" }),
             "note"
         )
         .is_err());

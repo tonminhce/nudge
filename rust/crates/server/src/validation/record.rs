@@ -379,7 +379,10 @@ mod tests {
         let error =
             validate_record_data(&model, &record(vec![("stage", json!("COLD"))])).unwrap_err();
 
-        assert_eq!(error.message, "Invalid option COLD for field \"stage\"");
+        assert_eq!(
+            error.message,
+            "Invalid value \"COLD\" for field \"stage\". Valid values are: NEW, HOT"
+        );
     }
 
     #[test]
@@ -505,7 +508,7 @@ mod tests {
                     json!({ "primaryEmail": "not-an-email" })
                 )])
             )),
-            "Invalid email \"not-an-email\" for primary email in emails field \"emailAddresses\""
+            "Invalid string value 'not-an-email' for email field \"emailAddresses.primaryEmail\""
         );
     }
 

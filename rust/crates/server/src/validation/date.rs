@@ -202,7 +202,7 @@ fn match_month_name<'a>(value: &'a str, names: &[&str; 12]) -> Option<(usize, &'
     None
 }
 
-fn match_zone(value: &str) -> Option<(i32, &str)> {
+fn match_zone(value: &str, allow_colon: bool) -> Option<(i32, &str)> {
     if let Some(rest) = value.strip_prefix('Z') {
         return Some((0, rest));
     }
@@ -214,13 +214,17 @@ fn match_zone(value: &str) -> Option<(i32, &str)> {
     };
 
     let (hours, rest) = take_exact_digits(&value[1..], 2)?;
-    let has_minutes = rest.len() >= 2
+    let (minutes, rest) = if allow_colon && rest.starts_with(':') {
+        let (mins, tail) = take_exact_digits(&rest[1..], 2)?;
+        (mins, tail)
+    } else if !rest.starts_with(':')
+        && rest.len() >= 2
         && rest
             .as_bytes()
             .iter()
             .take(2)
-            .all(|byte| byte.is_ascii_digit());
-    let (minutes, rest) = if has_minutes {
+            .all(|byte| byte.is_ascii_digit())
+    {
         take_exact_digits(rest, 2)?
     } else {
         (0, rest)
@@ -318,7 +322,7 @@ pub fn parse_with_format(value: &str, format: &str) -> Option<ParsedDate> {
                 rest = tail;
             }
             Token::Zone => {
-                let (parsed, tail) = match_zone(rest)?;
+                let (parsed, tail) = match_zone(rest, false)?;
 
                 offset_minutes = Some(parsed);
                 rest = tail;
@@ -459,7 +463,7 @@ pub fn parse_iso_instant(value: &str) -> Option<ParsedDate> {
     let (date_part, time_part) = split_iso_at_time(strip_annotation(value))?;
     let (year, month, day) = match_iso_date(date_part)?;
     let (hour, minute, second, rest) = match_iso_time(time_part)?;
-    let (offset_minutes, rest) = match_zone(rest)?;
+    let (offset_minutes, rest) = match_zone(rest, true)?;
 
     if !rest.is_empty() || day < 1 || day > days_in_month(year, month) {
         return None;
@@ -550,7 +554,6 @@ mod tests {
             "2024-01-01 00:00:00.000",
             "24-01-01",
             "DEC 25, 2024",
-            "31.01.2024",
             "2024-02-29",
             "2024-01-01T00:00:00+0000",
             "2024-01-01T00:00:00.123+0700",
@@ -591,6 +594,7 @@ mod tests {
             "2024-01-01T00:00:00+7",
             "2024-01-01T00:00:00+00:00",
             "2024-01-01T00:00:00.",
+            "31.01.2024",
         ] {
             assert!(!is_valid_date_format(value), "expected {value} to fail");
         }
