@@ -23,6 +23,10 @@ use super::permissions::validate_filter_read;
 use super::permissions::validate_write;
 use super::rls::row_access_filter;
 use super::rls::validate_updated_rows;
+use super::snapshots::read_stored_records;
+use super::snapshots::readable_stored_columns;
+use super::snapshots::snapshot_from_stored_row;
+use super::snapshots::stored_column_names;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +58,18 @@ impl FilteredMutationKind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MutationSnapshot {
+    pub before: Value,
+    pub after: Option<Value>,
+}
+
+#[derive(Debug)]
+struct MutationExecution {
+    records: Vec<Value>,
+    snapshots: Vec<MutationSnapshot>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_mutation(
     pool: &sqlx::PgPool,
@@ -66,6 +82,63 @@ pub async fn run_mutation(
     with_deleted: bool,
     returning_columns: Vec<String>,
 ) -> Result<Vec<Value>, RunnerError> {
+    Ok(run_mutation_inner(
+        pool,
+        schema,
+        object_name_singular,
+        kind,
+        filter,
+        data,
+        actor,
+        with_deleted,
+        returning_columns,
+        false,
+    )
+    .await?
+    .records)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_mutation_with_snapshots(
+    pool: &sqlx::PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    kind: FilteredMutationKind,
+    filter: Option<Value>,
+    data: Option<Value>,
+    actor: Option<&ActorContext>,
+    with_deleted: bool,
+    returning_columns: Vec<String>,
+) -> Result<Vec<MutationSnapshot>, RunnerError> {
+    Ok(run_mutation_inner(
+        pool,
+        schema,
+        object_name_singular,
+        kind,
+        filter,
+        data,
+        actor,
+        with_deleted,
+        returning_columns,
+        true,
+    )
+    .await?
+    .snapshots)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_mutation_inner(
+    pool: &sqlx::PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    kind: FilteredMutationKind,
+    filter: Option<Value>,
+    data: Option<Value>,
+    actor: Option<&ActorContext>,
+    with_deleted: bool,
+    returning_columns: Vec<String>,
+    capture_snapshots: bool,
+) -> Result<MutationExecution, RunnerError> {
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
     validate_filter_read(schema, model, filter.as_ref())?;
@@ -109,7 +182,10 @@ pub async fn run_mutation(
         Vec::new()
     };
     let set_columns = expanded_columns.clone();
-    let returning_columns = if returning_columns.is_empty() {
+    let snapshot_columns = capture_snapshots.then(|| readable_stored_columns(schema, model));
+    let returning_columns = if let Some(columns) = &snapshot_columns {
+        stored_column_names(columns)
+    } else if returning_columns.is_empty() {
         vec![String::from("id")]
     } else {
         returning_columns
@@ -148,36 +224,54 @@ pub async fn run_mutation(
     if validate_update && !return_id {
         returning_columns.push(String::from("id"));
     }
-    let mut transaction = if validate_update {
+    let mut transaction = if validate_update || capture_snapshots {
         Some(pool.begin().await.map_err(RunnerError::database)?)
     } else {
         None
     };
     let mut where_clauses = where_clauses;
     let mut parameter_map = parameter_map;
-    if validate_update {
+    let mut snapshots = Vec::new();
+    if let Some(transaction) = transaction.as_mut() {
         let access_condition = row_access_conditions.first().cloned().unwrap_or_default();
         let ids = lock_update_candidates(
-            transaction.as_mut().expect("update transaction"),
+            transaction,
             model,
             alias,
             &user_where,
             &access_condition,
             &parameter_map,
+            kind,
+            with_deleted,
         )
         .await?;
-        let mut id_parameters = Map::new();
-        id_parameters.insert(
-            String::from("rlsIds"),
-            Value::Array(ids.iter().map(|id| Value::String(id.to_string())).collect()),
-        );
-        where_clauses = vec![MutationWhereClause::and(format!(
-            "{}.{} = ANY(ARRAY[:...rlsIds]::uuid[])",
-            quote_identifier(alias)?,
-            quote_identifier("id")?
-        ))];
-        row_access_conditions.clear();
-        parameter_map = id_parameters;
+        if capture_snapshots {
+            let columns = snapshot_columns.as_ref().expect("snapshot columns");
+            let before = read_stored_records(&mut **transaction, model, columns, &ids).await?;
+            snapshots = ids
+                .iter()
+                .filter_map(|id| {
+                    before.get(id).cloned().map(|before| MutationSnapshot {
+                        before,
+                        after: None,
+                    })
+                })
+                .collect();
+        }
+        if validate_update || capture_snapshots {
+            let mut id_parameters = Map::new();
+            id_parameters.insert(
+                String::from("rlsIds"),
+                Value::Array(ids.iter().map(|id| Value::String(id.to_string())).collect()),
+            );
+            where_clauses = vec![MutationWhereClause::and(format!(
+                "{}.{} = ANY(ARRAY[:...rlsIds]::uuid[])",
+                quote_identifier(alias)?,
+                quote_identifier("id")?
+            ))];
+            row_access_conditions.clear();
+            parameter_map = id_parameters;
+        }
     }
     let state = MutationStatementState {
         alias,
@@ -192,6 +286,27 @@ pub async fn run_mutation(
     };
     let statement = build_mutation_statement(&state).map_err(RunnerError::from_repository)?;
     let mut statement_sql = statement.sql;
+
+    if let Some(columns) = snapshot_columns.as_ref() {
+        for column in columns.iter().filter(|column| {
+            matches!(
+                column.field_metadata_type,
+                crate::metadata::flat::FieldMetadataType::Select
+                    | crate::metadata::flat::FieldMetadataType::TsVector
+            )
+        }) {
+            let expression = format!(
+                "{}::text",
+                quote_identifier(alias)? + "." + &quote_identifier(&column.column_name)?
+            );
+            let returned = format!(
+                "{}.{}",
+                quote_identifier(alias)?,
+                quote_identifier(&column.column_name)?
+            );
+            statement_sql = statement_sql.replace(&returned, &expression);
+        }
+    }
 
     for (index, (column_name, _)) in expanded_columns.iter().enumerate() {
         let column = model
@@ -252,15 +367,43 @@ pub async fn run_mutation(
             .map(|row| row.try_get::<Uuid, _>(id_alias.as_str()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(RunnerError::database)?;
-        validate_updated_rows(
-            &mut *transaction,
-            schema,
-            object_name_singular,
-            &ids,
-            update_access.as_ref().expect("update access"),
-        )
-        .await?;
+        if let Some(update_access) = update_access.as_ref() {
+            validate_updated_rows(
+                &mut *transaction,
+                schema,
+                object_name_singular,
+                &ids,
+                update_access,
+            )
+            .await?;
+        }
         transaction.commit().await.map_err(RunnerError::database)?;
+        if capture_snapshots {
+            let columns = snapshot_columns.as_ref().expect("snapshot columns");
+            let after = rows
+                .iter()
+                .map(|row| snapshot_from_stored_row(row, model, columns))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter_map(|record| {
+                    let id = record
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .and_then(|id| Uuid::parse_str(id).ok())?;
+                    Some((id, record))
+                })
+                .collect::<std::collections::HashMap<_, _>>();
+            if kind != FilteredMutationKind::Destroy {
+                for snapshot in &mut snapshots {
+                    let id = snapshot
+                        .before
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .and_then(|id| Uuid::parse_str(id).ok());
+                    snapshot.after = id.and_then(|id| after.get(&id).cloned());
+                }
+            }
+        }
         rows
     } else {
         query.fetch_all(pool).await.map_err(RunnerError::database)?
@@ -282,9 +425,13 @@ pub async fn run_mutation(
         results.push(Value::Object(record));
     }
 
-    Ok(results)
+    Ok(MutationExecution {
+        records: results,
+        snapshots,
+    })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn lock_update_candidates(
     transaction: &mut PgConnection,
     model: &ObjectModel,
@@ -292,15 +439,31 @@ async fn lock_update_candidates(
     user_where: &str,
     access_condition: &str,
     parameters: &Map<String, Value>,
+    kind: FilteredMutationKind,
+    with_deleted: bool,
 ) -> Result<Vec<Uuid>, RunnerError> {
-    let filter_expression = if user_where.is_empty() {
-        access_condition.to_string()
+    let mut predicates = Vec::new();
+    if !user_where.is_empty() {
+        predicates.push(format!("({user_where})"));
+    }
+    if !access_condition.is_empty() {
+        predicates.push(format!("({access_condition})"));
+    }
+    if kind == FilteredMutationKind::SoftDelete && !with_deleted {
+        predicates.push(format!(
+            "{}.{} IS NULL",
+            quote_identifier(alias)?,
+            quote_identifier("deletedAt")?
+        ));
+    }
+    let filter_expression = if predicates.is_empty() {
+        String::new()
     } else {
-        format!("({user_where}) AND ({access_condition})")
+        format!(" WHERE {}", predicates.join(" AND "))
     };
     let alias_sql = quote_identifier(alias)?;
     let sql = format!(
-        "SELECT {alias_sql}.{} FROM {}.{} AS {alias_sql} WHERE {filter_expression} ORDER BY {alias_sql}.{} FOR UPDATE OF {alias_sql}",
+        "SELECT {alias_sql}.{} FROM {}.{} AS {alias_sql}{filter_expression} ORDER BY {alias_sql}.{} FOR UPDATE OF {alias_sql}",
         quote_identifier("id")?,
         quote_identifier(&model.shape.schema_name)?,
         quote_identifier(&model.shape.table_name)?,
@@ -351,6 +514,35 @@ pub async fn run_mutation_one(
         .into_iter()
         .next()
         .ok_or_else(RunnerError::record_not_found)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_mutation_one_with_snapshot(
+    pool: &sqlx::PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    kind: FilteredMutationKind,
+    filter: Option<Value>,
+    data: Option<Value>,
+    actor: Option<&ActorContext>,
+    with_deleted: bool,
+    returning_columns: Vec<String>,
+) -> Result<MutationSnapshot, RunnerError> {
+    run_mutation_with_snapshots(
+        pool,
+        schema,
+        object_name_singular,
+        kind,
+        filter,
+        data,
+        actor,
+        with_deleted,
+        returning_columns,
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(RunnerError::record_not_found)
 }
 
 #[allow(clippy::too_many_arguments)]

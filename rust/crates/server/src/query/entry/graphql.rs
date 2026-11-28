@@ -38,13 +38,14 @@ use crate::permissions::current_user_workspace_permissions_for_auth;
 use crate::permissions::records_permissions_for_auth;
 use crate::query::cursor::encode_cursor_data;
 use crate::query::runner::create_many;
-use crate::query::runner::create_one;
+use crate::query::runner::create_one_with_snapshot;
 use crate::query::runner::find_duplicates;
 use crate::query::runner::find_many;
 use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
 use crate::query::runner::merge_many;
 use crate::query::runner::run_mutation_one;
+use crate::query::runner::run_mutation_one_with_snapshot;
 use crate::query::runner::search;
 use crate::query::runner::ActorContext;
 use crate::query::runner::CreateArgs;
@@ -583,14 +584,7 @@ async fn execute_workspace(
         )
         .map_err(runner_graphql_error)?,
     });
-    let actor = if auth.workspace_member_id.is_some() {
-        Some(ActorContext::manual(
-            auth.workspace_member_id.map(|id| id.to_string()),
-            None,
-        ))
-    } else {
-        None
-    };
+    let actor = Some(ActorContext::from_auth(auth));
 
     if field.name == "search" {
         if !is_query {
@@ -642,7 +636,7 @@ async fn execute_workspace(
         ResolverMethod::CreateOne => {
             let data = required_object(field, "data")?;
             let upsert = optional_bool_arg(field, "upsert");
-            let id = create_one(
+            let after = create_one_with_snapshot(
                 &state.core_pool,
                 &runner_schema,
                 &resolver.object_name_singular,
@@ -653,6 +647,25 @@ async fn execute_workspace(
             )
             .await
             .map_err(runner_graphql_error)?;
+            let id = after
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .ok_or_else(record_not_found_graphql_error)?;
+            let workspace_id = runner_schema
+                .object(&resolver.object_name_singular)
+                .map_err(runner_graphql_error)?
+                .object
+                .workspace_id;
+            state.event_streams.publish_record(
+                workspace_id,
+                "created",
+                &resolver.object_name_singular,
+                &id.to_string(),
+                json!({"after": after}),
+                runner_schema.as_ref(),
+                actor.as_ref(),
+            );
 
             find_record(state, schema, &runner_schema, field, resolver, id, false).await
         }
@@ -706,6 +719,7 @@ async fn execute_workspace(
                 resolver,
                 FilteredMutationKind::Update,
                 field.argument("data").cloned(),
+                actor.as_ref(),
                 false,
             )
             .await
@@ -713,7 +727,7 @@ async fn execute_workspace(
         ResolverMethod::DeleteOne => {
             let id = required_id(field)?;
 
-            run_mutation_one(
+            let snapshot = run_mutation_one_with_snapshot(
                 &state.core_pool,
                 &runner_schema,
                 &resolver.object_name_singular,
@@ -722,10 +736,29 @@ async fn execute_workspace(
                 None,
                 actor.as_ref(),
                 false,
-                vec![String::from("id")],
+                Vec::new(),
             )
             .await
             .map_err(runner_graphql_error)?;
+            let properties = crate::events::record_mutation_properties(
+                &snapshot.before,
+                snapshot.after.as_ref(),
+            )
+            .unwrap_or_else(|| json!({"before": snapshot.before, "after": snapshot.after}));
+            let workspace_id = runner_schema
+                .object(&resolver.object_name_singular)
+                .map_err(runner_graphql_error)?
+                .object
+                .workspace_id;
+            state.event_streams.publish_record(
+                workspace_id,
+                "deleted",
+                &resolver.object_name_singular,
+                &id.to_string(),
+                properties,
+                runner_schema.as_ref(),
+                actor.as_ref(),
+            );
 
             find_record(state, schema, &runner_schema, field, resolver, id, true).await
         }
@@ -759,6 +792,7 @@ async fn execute_workspace(
                 resolver,
                 FilteredMutationKind::Restore,
                 None,
+                actor.as_ref(),
                 true,
             )
             .await
@@ -1384,18 +1418,11 @@ async fn mutate_existing_record(
     resolver: &super::schema::RootResolver,
     kind: FilteredMutationKind,
     data: Option<Value>,
+    actor: Option<&ActorContext>,
     with_deleted: bool,
 ) -> Result<Value, GraphQlError> {
     let id = required_id(field)?;
-    let actor = None;
-    let selected = root_record_fields(schema, field, resolver);
-    let updated_fields = data
-        .as_ref()
-        .and_then(Value::as_object)
-        .map(|data| data.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-
-    run_mutation_one(
+    let snapshot = run_mutation_one_with_snapshot(
         &state.core_pool,
         runner_schema,
         &resolver.object_name_singular,
@@ -1404,11 +1431,18 @@ async fn mutate_existing_record(
         data,
         actor,
         with_deleted,
-        selected.clone(),
+        Vec::new(),
     )
     .await
     .map_err(runner_graphql_error)?;
-    if kind == FilteredMutationKind::Update {
+    let action = if kind == FilteredMutationKind::Update {
+        "updated"
+    } else {
+        "restored"
+    };
+    if let Some(properties) =
+        crate::events::record_mutation_properties(&snapshot.before, snapshot.after.as_ref())
+    {
         let workspace_id = runner_schema
             .object(&resolver.object_name_singular)
             .map_err(runner_graphql_error)?
@@ -1416,10 +1450,12 @@ async fn mutate_existing_record(
             .workspace_id;
         state.event_streams.publish_record(
             workspace_id,
-            "updated",
+            action,
             &resolver.object_name_singular,
             &id.to_string(),
-            json!({"updatedFields": updated_fields}),
+            properties,
+            runner_schema,
+            actor,
         );
     }
 

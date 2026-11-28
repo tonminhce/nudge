@@ -276,7 +276,7 @@ async fn rest_endpoint(
         return RestError::bad_request("A REST object path is required").response();
     }
 
-    let actor = ActorContext::manual(auth.workspace_member_id.map(|id| id.to_string()), None);
+    let actor = ActorContext::from_auth(&auth);
     let body = if matches!(
         parts.method,
         Method::POST | Method::PATCH | Method::PUT | Method::DELETE

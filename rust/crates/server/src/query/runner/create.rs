@@ -23,6 +23,8 @@ use super::permissions::validate_write;
 use super::position::override_position_on_records;
 use super::rls::requires_row_access;
 use super::rls::validate_created_rows;
+use super::snapshots::read_stored_records;
+use super::snapshots::readable_stored_columns;
 use super::RunnerError;
 
 #[derive(Debug, Clone, Default)]
@@ -139,6 +141,52 @@ pub async fn create_many(
     } else {
         insert_records(pool, &model.shape, &records).await
     }
+}
+
+pub async fn create_many_with_snapshots(
+    pool: &sqlx::PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    args: &CreateArgs,
+) -> Result<Vec<Value>, RunnerError> {
+    let ids = create_many(pool, schema, object_name_singular, args).await?;
+    let model = schema.object(object_name_singular)?;
+    let columns = readable_stored_columns(schema, model);
+    let records = read_stored_records(pool, model, &columns, &ids).await?;
+    ids.into_iter()
+        .map(|id| {
+            records
+                .get(&id)
+                .cloned()
+                .ok_or_else(RunnerError::record_not_found)
+        })
+        .collect()
+}
+
+pub async fn create_one_with_snapshot(
+    pool: &sqlx::PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    record: Map<String, Value>,
+    upsert: bool,
+    backfill_position_undefined: bool,
+    actor: Option<&ActorContext>,
+) -> Result<Value, RunnerError> {
+    create_many_with_snapshots(
+        pool,
+        schema,
+        object_name_singular,
+        &CreateArgs {
+            records: vec![record],
+            upsert,
+            backfill_position_undefined,
+            actor: actor.cloned(),
+        },
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(RunnerError::record_not_found)
 }
 
 pub async fn create_one(
@@ -495,6 +543,104 @@ mod db_tests {
     use crate::query::runner::test_support;
     use crate::query::runner::FilteredMutationKind;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn eventful_create_and_mutation_snapshots_capture_stored_before_and_after_values() {
+        let Ok(url) = std::env::var("NUDGE_TEST_DATABASE_URL") else {
+            return;
+        };
+        let _guard = test_support::DB_TEST_LOCK.lock().await;
+        let seeded = test_support::seeded_workspace(&url)
+            .await
+            .expect("seeded snapshot workspace");
+        let schema = test_support::runner_schema(&seeded).await;
+        let actor = ActorContext::manual(
+            Some(Uuid::nil().to_string()),
+            Some(String::from("Ada Lovelace")),
+        );
+        let created = create_one_with_snapshot(
+            &seeded.state.core_pool,
+            &schema,
+            "person",
+            test_support::record(
+                r#"{"name": {"firstName": "Ada", "lastName": "Lovelace"}, "jobTitle": "Engineer"}"#,
+            ),
+            false,
+            true,
+            Some(&actor),
+        )
+        .await
+        .expect("created snapshot");
+        let id = created["id"].as_str().expect("created id").to_string();
+        assert_eq!(created["name"]["firstName"], json!("Ada"));
+        assert_eq!(created["jobTitle"], json!("Engineer"));
+
+        let updated = super::super::mutation::run_mutation_one_with_snapshot(
+            &seeded.state.core_pool,
+            &schema,
+            "person",
+            super::super::FilteredMutationKind::Update,
+            Some(value_object_for_id(uuid::Uuid::parse_str(&id).expect("id"))),
+            Some(json!({"jobTitle": "Chief Engineer"})),
+            Some(&actor),
+            false,
+            Vec::new(),
+        )
+        .await
+        .expect("updated snapshot");
+        assert_eq!(updated.before["jobTitle"], json!("Engineer"));
+        assert_eq!(
+            updated.after.as_ref().expect("after")["jobTitle"],
+            json!("Chief Engineer")
+        );
+        let properties =
+            crate::events::record_mutation_properties(&updated.before, updated.after.as_ref())
+                .expect("update properties");
+        assert_eq!(
+            properties["updatedFields"],
+            json!(["jobTitle", "updatedBy"])
+        );
+
+        let no_op = super::super::mutation::run_mutation_one_with_snapshot(
+            &seeded.state.core_pool,
+            &schema,
+            "person",
+            super::super::FilteredMutationKind::Update,
+            Some(value_object_for_id(uuid::Uuid::parse_str(&id).expect("id"))),
+            Some(json!({"jobTitle": "Chief Engineer"})),
+            Some(&actor),
+            false,
+            Vec::new(),
+        )
+        .await
+        .expect("no-op snapshot");
+        assert!(
+            crate::events::record_mutation_properties(&no_op.before, no_op.after.as_ref())
+                .is_none()
+        );
+
+        let deleted = super::super::mutation::run_mutation_one_with_snapshot(
+            &seeded.state.core_pool,
+            &schema,
+            "person",
+            super::super::FilteredMutationKind::SoftDelete,
+            Some(value_object_for_id(uuid::Uuid::parse_str(&id).expect("id"))),
+            None,
+            Some(&actor),
+            false,
+            Vec::new(),
+        )
+        .await
+        .expect("deleted snapshot");
+        assert!(deleted.before["deletedAt"].is_null());
+        assert!(deleted.after.as_ref().expect("after")["deletedAt"].is_string());
+        let properties =
+            crate::events::record_mutation_properties(&deleted.before, deleted.after.as_ref())
+                .expect("delete properties");
+        assert_eq!(properties["updatedFields"], json!(["deletedAt"]));
+
+        test_support::drop_workspace(&seeded).await;
+    }
 
     #[tokio::test]
     async fn create_update_delete_restore_and_upsert_follow_the_upstream_contracts() {

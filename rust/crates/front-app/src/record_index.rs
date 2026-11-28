@@ -7,6 +7,10 @@ use front_core::sse::subscribe_event_stream;
 use front_core::sse::unregister_event_query;
 #[cfg(target_arch = "wasm32")]
 use front_core::sse::EventStreamCancellation;
+#[cfg(any(target_arch = "wasm32", test))]
+use front_core::sse::RecordOperationSignature;
+#[cfg(any(target_arch = "wasm32", test))]
+use front_core::sse::RecordOperationVariables;
 #[cfg(target_arch = "wasm32")]
 use front_core::sse::SseEvent;
 use front_ui::icons::IconBuildingSkyscraper;
@@ -61,6 +65,44 @@ impl RecordSort {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EventStreamSession {
+    event_stream_id: String,
+    base_url: String,
+    token: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn registration_is_current(
+    generation: usize,
+    expected_generation: usize,
+    session: Option<&EventStreamSession>,
+    expected_session: &EventStreamSession,
+) -> bool {
+    generation == expected_generation && session == Some(expected_session)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn record_operation_signature(
+    object_name_singular: &str,
+    applied_search: &str,
+    sort: RecordSort,
+) -> RecordOperationSignature {
+    RecordOperationSignature {
+        object_name_singular: object_name_singular.to_string(),
+        variables: RecordOperationVariables {
+            filter: text_filter(object_name_singular, applied_search),
+            order_by: order_by(object_name_singular, sort),
+            limit: Some(200),
+            cursor_filter: None,
+        },
+        fields: Some(
+            serde_json::from_value(serde_json::json!({"id": true})).expect("field selection"),
+        ),
+    }
+}
+
 pub fn virtual_range(scroll_top: usize, viewport_height: usize, total: usize) -> (usize, usize) {
     let first = scroll_top / ROW_HEIGHT;
     let start = first.saturating_sub(OVERSCAN_ROWS).min(total);
@@ -103,6 +145,10 @@ pub fn RecordIndexPage() -> impl IntoView {
     let show_create = RwSignal::new(false);
     let revision = RwSignal::new(0_usize);
     let load_generation = RwSignal::new(0_usize);
+    #[cfg(target_arch = "wasm32")]
+    let stream_session = RwSignal::new(None::<EventStreamSession>);
+    #[cfg(target_arch = "wasm32")]
+    let registration_generation = RwSignal::new(0_usize);
     let first_name = RwSignal::new(String::new());
     let last_name = RwSignal::new(String::new());
     let record_name = RwSignal::new(String::new());
@@ -206,34 +252,39 @@ pub fn RecordIndexPage() -> impl IntoView {
         }
         let event_stream_id = format!("nudge-{}-{}", js_sys::Date::now(), js_sys::Math::random());
         let query_id = format!("people-{event_stream_id}");
-        let base_url = server_url();
+        let session = EventStreamSession {
+            event_stream_id: event_stream_id.clone(),
+            base_url: server_url(),
+            token: token.clone(),
+        };
+        let base_url = session.base_url.clone();
         let active = RwSignal::new(true);
-        let registered = RwSignal::new(false);
         let cancellation = RwSignal::new(None::<EventStreamCancellation>);
 
-        let cleanup_base_url = base_url.clone();
-        let cleanup_token = token.clone();
-        let cleanup_event_stream_id = event_stream_id.clone();
+        let cleanup_session = session.clone();
         let cleanup_query_id = query_id.clone();
         on_cleanup(move || {
             active.set(false);
             if let Some(cancellation) = cancellation.get_untracked() {
                 cancellation.cancel();
             }
+            if stream_session.get_untracked().as_ref() == Some(&cleanup_session) {
+                stream_session.set(None);
+            }
+            registration_generation.update(|generation| *generation += 1);
             leptos::task::spawn_local(async move {
                 let _ = unregister_event_query(
-                    &cleanup_base_url,
-                    &cleanup_token,
-                    &cleanup_event_stream_id,
+                    &cleanup_session.base_url,
+                    &cleanup_session.token,
+                    &cleanup_session.event_stream_id,
                     &cleanup_query_id,
                 )
                 .await;
             });
         });
 
-        let callback_base_url = base_url.clone();
-        let callback_token = token.clone();
-        let callback_event_stream_id = event_stream_id.clone();
+        let callback_session = session.clone();
+        let callback_query_id = query_id.clone();
         let (stream_cancellation, subscription) =
             match subscribe_event_stream(&base_url, &token, &event_stream_id, move |event| {
                 if !active.get_untracked() {
@@ -241,47 +292,14 @@ pub fn RecordIndexPage() -> impl IntoView {
                 }
                 match event {
                     SseEvent::Ready { event_stream_id } => {
-                        if event_stream_id != callback_event_stream_id || registered.get_untracked()
-                        {
-                            return;
+                        if event_stream_id == callback_session.event_stream_id {
+                            stream_session.set(Some(callback_session.clone()));
                         }
-                        registered.set(true);
-                        let register_base_url = callback_base_url.clone();
-                        let register_token = callback_token.clone();
-                        let register_event_stream_id = callback_event_stream_id.clone();
-                        let register_query_id = query_id.clone();
-                        leptos::task::spawn_local(async move {
-                            match register_event_query(
-                                &register_base_url,
-                                &register_token,
-                                &register_event_stream_id,
-                                &register_query_id,
-                                "FindManyPeople",
-                            )
-                            .await
-                            {
-                                Ok(true) => {
-                                    revision.update(|revision| *revision += 1);
-                                }
-                                Ok(false) => {
-                                    if active.get_untracked() {
-                                        error.set(Some(
-                                            "Event stream query registration failed".to_string(),
-                                        ));
-                                    }
-                                }
-                                Err(message) => {
-                                    if active.get_untracked() {
-                                        error.set(Some(message.to_string()));
-                                    }
-                                }
-                            }
-                        });
                     }
                     SseEvent::ObjectRecord { event, query_ids }
                         if matches!(event.action.as_str(), "created" | "updated" | "deleted")
                             && event.object_name_singular == "person"
-                            && query_ids.iter().any(|id| id == &query_id) =>
+                            && query_ids.iter().any(|id| id == &callback_query_id) =>
                     {
                         revision.update(|revision| *revision += 1);
                     }
@@ -303,6 +321,48 @@ pub fn RecordIndexPage() -> impl IntoView {
                     error.set(Some(message.to_string()));
                 }
             }
+        });
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    Effect::new(move |_| {
+        let Some(session) = stream_session.get() else {
+            return;
+        };
+        let applied_search = applied_search.get();
+        let sort = sort.get();
+        registration_generation.update(|generation| *generation += 1);
+        let generation = registration_generation.get_untracked();
+        let query_id = format!("people-{}", session.event_stream_id);
+        let signature = record_operation_signature("person", &applied_search, sort);
+        let expected_session = session.clone();
+        leptos::task::spawn_local(async move {
+            let result = register_event_query(
+                &session.base_url,
+                &session.token,
+                &session.event_stream_id,
+                &query_id,
+                &signature,
+            )
+            .await;
+            if !registration_is_current(
+                registration_generation.get_untracked(),
+                generation,
+                stream_session.get_untracked().as_ref(),
+                &expected_session,
+            ) {
+                return;
+            }
+            match result {
+                Ok(true) => revision.update(|revision| *revision += 1),
+                Ok(false) => {
+                    error.set(Some("Event stream query registration failed".to_string()));
+                }
+                Err(message) => error.set(Some(message.to_string())),
+            }
+        });
+        on_cleanup(move || {
+            registration_generation.update(|generation| *generation += 1);
         });
     });
 
@@ -781,5 +841,34 @@ mod tests {
         let filter = text_filter("person", "Ada").unwrap();
         assert_eq!(filter["or"][0]["name"]["firstName"]["ilike"], "%Ada%");
         assert_eq!(filter["or"][2]["emails"]["primaryEmail"]["ilike"], "%Ada%");
+    }
+
+    #[test]
+    fn event_registration_reuses_the_loading_filter_and_order() {
+        let signature = record_operation_signature("person", "Ada", RecordSort::NameDesc);
+        assert_eq!(signature.object_name_singular, "person");
+        assert_eq!(signature.variables.filter, text_filter("person", "Ada"));
+        assert_eq!(
+            signature.variables.order_by,
+            order_by("person", RecordSort::NameDesc)
+        );
+        assert_eq!(signature.variables.limit, Some(200));
+    }
+
+    #[test]
+    fn stale_registration_generations_and_stream_sessions_are_ignored() {
+        let session = EventStreamSession {
+            event_stream_id: String::from("stream-1"),
+            base_url: String::from("http://localhost"),
+            token: String::from("token"),
+        };
+        assert!(registration_is_current(2, 2, Some(&session), &session));
+        assert!(!registration_is_current(1, 2, Some(&session), &session));
+        let replacement = EventStreamSession {
+            event_stream_id: String::from("stream-2"),
+            ..session.clone()
+        };
+        assert!(!registration_is_current(2, 2, Some(&replacement), &session));
+        assert!(!registration_is_current(2, 2, None, &session));
     }
 }
