@@ -196,6 +196,10 @@ pub fn RecordIndexPage() -> impl IntoView {
     });
 
     #[cfg(target_arch = "wasm32")]
+    let stream_id_signal = RwSignal::new(None::<String>);
+    #[cfg(target_arch = "wasm32")]
+    let active_query_id_signal = RwSignal::new(None::<String>);
+    #[cfg(target_arch = "wasm32")]
     Effect::new(move |_| {
         let plural = params.get().get("plural").unwrap_or_default();
         let Some(token) = auth.token.get() else {
@@ -204,19 +208,21 @@ pub fn RecordIndexPage() -> impl IntoView {
         if plural != "people" {
             return;
         }
-        let event_stream_id = format!("nudge-{}-{}", js_sys::Date::now(), js_sys::Math::random());
-        let query_id = format!("people-{event_stream_id}");
+        let local_event_stream_id =
+            format!("nudge-{}-{}", js_sys::Date::now(), js_sys::Math::random());
+        let local_query_id = format!("people-{local_event_stream_id}");
         let base_url = server_url();
         let active = RwSignal::new(true);
-        let registered = RwSignal::new(false);
         let cancellation = RwSignal::new(None::<EventStreamCancellation>);
 
         let cleanup_base_url = base_url.clone();
         let cleanup_token = token.clone();
-        let cleanup_event_stream_id = event_stream_id.clone();
-        let cleanup_query_id = query_id.clone();
+        let cleanup_event_stream_id = local_event_stream_id.clone();
+        let cleanup_query_id = local_query_id.clone();
         on_cleanup(move || {
             active.set(false);
+            stream_id_signal.set(None);
+            active_query_id_signal.set(None);
             if let Some(cancellation) = cancellation.get_untracked() {
                 cancellation.cancel();
             }
@@ -231,86 +237,87 @@ pub fn RecordIndexPage() -> impl IntoView {
             });
         });
 
-        let callback_base_url = base_url.clone();
-        let callback_token = token.clone();
-        let callback_event_stream_id = event_stream_id.clone();
-        let (stream_cancellation, subscription) = match subscribe_event_stream(
-            &base_url,
-            &token,
-            &event_stream_id,
-            move |event| {
+        let callback_event_stream_id = local_event_stream_id.clone();
+        let (stream_cancellation, subscription) =
+            match subscribe_event_stream(&base_url, &token, &local_event_stream_id, move |event| {
                 if !active.get_untracked() {
                     return;
                 }
                 match event {
                     SseEvent::Ready { event_stream_id } => {
-                        if event_stream_id != callback_event_stream_id || registered.get_untracked()
-                        {
-                            return;
+                        if event_stream_id == callback_event_stream_id {
+                            stream_id_signal.set(Some(event_stream_id));
                         }
-                        registered.set(true);
-                        let register_base_url = callback_base_url.clone();
-                        let register_token = callback_token.clone();
-                        let register_event_stream_id = callback_event_stream_id.clone();
-                        let register_query_id = query_id.clone();
-                        leptos::task::spawn_local(async move {
-                            match register_event_query(
-                                &register_base_url,
-                                &register_token,
-                                &register_event_stream_id,
-                                &register_query_id,
-                                serde_json::json!({
-                                    "objectNameSingular": "person",
-                                    "variables": {
-                                        "filter": text_filter("person", &applied_search.get_untracked()),
-                                        "orderBy": order_by("person", sort.get_untracked()),
-                                        "limit": 60
-                                    }
-                                }),
-                            )
-                            .await
-                            {
-                                Ok(true) => {
-                                    revision.update(|revision| *revision += 1);
-                                }
-                                Ok(false) => {
-                                    if active.get_untracked() {
-                                        error.set(Some(
-                                            "Event stream query registration failed".to_string(),
-                                        ));
-                                    }
-                                }
-                                Err(message) => {
-                                    if active.get_untracked() {
-                                        error.set(Some(message.to_string()));
-                                    }
-                                }
-                            }
-                        });
                     }
                     SseEvent::ObjectRecord { event, query_ids }
                         if matches!(event.action.as_str(), "created" | "updated" | "deleted")
                             && event.object_name_singular == "person"
-                            && query_ids.iter().any(|id| id == &query_id) =>
+                            && query_ids.iter().any(|id| {
+                                Some(id) == active_query_id_signal.get_untracked().as_ref()
+                            }) =>
                     {
                         revision.update(|revision| *revision += 1);
                     }
                     _ => {}
                 }
-            },
-        ) {
-            Ok(subscription) => subscription,
-            Err(message) => {
-                error.set(Some(message.to_string()));
-                return;
-            }
-        };
+            }) {
+                Ok(subscription) => subscription,
+                Err(message) => {
+                    error.set(Some(message.to_string()));
+                    return;
+                }
+            };
+        stream_id_signal.set(Some(local_event_stream_id.clone()));
+        active_query_id_signal.set(Some(local_query_id));
         cancellation.set(Some(stream_cancellation));
         leptos::task::spawn_local(async move {
             let result = subscription.await;
             cancellation.set(None);
             if active.get_untracked() {
                 if let Err(message) = result {
+                    error.set(Some(message.to_string()));
+                }
+            }
+        });
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    Effect::new(move |_| {
+        let plural = params.get().get("plural").unwrap_or_default();
+        let Some(token) = auth.token.get() else {
+            return;
+        };
+        if plural != "people" {
+            return;
+        }
+        let Some(event_stream_id) = stream_id_signal.get() else {
+            return;
+        };
+        let old_query_id = active_query_id_signal.get_untracked();
+        let query_id = format!("people-filter-{}", js_sys::Date::now());
+        let base_url = server_url();
+        let signature = serde_json::json!({
+            "objectNameSingular": "person",
+            "variables": {
+                "filter": text_filter("person", &applied_search.get()),
+                "orderBy": order_by("person", sort.get()),
+                "limit": 60
+            }
+        });
+        active_query_id_signal.set(Some(query_id.clone()));
+        leptos::task::spawn_local(async move {
+            if let Some(old_query_id) = old_query_id {
+                let _ = unregister_event_query(&base_url, &token, &event_stream_id, &old_query_id)
+                    .await;
+            }
+            match register_event_query(&base_url, &token, &event_stream_id, &query_id, signature)
+                .await
+            {
+                Ok(true) => revision.update(|revision| *revision += 1),
+                Ok(false) => {
+                    error.set(Some("Event stream query registration failed".to_string()));
+                }
+                Err(message) => {
                     error.set(Some(message.to_string()));
                 }
             }
