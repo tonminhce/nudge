@@ -6,19 +6,19 @@
           "people": [
             {
               "avatarFile": null,
-              "avatarUrl": "https://twentyhq.github.io/placeholder-images/founders/ivan-zhao.jpg",
-              "companyId": "<uuid>",
+              "avatarUrl": "",
+              "companyId": null,
               "createdAt": "<iso>",
               "createdBy": {
-                "context": null,
-                "name": "System",
-                "source": "SYSTEM",
-                "workspaceMemberId": null
+                "context": {},
+                "name": " ",
+                "source": "MANUAL",
+                "workspaceMemberId": "<uuid>"
               },
               "deletedAt": null,
               "emails": {
                 "additionalEmails": [],
-                "primaryEmail": "zhao@notion.com"
+                "primaryEmail": ""
               },
               "id": "<uuid>",
               "jobTitle": "",
@@ -28,77 +28,34 @@
                 "secondaryLinks": []
               },
               "name": {
-                "firstName": "Ivan",
-                "lastName": "Zhao"
+                "firstName": "Bob",
+                "lastName": "Diaz"
               },
               "phones": {
                 "additionalPhones": [],
-                "primaryPhoneCallingCode": "+1",
+                "primaryPhoneCallingCode": "",
                 "primaryPhoneCountryCode": "",
-                "primaryPhoneNumber": "882261739"
+                "primaryPhoneNumber": ""
               },
-              "position": 5,
-              "searchVector": "'+1':6 '+1882261739':7 '0882261739':9 '1882261739':8 '882261739':5 'ivan':1 'notion.com':4 'zhao':2 'zhao@notion.com':3",
+              "position": 0,
+              "searchVector": "'bob':1 'diaz':2",
               "updatedAt": "<iso>",
               "updatedBy": {
-                "context": null,
-                "name": "System",
-                "source": "SYSTEM",
-                "workspaceMemberId": null
-              }
-            },
-            {
-              "avatarFile": null,
-              "avatarUrl": "https://twentyhq.github.io/placeholder-images/founders/dylan-field.jpg",
-              "companyId": "<uuid>",
-              "createdAt": "<iso>",
-              "createdBy": {
-                "context": null,
-                "name": "System",
-                "source": "SYSTEM",
-                "workspaceMemberId": null
-              },
-              "deletedAt": null,
-              "emails": {
-                "additionalEmails": [],
-                "primaryEmail": "field@figma.com"
-              },
-              "id": "<uuid>",
-              "jobTitle": "",
-              "linkedinLink": {
-                "primaryLinkLabel": "",
-                "primaryLinkUrl": "",
-                "secondaryLinks": []
-              },
-              "name": {
-                "firstName": "Dylan",
-                "lastName": "Field"
-              },
-              "phones": {
-                "additionalPhones": [],
-                "primaryPhoneCallingCode": "+1",
-                "primaryPhoneCountryCode": "",
-                "primaryPhoneNumber": "098822619"
-              },
-              "position": 4,
-              "searchVector": "'+1':6 '+1098822619':7 '0098822619':9 '098822619':5 '1098822619':8 'dylan':1 'field':2 'field@figma.com':3 'figma.com':4",
-              "updatedAt": "<iso>",
-              "updatedBy": {
-                "context": null,
-                "name": "System",
-                "source": "SYSTEM",
-                "workspaceMemberId": null
+                "context": {},
+                "name": " ",
+                "source": "MANUAL",
+                "workspaceMemberId": "<uuid>"
               }
             }
           ]
         },
         "pageInfo": {
           "endCursor": "<cursor>",
-          "hasNextPage": true,
+          "hasNextPage": false,
           "hasPreviousPage": false,
           "startCursor": "<cursor>"
         },
-        "totalCount": 5
+        "totalCount": 1
       },
       "statusCode": 200
     }

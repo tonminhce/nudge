@@ -299,6 +299,10 @@ impl RunnerSchema {
             .ok_or_else(|| RunnerError::unknown_object(name_singular))
     }
 
+    pub fn objects(&self) -> impl Iterator<Item = &ObjectModel> + '_ {
+        self.objects_by_name.values()
+    }
+
     pub fn object_by_id(&self, id: &Uuid) -> Result<&ObjectModel, RunnerError> {
         self.objects_by_id
             .get(id)

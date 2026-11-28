@@ -1,0 +1,189 @@
+{
+  "normalized": {
+    "badIndex": {
+      "data": {
+        "mergeCompanies": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "BAD_USER_INPUT",
+            "subCode": "INVALID_QUERY_INPUT",
+            "userFriendlyMessage": "An error occurred."
+          },
+          "message": "Invalid conflict priority '7'. Valid options for 2 records: 0-1"
+        }
+      ]
+    },
+    "childAfter": {
+      "data": {
+        "person": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "BAD_USER_INPUT",
+            "subCode": "INVALID_ARGS_FILTER",
+            "userFriendlyMessage": "Invalid value for UUID: \"''\""
+          },
+          "message": "Invalid UUID value '' for field \"id\""
+        }
+      ]
+    },
+    "childBefore": {
+      "data": {
+        "createPerson": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "BAD_USER_INPUT",
+            "userFriendlyMessage": "An error occurred."
+          },
+          "message": "Column \"company\" does not exist on \"person\""
+        }
+      ]
+    },
+    "create": {
+      "count": 2
+    },
+    "dryRun": {
+      "data": {
+        "mergeCompanies": {
+          "accountOwner": null,
+          "deletedAt": "<iso>",
+          "domainName": {
+            "primaryLinkLabel": "",
+            "primaryLinkUrl": "<tag>.test",
+            "secondaryLinks": [
+              {
+                "label": "A",
+                "url": "<tag>-a.test"
+              },
+              {
+                "label": "",
+                "url": "<tag>-b.test"
+              },
+              {
+                "label": "B1",
+                "url": "<tag>-b1.test"
+              }
+            ]
+          },
+          "id": "<uuid>",
+          "linkedinLink": {
+            "primaryLinkLabel": "Primary",
+            "primaryLinkUrl": "https://linkedin.com/<tag>-primary",
+            "secondaryLinks": [
+              {
+                "label": "P1",
+                "url": "https://linkedin.com/<tag>-p1"
+              },
+              {
+                "label": "",
+                "url": "https://linkedin.com/<tag>-secondary"
+              },
+              {
+                "label": "S1",
+                "url": "https://linkedin.com/<tag>-s1"
+              }
+            ]
+          },
+          "name": "MergePrimary<tag>"
+        }
+      }
+    },
+    "merge": {
+      "data": {
+        "mergeCompanies": {
+          "accountOwner": null,
+          "deletedAt": null,
+          "domainName": {
+            "primaryLinkLabel": "",
+            "primaryLinkUrl": "<tag>.test",
+            "secondaryLinks": [
+              {
+                "label": "A",
+                "url": "<tag>-a.test"
+              },
+              {
+                "label": "",
+                "url": "<tag>-b.test"
+              },
+              {
+                "label": "B1",
+                "url": "<tag>-b1.test"
+              }
+            ]
+          },
+          "id": "<uuid>",
+          "linkedinLink": {
+            "primaryLinkLabel": "Primary",
+            "primaryLinkUrl": "https://linkedin.com/<tag>-primary",
+            "secondaryLinks": [
+              {
+                "label": "P1",
+                "url": "https://linkedin.com/<tag>-p1"
+              },
+              {
+                "label": "",
+                "url": "https://linkedin.com/<tag>-secondary"
+              },
+              {
+                "label": "S1",
+                "url": "https://linkedin.com/<tag>-s1"
+              }
+            ]
+          },
+          "name": "MergePrimary<tag>"
+        }
+      }
+    },
+    "secondaryAfter": {
+      "data": {
+        "company": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "NOT_FOUND",
+            "subCode": "RECORD_NOT_FOUND",
+            "userFriendlyMessage": "This record does not exist or has been deleted."
+          },
+          "message": "Record not found"
+        }
+      ]
+    },
+    "singleId": {
+      "data": {
+        "mergeCompanies": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "BAD_USER_INPUT",
+            "subCode": "INVALID_QUERY_INPUT",
+            "userFriendlyMessage": "Please select at least 2 records to merge."
+          },
+          "message": "At least 2 record IDs are required for merge"
+        }
+      ]
+    },
+    "unknownId": {
+      "data": {
+        "mergeCompanies": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "NOT_FOUND",
+            "subCode": "RECORD_NOT_FOUND",
+            "userFriendlyMessage": "One or more records were not found."
+          },
+          "message": "One or more records not found"
+        }
+      ]
+    }
+  },
+  "scenario": "merge-many"
+}

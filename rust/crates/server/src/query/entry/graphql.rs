@@ -826,7 +826,15 @@ async fn execute_workspace(
             .await
         }
         ResolverMethod::MergeMany => {
-            merge_many_root(state, schema, &runner_schema, field, resolver).await
+            merge_many_root(
+                state,
+                schema,
+                &runner_schema,
+                field,
+                resolver,
+                actor.as_ref(),
+            )
+            .await
         }
         ResolverMethod::GroupBy => Err(GraphQlError::user_input(
             "GroupBy is executed by the group-by runner endpoint in a following slice",
@@ -1370,6 +1378,7 @@ async fn merge_many_root(
     runner_schema: &RunnerSchema,
     field: &FieldSelection,
     resolver: &super::schema::RootResolver,
+    actor: Option<&ActorContext>,
 ) -> Result<Value, GraphQlError> {
     let ids = field
         .argument("ids")
@@ -1397,6 +1406,7 @@ async fn merge_many_root(
             conflict_priority_index,
             dry_run: optional_bool_arg(field, "dryRun"),
         },
+        actor,
         root_record_fields_schemaless(field),
         nested_relations(schema, field, resolver),
     )
