@@ -11,12 +11,7 @@ use super::runner::base::execute_json_rows;
 use super::runner::base::ObjectModel;
 use super::runner::RunnerError;
 use super::runner::RunnerSchema;
-use crate::auth::jwt_service::TokenType;
-use crate::auth::middleware::AuthContext;
 use crate::metadata::flat::FieldMetadataType;
-use crate::metadata::flat::FlatFieldMetadata;
-use crate::metadata::flat::RelationType;
-use crate::permissions::ObjectRecordsOperationType;
 
 pub const FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED: &str =
     "FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED";
@@ -24,26 +19,18 @@ pub const FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED: &str =
 const MESSAGE_OBJECT: &str = "message";
 const ATTACHMENT_OBJECT: &str = "attachment";
 const CALENDAR_EVENT_OBJECT: &str = "calendarEvent";
-const TIMELINE_ACTIVITY_OBJECT: &str = "timelineActivity";
 const MESSAGE_CHANNEL_ASSOCIATION_OBJECT: &str = "messageChannelMessageAssociation";
 const CALENDAR_CHANNEL_ASSOCIATION_OBJECT: &str = "calendarChannelEventAssociation";
 
 const MESSAGE_CHANNEL_TABLE: &str = "messageChannel";
 const CALENDAR_CHANNEL_TABLE: &str = "calendarChannel";
 const CONNECTED_ACCOUNT_TABLE: &str = "connectedAccount";
-const USER_WORKSPACE_TABLE: &str = "userWorkspace";
 
 const RESTRICTED_MESSAGE_FIELDS: [&str; 3] = ["subject", "text", "attachments"];
 const RESTRICTED_ATTACHMENT_FIELDS: [&str; 3] = ["name", "fullPath", "file"];
 const RESTRICTED_CALENDAR_EVENT_FIELDS: [&str; 2] = ["title", "description"];
-const RESTRICTED_TIMELINE_ACTIVITY_FIELDS: [&str; 1] = ["properties"];
 
 const ATTACHMENT_TARGET_FIELD: &str = "targetMessage";
-const LINKED_OBJECT_METADATA_FIELD: &str = "linkedObjectMetadataId";
-const TIMELINE_TARGET_PREFIX: &str = "target";
-const EVENT_PROPERTY_CONTAINERS: [&str; 3] = ["before", "after", "diff"];
-const UPDATED_FIELDS_PROPERTY: &str = "updatedFields";
-
 const SHARE_EVERYTHING_VISIBILITY: &str = "SHARE_EVERYTHING";
 const SUBJECT_VISIBILITY: &str = "SUBJECT";
 
@@ -87,6 +74,20 @@ pub enum ChannelViewer {
     NoOwnership,
 }
 
+impl ChannelViewer {
+    pub fn from_credentials(user_workspace_id: Option<Uuid>, application_id: Option<Uuid>) -> Self {
+        if let Some(user_workspace_id) = user_workspace_id {
+            return ChannelViewer::User { user_workspace_id };
+        }
+
+        if let Some(application_id) = application_id {
+            return ChannelViewer::Application { application_id };
+        }
+
+        ChannelViewer::NoOwnership
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ChannelOwner {
     pub user_workspace_id: Option<Uuid>,
@@ -96,9 +97,9 @@ pub struct ChannelOwner {
 impl ChannelOwner {
     pub fn owns_messages(&self, viewer: ChannelViewer) -> bool {
         match viewer {
-            ChannelViewer::User {
-                user_workspace_id,
-            } => self.user_workspace_id == Some(user_workspace_id),
+            ChannelViewer::User { user_workspace_id } => {
+                self.user_workspace_id == Some(user_workspace_id)
+            }
             ChannelViewer::Application { application_id } => {
                 self.application_id == Some(application_id)
             }
@@ -108,9 +109,9 @@ impl ChannelOwner {
 
     pub fn owns_calendar_events(&self, viewer: ChannelViewer) -> bool {
         match viewer {
-            ChannelViewer::User {
-                user_workspace_id,
-            } => self.user_workspace_id == Some(user_workspace_id),
+            ChannelViewer::User { user_workspace_id } => {
+                self.user_workspace_id == Some(user_workspace_id)
+            }
             ChannelViewer::Application { .. } | ChannelViewer::NoOwnership => false,
         }
     }
@@ -206,102 +207,10 @@ pub fn restricted_attachment_ids(
         .collect()
 }
 
-pub fn filter_field_names_in_event_properties(
-    properties: &Map<String, Value>,
-    readable_field_names: &HashSet<String>,
-) -> Map<String, Value> {
-    let mut filtered = Map::new();
-
-    for container in EVENT_PROPERTY_CONTAINERS {
-        let Some(value) = properties.get(container) else {
-            continue;
-        };
-
-        if value.is_null() {
-            continue;
-        }
-
-        match value.as_object() {
-            Some(entries) => {
-                let kept = entries
-                    .iter()
-                    .filter(|(field_name, _)| readable_field_names.contains(field_name.as_str()))
-                    .map(|(field_name, value)| (field_name.clone(), value.clone()))
-                    .collect::<Map<_, _>>();
-                filtered.insert(container.to_string(), Value::Object(kept));
-            }
-            None => {
-                filtered.insert(container.to_string(), Value::Null);
-            }
-        }
-    }
-
-    if let Some(Value::Array(updated_fields)) = properties.get(UPDATED_FIELDS_PROPERTY) {
-        let kept = updated_fields
-            .iter()
-            .filter(|entry| {
-                entry
-                    .as_str()
-                    .is_some_and(|name| readable_field_names.contains(name))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        filtered.insert(String::from(UPDATED_FIELDS_PROPERTY), Value::Array(kept));
-    }
-
-    filtered
-}
-
-pub fn omit_restricted_fields_from_timeline_activity(
-    properties: &Value,
-    readable_field_names: &HashSet<String>,
-) -> Value {
-    let Some(entries) = properties.as_object() else {
-        return Value::Null;
-    };
-    let filtered = filter_field_names_in_event_properties(entries, readable_field_names);
-    let mut redacted = entries.clone();
-
-    for container in EVENT_PROPERTY_CONTAINERS {
-        if !entries.contains_key(container) {
-            continue;
-        }
-
-        match filtered.get(container) {
-            Some(Value::Null) => {
-                redacted.remove(container);
-            }
-            Some(value) => {
-                redacted.insert(container.to_string(), value.clone());
-            }
-            None => {}
-        }
-    }
-
-    if let Some(value) = filtered.get(UPDATED_FIELDS_PROPERTY) {
-        redacted.insert(String::from(UPDATED_FIELDS_PROPERTY), value.clone());
-    }
-
-    Value::Object(redacted)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ActivityObject {
-    pub object_metadata_id: Option<Uuid>,
-    pub is_linked: bool,
-}
-
 #[derive(Debug, Clone)]
-struct TimelineTarget {
-    field_name: String,
-    join_column: String,
-    object_metadata_id: Uuid,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AttachmentTarget {
-    Projected(Option<Uuid>),
-    Unprojected,
+struct AttachmentTarget {
+    projected: Option<Uuid>,
+    unprojected: bool,
 }
 
 #[derive(Debug, Default)]
@@ -309,8 +218,6 @@ struct VisibilityScan {
     message_ids: HashSet<Uuid>,
     calendar_event_ids: HashSet<Uuid>,
     attachment_targets: Vec<(Uuid, AttachmentTarget)>,
-    activity_ids: Vec<Uuid>,
-    activity_objects: HashMap<Uuid, ActivityObject>,
 }
 
 impl VisibilityScan {
@@ -318,7 +225,6 @@ impl VisibilityScan {
         self.message_ids.is_empty()
             && self.calendar_event_ids.is_empty()
             && self.attachment_targets.is_empty()
-            && self.activity_ids.is_empty()
     }
 }
 
@@ -327,7 +233,6 @@ struct VisibilityDecisions {
     message_visibility: MessageVisibility,
     restricted_attachments: HashSet<Uuid>,
     restricted_calendar_events: HashSet<Uuid>,
-    readable_properties: HashMap<Uuid, HashSet<String>>,
 }
 
 fn quoted_identifier(identifier: &str) -> Result<String, RunnerError> {
@@ -336,14 +241,6 @@ fn quoted_identifier(identifier: &str) -> Result<String, RunnerError> {
 
 fn record_id(record: &Value) -> Option<Uuid> {
     Uuid::parse_str(record.get("id")?.as_str()?).ok()
-}
-
-fn non_empty_uuid(record: &Value, field_name: &str) -> Option<Uuid> {
-    record
-        .get(field_name)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .and_then(|value| Uuid::parse_str(value).ok())
 }
 
 fn holds_any_field(record: &Value, field_names: &[&str]) -> bool {
@@ -369,7 +266,7 @@ fn relation_targets(model: &ObjectModel, schema: &RunnerSchema) -> Vec<(String, 
     children
 }
 
-fn visit_child_records<F>(
+fn visit_nested_records<F>(
     record: &mut Value,
     object_name: &str,
     schema: &RunnerSchema,
@@ -388,12 +285,17 @@ fn visit_child_records<F>(
         };
 
         match child {
-            Value::Object(_) => visit_child_records(child, &child_name, schema, visit),
+            Value::Object(_) => {
+                visit(child, &child_name);
+                visit_nested_records(child, &child_name, schema, visit);
+            }
             Value::Array(items) => {
                 for item in items.iter_mut() {
-                    if item.is_object() {
-                        visit_child_records(item, &child_name, schema, visit);
+                    if !item.is_object() {
+                        continue;
                     }
+                    visit(item, &child_name);
+                    visit_nested_records(item, &child_name, schema, visit);
                 }
             }
             _ => {}
@@ -411,76 +313,41 @@ fn attachment_target_in_record(record: &Value) -> AttachmentTarget {
         };
 
         return match value {
-            Value::Null => AttachmentTarget::Projected(None),
-            Value::Object(object) => AttachmentTarget::Projected(
-                object
+            Value::Null => AttachmentTarget {
+                projected: None,
+                unprojected: false,
+            },
+            Value::Object(object) => AttachmentTarget {
+                projected: object
                     .get("id")
                     .and_then(Value::as_str)
                     .and_then(|value| Uuid::parse_str(value).ok()),
-            ),
-            other => AttachmentTarget::Projected(
-                other
+                unprojected: false,
+            },
+            other => AttachmentTarget {
+                projected: other
                     .as_str()
                     .filter(|value| !value.is_empty())
                     .and_then(|value| Uuid::parse_str(value).ok()),
-            ),
+                unprojected: false,
+            },
         };
     }
 
-    AttachmentTarget::Unprojected
+    AttachmentTarget {
+        projected: None,
+        unprojected: true,
+    }
 }
 
-pub fn resolve_activity_object(record: &Value, targets: &[TimelineTarget]) -> Option<ActivityObject> {
-    let entries = record.as_object()?;
-    let discriminator = format!("{LINKED_OBJECT_METADATA_FIELD}Id");
-
-    if !entries.contains_key(LINKED_OBJECT_METADATA_FIELD) && !entries.contains_key(&discriminator)
-    {
-        return None;
-    }
-    let linked_object_metadata_id = non_empty_uuid(record, LINKED_OBJECT_METADATA_FIELD)
-        .or_else(|| non_empty_uuid(record, &discriminator));
-
-    if let Some(object_metadata_id) = linked_object_metadata_id {
-        return Some(ActivityObject {
-            object_metadata_id: Some(object_metadata_id),
-            is_linked: true,
-        });
-    }
-
-    for target in targets {
-        let projected = [target.join_column.as_str(), target.field_name.as_str()]
-            .into_iter()
-            .any(|key| {
-                entries
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .is_some_and(|value| !value.is_empty())
-            });
-
-        if projected {
-            return Some(ActivityObject {
-                object_metadata_id: Some(target.object_metadata_id),
-                is_linked: false,
-            });
-        }
-    }
-
-    Some(ActivityObject {
-        object_metadata_id: None,
-        is_linked: false,
-    })
-}
-
-fn scan_record(record: &mut Value, object_name: &str, targets: &[TimelineTarget], scan: &mut VisibilityScan) {
+fn scan_record(record: &Value, object_name: &str, scan: &mut VisibilityScan) {
     match object_name {
-        MESSAGE_OBJECT => {
-            if holds_any_field(record, &RESTRICTED_MESSAGE_FIELDS) {
-                if let Some(id) = record_id(record) {
-                    scan.message_ids.insert(id);
-                }
+        MESSAGE_OBJECT => match record_id(record) {
+            Some(id) if holds_any_field(record, &RESTRICTED_MESSAGE_FIELDS) => {
+                scan.message_ids.insert(id);
             }
-        }
+            _ => {}
+        },
         ATTACHMENT_OBJECT => {
             if !holds_any_field(record, &RESTRICTED_ATTACHMENT_FIELDS) {
                 return;
@@ -489,139 +356,23 @@ fn scan_record(record: &mut Value, object_name: &str, targets: &[TimelineTarget]
                 return;
             };
 
-            if !scan
-                .attachment_targets
-                .iter()
-                .any(|(seen, _)| *seen == id)
-            {
+            if !scan.attachment_targets.iter().any(|(seen, _)| *seen == id) {
                 scan.attachment_targets
                     .push((id, attachment_target_in_record(record)));
             }
         }
-        CALENDAR_EVENT_OBJECT => {
-            if holds_any_field(record, &RESTRICTED_CALENDAR_EVENT_FIELDS) {
-                if let Some(id) = record_id(record) {
-                    scan.calendar_event_ids.insert(id);
-                }
+        CALENDAR_EVENT_OBJECT => match record_id(record) {
+            Some(id) if holds_any_field(record, &RESTRICTED_CALENDAR_EVENT_FIELDS) => {
+                scan.calendar_event_ids.insert(id);
             }
-        }
-        TIMELINE_ACTIVITY_OBJECT => {
-            if !holds_any_field(record, &RESTRICTED_TIMELINE_ACTIVITY_FIELDS) {
-                return;
-            }
-            let Some(id) = record_id(record) else {
-                return;
-            };
-
-            if !scan.activity_ids.contains(&id) {
-                scan.activity_ids.push(id);
-            }
-
-            if !scan.activity_objects.contains_key(&id) {
-                if let Some(object) = resolve_activity_object(record, targets) {
-                    scan.activity_objects.insert(id, object);
-                }
-            }
-        }
+            _ => {}
+        },
         _ => {}
     }
 }
 
-fn timeline_targets(schema: &RunnerSchema) -> Vec<TimelineTarget> {
-    let Ok(model) = schema.object(TIMELINE_ACTIVITY_OBJECT) else {
-        return Vec::new();
-    };
-    let mut targets = model
-        .shape
-        .relation_shape_by_field_name
-        .values()
-        .filter(|relation| relation.field_name.starts_with(TIMELINE_TARGET_PREFIX))
-        .filter(|relation| relation.relation_type == RelationType::ManyToOne)
-        .filter_map(|relation| {
-            let object_metadata_id = relation.target_object_metadata_id?;
-
-            Some(TimelineTarget {
-                field_name: relation.field_name.clone(),
-                join_column: relation
-                    .join_column_name
-                    .clone()
-                    .unwrap_or_else(|| format!("{}Id", relation.field_name)),
-                object_metadata_id,
-            })
-        })
-        .collect::<Vec<_>>();
-    targets.sort_by(|left, right| left.join_column.cmp(&right.join_column));
-
-    targets
-}
-
-fn attachment_target_metadata_exists(schema: &RunnerSchema) -> bool {
-    schema
-        .object(ATTACHMENT_OBJECT)
-        .ok()
-        .and_then(|model| model.fields_by_name.get(ATTACHMENT_TARGET_FIELD).cloned())
-        .is_some_and(|field| {
-            field.field_type == FieldMetadataType::Relation
-                || field.field_type == FieldMetadataType::MorphRelation
-        })
-}
-
-fn object_read_denied(schema: &RunnerSchema, object_metadata_id: Uuid) -> bool {
-    schema
-        .records_permissions()
-        .and_then(|permissions| permissions.object(object_metadata_id))
-        .is_some_and(|object| {
-            !object.operation_allowed(ObjectRecordsOperationType::Read)
-                && !object.can_read_some_records()
-        })
-}
-
-fn event_property_field_names(field: &FlatFieldMetadata, model: &ObjectModel) -> Vec<String> {
-    if !matches!(
-        field.field_type,
-        FieldMetadataType::Relation | FieldMetadataType::MorphRelation
-    ) {
-        return vec![field.name.clone()];
-    }
-    let many_to_one = model
-        .shape
-        .relation(&field.name)
-        .is_some_and(|relation| relation.relation_type == RelationType::ManyToOne);
-
-    if many_to_one {
-        return vec![field.name.clone(), format!("{}Id", field.name)];
-    }
-
-    vec![field.name.clone()]
-}
-
-pub fn readable_event_property_names(
-    schema: &RunnerSchema,
-    object: &ActivityObject,
-) -> HashSet<String> {
-    let Some(object_metadata_id) = object.object_metadata_id else {
-        return HashSet::new();
-    };
-    let Ok(model) = schema.object_by_id(&object_metadata_id) else {
-        return HashSet::new();
-    };
-
-    if object.is_linked && object_read_denied(schema, model.object.id) {
-        return HashSet::new();
-    }
-    let mut readable = HashSet::new();
-
-    for field in model.fields_by_name.values() {
-        if schema.is_field_unreadable(model.object.id, field.id) {
-            continue;
-        }
-
-        for name in event_property_field_names(field, model) {
-            readable.insert(name);
-        }
-    }
-
-    readable
+fn restricted_sentinel() -> Value {
+    Value::String(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED.to_string())
 }
 
 fn redact_message(record: &mut Value, visibility: &MessageVisibility) {
@@ -637,7 +388,7 @@ fn redact_message(record: &mut Value, visibility: &MessageVisibility) {
     let Some(entries) = record.as_object_mut() else {
         return;
     };
-    let sentinel = Value::String(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED.to_string());
+    let sentinel = restricted_sentinel();
 
     if entries.contains_key("text") {
         entries.insert(String::from("text"), sentinel.clone());
@@ -663,7 +414,7 @@ fn redact_attachment(record: &mut Value, restricted_ids: &HashSet<Uuid>) {
     let Some(entries) = record.as_object_mut() else {
         return;
     };
-    let sentinel = Value::String(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED.to_string());
+    let sentinel = restricted_sentinel();
 
     for field_name in ["name", "fullPath"] {
         if entries.contains_key(field_name) {
@@ -687,7 +438,7 @@ fn redact_calendar_event(record: &mut Value, restricted_ids: &HashSet<Uuid>) {
     let Some(entries) = record.as_object_mut() else {
         return;
     };
-    let sentinel = Value::String(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED.to_string());
+    let sentinel = restricted_sentinel();
 
     for field_name in RESTRICTED_CALENDAR_EVENT_FIELDS {
         if entries.contains_key(field_name) {
@@ -696,56 +447,15 @@ fn redact_calendar_event(record: &mut Value, restricted_ids: &HashSet<Uuid>) {
     }
 }
 
-fn redact_timeline_activity(
-    record: &mut Value,
-    schema: &RunnerSchema,
-    decisions: &VisibilityDecisions,
-    targets: &[TimelineTarget],
-) {
-    if !holds_any_field(record, &RESTRICTED_TIMELINE_ACTIVITY_FIELDS) {
-        return;
-    }
-    let Some(entries) = record.as_object_mut() else {
-        return;
-    };
-    let Some(properties) = entries.get("properties").cloned() else {
-        return;
-    };
-    let empty = HashSet::new();
-    let resolved = record_id(record)
-        .and_then(|id| decisions.readable_properties.get(&id))
-        .cloned();
-    let readable = match resolved {
-        Some(readable) => readable,
-        None => match resolve_activity_object(record, targets) {
-            Some(object) => readable_event_property_names(schema, &object),
-            None => empty.clone(),
-        },
-    };
-    let redacted = omit_restricted_fields_from_timeline_activity(&properties, &readable);
-    entries.insert(String::from("properties"), redacted);
-}
-
-fn apply_record_decisions(
-    record: &mut Value,
-    object_name: &str,
-    schema: &RunnerSchema,
-    decisions: &VisibilityDecisions,
-    targets: &[TimelineTarget],
-) {
+fn redact_record(record: &mut Value, object_name: &str, decisions: &VisibilityDecisions) {
     match object_name {
         MESSAGE_OBJECT => redact_message(record, &decisions.message_visibility),
         ATTACHMENT_OBJECT => redact_attachment(record, &decisions.restricted_attachments),
         CALENDAR_EVENT_OBJECT => {
             redact_calendar_event(record, &decisions.restricted_calendar_events)
         }
-        TIMELINE_ACTIVITY_OBJECT => redact_timeline_activity(record, decisions, targets),
         _ => {}
     }
-
-    visit_child_records(record, object_name, schema, &mut |child, child_name| {
-        apply_record_decisions(child, child_name, schema, decisions, targets)
-    });
 }
 
 fn uuid_cell(row: &Map<String, Value>, key: &str) -> Option<Uuid> {
@@ -758,11 +468,11 @@ fn string_cell(row: &Map<String, Value>, key: &str) -> Option<String> {
         .map(|value| value.to_string())
 }
 
-fn ids_parameter(name: &str, ids: &[Uuid]) -> (String, Value) {
-    (
+fn put_ids_parameter(parameters: &mut Map<String, Value>, name: &str, ids: &[Uuid]) {
+    parameters.insert(
         name.to_string(),
         Value::Array(ids.iter().map(|id| Value::String(id.to_string())).collect()),
-    )
+    );
 }
 
 fn unique_sorted(ids: impl IntoIterator<Item = Uuid>) -> Vec<Uuid> {
@@ -813,10 +523,10 @@ async fn fetch_associations(
     if record_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let Some(table) = qualified_table(schema, object_name) else {
+    let Ok(model) = schema.object(object_name) else {
         return Ok(Vec::new());
     };
-    let Ok(model) = schema.object(object_name) else {
+    let Some(table) = qualified_table(schema, object_name) else {
         return Ok(Vec::new());
     };
     let record_column = quoted_identifier(&column_for_field(model, record_field))?;
@@ -831,7 +541,7 @@ async fn fetch_associations(
          FROM {table} AS a WHERE a.{record_column} = ANY(ARRAY[:...recordIds]::uuid[]){deleted_filter}"
     );
     let mut parameters = Map::new();
-    parameters.insert(ids_parameter("recordIds", record_ids));
+    put_ids_parameter(&mut parameters, "recordIds", record_ids);
     let rows = select_rows(pool, &sql, &parameters).await?;
 
     Ok(rows
@@ -863,7 +573,7 @@ async fn fetch_channels(
         String::from("workspaceId"),
         Value::String(workspace_id.to_string()),
     );
-    parameters.insert(ids_parameter("channelIds", channel_ids));
+    put_ids_parameter(&mut parameters, "channelIds", channel_ids);
     let rows = select_rows(pool, &sql, &parameters).await?;
 
     Ok(rows
@@ -903,8 +613,7 @@ async fn fetch_message_visibility(
     )
     .await?;
     let channel_ids = unique_sorted(associations.iter().map(|(_, channel_id)| *channel_id));
-    let channels =
-        fetch_channels(pool, MESSAGE_CHANNEL_TABLE, workspace_id, &channel_ids).await?;
+    let channels = fetch_channels(pool, MESSAGE_CHANNEL_TABLE, workspace_id, &channel_ids).await?;
 
     Ok(resolve_message_visibility(&associations, &channels, viewer))
 }
@@ -934,7 +643,9 @@ async fn fetch_visible_calendar_event_ids(
     let channels = fetch_channels(pool, CALENDAR_CHANNEL_TABLE, workspace_id, &channel_ids).await?;
 
     Ok(resolve_visible_calendar_event_ids(
-        &associations, &channels, viewer,
+        &associations,
+        &channels,
+        viewer,
     ))
 }
 
@@ -969,7 +680,7 @@ async fn fetch_attachment_targets(
          AND a.{target_column} IS NOT NULL"
     );
     let mut parameters = Map::new();
-    parameters.insert(ids_parameter("attachmentIds", attachment_ids));
+    put_ids_parameter(&mut parameters, "attachmentIds", attachment_ids);
     let rows = select_rows(pool, &sql, &parameters).await?;
 
     Ok(rows
@@ -983,156 +694,45 @@ async fn fetch_attachment_targets(
         .collect())
 }
 
-async fn fetch_activity_objects(
-    pool: &sqlx::PgPool,
-    schema: &RunnerSchema,
-    activity_ids: &[Uuid],
-    targets: &[TimelineTarget],
-) -> Result<HashMap<Uuid, ActivityObject>, RunnerError> {
-    if activity_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let Some(table) = qualified_table(schema, TIMELINE_ACTIVITY_OBJECT) else {
-        return Ok(HashMap::new());
-    };
-    let Ok(model) = schema.object(TIMELINE_ACTIVITY_OBJECT) else {
-        return Ok(HashMap::new());
-    };
-    let mut projections = Vec::new();
-
-    if model
-        .shape
-        .columns
-        .iter()
-        .any(|column| column.column_name == LINKED_OBJECT_METADATA_FIELD)
-    {
-        projections.push((
-            quoted_identifier(LINKED_OBJECT_METADATA_FIELD)?,
-            String::from(LINKED_OBJECT_METADATA_FIELD),
-        ));
-    }
-
-    for target in targets {
-        let column = column_for_field(model, &target.field_name);
-
-        if !model.shape.columns.iter().any(|item| item.column_name == column) {
-            continue;
-        }
-        projections.push((quoted_identifier(&column)?, target.field_name.clone()));
-    }
-    let selected = projections
-        .iter()
-        .map(|(column, alias)| format!("{column} AS {alias}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let selected = if selected.is_empty() {
-        String::from("NULL AS \"unprojected\"")
-    } else {
-        selected
-    };
-    let sql = format!(
-        "SELECT a.id AS \"activityId\", {selected} FROM {table} AS a \
-         WHERE a.id = ANY(ARRAY[:...activityIds]::uuid[])"
-    );
-    let mut parameters = Map::new();
-    parameters.insert(ids_parameter("activityIds", activity_ids));
-    let rows = select_rows(pool, &sql, &parameters).await?;
-    let mut objects = HashMap::new();
-
-    for row in &rows {
-        let Some(activity_id) = uuid_cell(row, "activityId") else {
-            continue;
-        };
-        let linked_object_metadata_id = uuid_cell(row, LINKED_OBJECT_METADATA_FIELD);
-        let object_metadata_id = match linked_object_metadata_id {
-            Some(object_metadata_id) => Some(object_metadata_id),
-            None => targets
-                .iter()
-                .find(|target| {
-                    row.get(target.field_name.as_str())
-                        .and_then(Value::as_str)
-                        .is_some_and(|value| !value.is_empty())
-                })
-                .map(|target| target.object_metadata_id),
-        };
-
-        objects.insert(
-            activity_id,
-            ActivityObject {
-                object_metadata_id,
-                is_linked: linked_object_metadata_id.is_some(),
-            },
-        );
-    }
-
-    Ok(objects)
-}
-
-pub async fn channel_viewer_for_auth(
-    pool: &sqlx::PgPool,
-    auth: &AuthContext,
-) -> ChannelViewer {
-    if auth.token_type == TokenType::ApiKey {
-        return ChannelViewer::NoOwnership;
-    }
-
-    if let Some(user_workspace_id) = auth.user_workspace_id {
-        return ChannelViewer::User {
-            user_workspace_id,
-        };
-    }
-    let (Some(user_id), Some(workspace_id)) = (auth.user_id, auth.workspace_id) else {
-        return ChannelViewer::NoOwnership;
-    };
-    let Ok(table) = quoted_identifier(USER_WORKSPACE_TABLE) else {
-        return ChannelViewer::NoOwnership;
-    };
-    let sql = format!(
-        "SELECT uw.id AS \"id\" FROM core.{table} AS uw \
-         WHERE uw.\"userId\" = :userId::uuid AND uw.\"workspaceId\" = :workspaceId::uuid LIMIT 1"
-    );
-    let mut parameters = Map::new();
-    parameters.insert(String::from("userId"), Value::String(user_id.to_string()));
-    parameters.insert(
-        String::from("workspaceId"),
-        Value::String(workspace_id.to_string()),
-    );
-    let Ok(mut rows) = select_rows(pool, &sql, &parameters).await else {
-        return ChannelViewer::NoOwnership;
-    };
-
-    rows.iter_mut()
-        .next()
-        .and_then(|row| uuid_cell(row, "id"))
-        .map_or(ChannelViewer::NoOwnership, |user_workspace_id| {
-            ChannelViewer::User {
-                user_workspace_id,
-            }
+fn attachment_target_metadata_exists(schema: &RunnerSchema) -> bool {
+    schema
+        .object(ATTACHMENT_OBJECT)
+        .ok()
+        .and_then(|model| model.fields_by_name.get(ATTACHMENT_TARGET_FIELD).cloned())
+        .is_some_and(|field| {
+            field.field_type == FieldMetadataType::Relation
+                || field.field_type == FieldMetadataType::MorphRelation
         })
 }
 
-pub async fn apply_record_visibility_restrictions(
+pub fn channel_viewer_for_schema(schema: &RunnerSchema) -> ChannelViewer {
+    ChannelViewer::from_credentials(schema.user_workspace_id(), None)
+}
+
+pub async fn apply_record_channel_visibility(
     pool: &sqlx::PgPool,
     schema: &RunnerSchema,
     object_name_singular: &str,
     records: &mut [Value],
-    viewer: ChannelViewer,
 ) -> Result<(), RunnerError> {
     if records.is_empty() {
         return Ok(());
     }
-    let workspace_id = match schema.object(object_name_singular) {
-        Ok(model) => model.object.workspace_id,
-        Err(_) => return Ok(()),
+    let Ok(model) = schema.object(object_name_singular) else {
+        return Ok(());
     };
-    let targets = timeline_targets(schema);
+    let workspace_id = model.object.workspace_id;
+    let viewer = channel_viewer_for_schema(schema);
     let mut scan = VisibilityScan::default();
 
     for record in records.iter_mut() {
-        scan_record(record, object_name_singular, &targets, &mut scan);
-        visit_child_records(record, object_name_singular, schema, &mut |child, child_name| {
-            scan_record(child, child_name, &targets, &mut scan)
-        });
+        scan_record(record, object_name_singular, &mut scan);
+        visit_nested_records(
+            record,
+            object_name_singular,
+            schema,
+            &mut |child, child_name| scan_record(child, child_name, &mut scan),
+        );
     }
 
     if scan.is_empty() {
@@ -1142,7 +742,7 @@ pub async fn apply_record_visibility_restrictions(
     let unresolved = scan
         .attachment_targets
         .iter()
-        .filter(|(_, target)| matches!(target, AttachmentTarget::Unprojected))
+        .filter(|(_, target)| target.unprojected)
         .map(|(id, _)| *id)
         .collect::<Vec<_>>();
     let stored_targets = fetch_attachment_targets(pool, schema, &unresolved).await?;
@@ -1150,14 +750,14 @@ pub async fn apply_record_visibility_restrictions(
     let mut attachment_targets = Vec::new();
 
     for (attachment_id, target) in &scan.attachment_targets {
-        let resolved = match target {
-            AttachmentTarget::Projected(target) => *target,
-            AttachmentTarget::Unprojected => stored_targets.get(attachment_id).copied(),
-        };
-
         if !track_attachments {
             continue;
         }
+        let resolved = if target.unprojected {
+            stored_targets.get(attachment_id).copied()
+        } else {
+            target.projected
+        };
 
         if let Some(message_id) = resolved {
             message_ids.push(message_id);
@@ -1180,45 +780,735 @@ pub async fn apply_record_visibility_restrictions(
         .copied()
         .filter(|event_id| !visible_calendar_events.contains(event_id))
         .collect::<HashSet<_>>();
-    let unresolved_activities = scan
-        .activity_ids
-        .iter()
-        .filter(|activity_id| !scan.activity_objects.contains_key(activity_id))
-        .copied()
-        .collect::<Vec<_>>();
-    let mut activity_objects = scan.activity_objects.clone();
-    let fetched_objects =
-        fetch_activity_objects(pool, schema, &unresolved_activities, &targets).await?;
-
-    for (activity_id, object) in fetched_objects {
-        activity_objects.insert(activity_id, object);
-    }
-    let mut readable_properties = HashMap::new();
-
-    for activity_id in &scan.activity_ids {
-        let object = activity_objects
-            .get(activity_id)
-            .copied()
-            .unwrap_or(ActivityObject {
-                object_metadata_id: None,
-                is_linked: false,
-            });
-        readable_properties
-            .insert(*activity_id, readable_event_property_names(schema, &object));
-    }
     let decisions = VisibilityDecisions {
-        message_visibility,
         restricted_attachments: restricted_attachment_ids(
             &attachment_targets,
             &message_visibility.fully_visible,
         ),
         restricted_calendar_events,
-        readable_properties,
+        message_visibility,
     };
 
     for record in records.iter_mut() {
-        apply_record_decisions(record, object_name_singular, schema, &decisions, &targets);
+        redact_record(record, object_name_singular, &decisions);
+        visit_nested_records(
+            record,
+            object_name_singular,
+            schema,
+            &mut |child, child_name| redact_record(child, child_name, &decisions),
+        );
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::metadata::flat::FlatEntityMaps;
+    use crate::metadata::flat::FlatFieldMetadata;
+    use crate::metadata::flat::FlatObjectMetadata;
+
+    fn owner_channel(user_workspace_id: Uuid) -> ChannelOwner {
+        ChannelOwner {
+            user_workspace_id: Some(user_workspace_id),
+            application_id: None,
+        }
+    }
+
+    const ATTACHMENT_ID: &str = "6b0d1f2e-3a4b-4c5d-9e8f-0a1b2c3d4e5f";
+
+    fn channel(visibility: &str, owner: ChannelOwner) -> ChannelRow {
+        ChannelRow {
+            id: Uuid::new_v4(),
+            visibility: visibility.to_string(),
+            owner,
+        }
+    }
+
+    fn outsider() -> ChannelViewer {
+        ChannelViewer::User {
+            user_workspace_id: Uuid::new_v4(),
+        }
+    }
+
+    fn body_message(id: Uuid) -> Value {
+        json!({
+            "id": id.to_string(),
+            "subject": "Quarterly numbers",
+            "text": "The attached deck has the quarterly numbers.",
+            "attachments": [{ "id": ATTACHMENT_ID }],
+        })
+    }
+
+    fn calendar_event(id: Uuid) -> Value {
+        json!({
+            "id": id.to_string(),
+            "title": "Board sync",
+            "description": "Vote on the acquisition.",
+            "startsAt": "2026-01-01T09:00:00.000Z",
+        })
+    }
+
+    #[test]
+    fn message_channel_share_everything_exposes_the_body_to_another_member() {
+        let viewer = outsider();
+        let channel = channel("SHARE_EVERYTHING", ChannelOwner::default());
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.contains(&message_id));
+        assert!(visibility.subject_visible.is_empty());
+    }
+
+    #[test]
+    fn message_channel_subject_visibility_exposes_only_the_subject() {
+        let viewer = outsider();
+        let channel = channel("SUBJECT", ChannelOwner::default());
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.is_empty());
+        assert!(visibility.subject_visible.contains(&message_id));
+    }
+
+    #[test]
+    fn message_channel_metadata_visibility_hides_the_subject_and_the_body() {
+        let viewer = outsider();
+        let channel = channel("METADATA", ChannelOwner::default());
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.is_empty());
+        assert!(visibility.subject_visible.is_empty());
+    }
+
+    #[test]
+    fn message_channel_owner_keeps_the_body_under_metadata_visibility() {
+        let owner = Uuid::new_v4();
+        let viewer = ChannelViewer::User {
+            user_workspace_id: owner,
+        };
+        let channel = channel("METADATA", owner_channel(owner));
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.contains(&message_id));
+    }
+
+    #[test]
+    fn message_channel_owner_of_a_subject_channel_is_not_downgraded() {
+        let owner = Uuid::new_v4();
+        let viewer = ChannelViewer::User {
+            user_workspace_id: owner,
+        };
+        let channel = channel("SUBJECT", owner_channel(owner));
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.contains(&message_id));
+        assert!(visibility.subject_visible.is_empty());
+    }
+
+    #[test]
+    fn another_member_is_not_the_message_channel_owner() {
+        let viewer = outsider();
+        let channel = channel("METADATA", owner_channel(Uuid::new_v4()));
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.is_empty());
+        assert!(visibility.subject_visible.is_empty());
+    }
+
+    #[test]
+    fn application_viewer_sees_bodies_on_channels_it_connected() {
+        let application_id = Uuid::new_v4();
+        let viewer = ChannelViewer::Application { application_id };
+        let channel = ChannelRow {
+            id: Uuid::new_v4(),
+            visibility: "METADATA".to_string(),
+            owner: ChannelOwner {
+                user_workspace_id: None,
+                application_id: Some(application_id),
+            },
+        };
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.contains(&message_id));
+    }
+
+    #[test]
+    fn application_viewer_never_owns_a_channel_it_did_not_connect() {
+        let viewer = ChannelViewer::Application {
+            application_id: Uuid::new_v4(),
+        };
+        let channel = channel("METADATA", owner_channel(Uuid::new_v4()));
+        let message_id = Uuid::new_v4();
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], viewer);
+
+        assert!(visibility.fully_visible.is_empty());
+    }
+
+    #[test]
+    fn unassociated_message_is_hidden_from_every_viewer() {
+        let viewer = outsider();
+        let visibility = resolve_message_visibility(&[], &[], viewer);
+
+        assert!(visibility.fully_visible.is_empty());
+        assert!(visibility.subject_visible.is_empty());
+    }
+
+    #[test]
+    fn message_in_several_channels_keeps_the_widest_visibility() {
+        let viewer = outsider();
+        let hidden = channel("METADATA", ChannelOwner::default());
+        let shared = channel("SHARE_EVERYTHING", ChannelOwner::default());
+        let message_id = Uuid::new_v4();
+        let visibility = resolve_message_visibility(
+            &[(message_id, hidden.id), (message_id, shared.id)],
+            &[hidden, shared],
+            viewer,
+        );
+
+        assert!(visibility.fully_visible.contains(&message_id));
+        assert!(visibility.subject_visible.is_empty());
+    }
+
+    #[test]
+    fn message_channel_from_another_workspace_does_not_grant_visibility() {
+        let owner = Uuid::new_v4();
+        let viewer = ChannelViewer::User {
+            user_workspace_id: owner,
+        };
+        let message_id = Uuid::new_v4();
+        let association = (message_id, Uuid::new_v4());
+        let visibility = resolve_message_visibility(&[association], &[], viewer);
+
+        assert!(visibility.fully_visible.is_empty());
+        assert!(visibility.subject_visible.is_empty());
+    }
+
+    #[test]
+    fn unknown_message_channel_visibility_is_treated_as_metadata() {
+        assert_eq!(
+            MessageChannelVisibility::parse("NOT_A_VISIBILITY"),
+            MessageChannelVisibility::Metadata
+        );
+        assert_eq!(
+            MessageChannelVisibility::parse("SUBJECT"),
+            MessageChannelVisibility::Subject
+        );
+        assert_eq!(
+            MessageChannelVisibility::parse("SHARE_EVERYTHING"),
+            MessageChannelVisibility::ShareEverything
+        );
+    }
+
+    #[test]
+    fn subject_visibility_string_never_unlocks_calendar_events() {
+        let viewer = outsider();
+        let subject_channel = channel("SUBJECT", ChannelOwner::default());
+        let event_id = Uuid::new_v4();
+        let visible = resolve_visible_calendar_event_ids(
+            &[(event_id, subject_channel.id)],
+            &[subject_channel],
+            viewer,
+        );
+
+        assert!(visible.is_empty());
+    }
+
+    #[test]
+    fn calendar_channel_share_everything_exposes_events_to_another_member() {
+        let viewer = outsider();
+        let shared = channel("SHARE_EVERYTHING", ChannelOwner::default());
+        let event_id = Uuid::new_v4();
+        let visible =
+            resolve_visible_calendar_event_ids(&[(event_id, shared.id)], &[shared], viewer);
+
+        assert!(visible.contains(&event_id));
+    }
+
+    #[test]
+    fn calendar_channel_metadata_visibility_hides_events_from_another_member() {
+        let viewer = outsider();
+        let hidden = channel("METADATA", owner_channel(Uuid::new_v4()));
+        let event_id = Uuid::new_v4();
+        let visible =
+            resolve_visible_calendar_event_ids(&[(event_id, hidden.id)], &[hidden], viewer);
+
+        assert!(!visible.contains(&event_id));
+    }
+
+    #[test]
+    fn calendar_channel_owner_keeps_their_own_events() {
+        let owner = Uuid::new_v4();
+        let viewer = ChannelViewer::User {
+            user_workspace_id: owner,
+        };
+        let hidden = channel("METADATA", owner_channel(owner));
+        let event_id = Uuid::new_v4();
+        let visible =
+            resolve_visible_calendar_event_ids(&[(event_id, hidden.id)], &[hidden], viewer);
+
+        assert!(visible.contains(&event_id));
+    }
+
+    #[test]
+    fn application_viewer_never_owns_a_calendar_channel() {
+        let application_id = Uuid::new_v4();
+        let viewer = ChannelViewer::Application { application_id };
+        let channel = ChannelRow {
+            id: Uuid::new_v4(),
+            visibility: "METADATA".to_string(),
+            owner: ChannelOwner {
+                user_workspace_id: None,
+                application_id: Some(application_id),
+            },
+        };
+        let event_id = Uuid::new_v4();
+        let visible =
+            resolve_visible_calendar_event_ids(&[(event_id, channel.id)], &[channel], viewer);
+
+        assert!(visible.is_empty());
+    }
+
+    #[test]
+    fn unassociated_calendar_event_is_hidden() {
+        let viewer = outsider();
+        let event_id = Uuid::new_v4();
+        let visible = resolve_visible_calendar_event_ids(&[], &[], viewer);
+
+        assert!(!visible.contains(&event_id));
+    }
+
+    #[test]
+    fn attachment_is_restricted_when_its_message_is_not_fully_visible() {
+        let message_id = Uuid::new_v4();
+        let attachment_id = Uuid::new_v4();
+        let restricted =
+            restricted_attachment_ids(&[(attachment_id, Some(message_id))], &HashSet::new());
+
+        assert!(restricted.contains(&attachment_id));
+    }
+
+    #[test]
+    fn attachment_of_a_visible_message_keeps_its_name_and_file() {
+        let message_id = Uuid::new_v4();
+        let attachment_id = Uuid::new_v4();
+        let mut visible = HashSet::new();
+        visible.insert(message_id);
+        let restricted = restricted_attachment_ids(&[(attachment_id, Some(message_id))], &visible);
+
+        assert!(!restricted.contains(&attachment_id));
+    }
+
+    #[test]
+    fn subject_visibility_alone_does_not_keep_the_attachment_visible() {
+        let message_id = Uuid::new_v4();
+        let attachment_id = Uuid::new_v4();
+        let channel = channel("SUBJECT", ChannelOwner::default());
+        let visibility =
+            resolve_message_visibility(&[(message_id, channel.id)], &[channel], outsider());
+        let restricted = restricted_attachment_ids(
+            &[(attachment_id, Some(message_id))],
+            &visibility.fully_visible,
+        );
+
+        assert!(restricted.contains(&attachment_id));
+    }
+
+    #[test]
+    fn attachment_without_a_target_message_stays_readable() {
+        let attachment_id = Uuid::new_v4();
+        let mut visible_message = HashSet::new();
+        visible_message.insert(Uuid::new_v4());
+        let restricted = restricted_attachment_ids(&[(attachment_id, None)], &visible_message);
+
+        assert!(restricted.is_empty());
+    }
+
+    #[test]
+    fn channel_viewer_without_credentials_claims_no_ownership() {
+        assert_eq!(
+            ChannelViewer::from_credentials(None, None),
+            ChannelViewer::NoOwnership
+        );
+
+        let user_workspace_id = Uuid::new_v4();
+        assert_eq!(
+            ChannelViewer::from_credentials(Some(user_workspace_id), None),
+            ChannelViewer::User { user_workspace_id }
+        );
+
+        let application_id = Uuid::new_v4();
+        assert_eq!(
+            ChannelViewer::from_credentials(None, Some(application_id)),
+            ChannelViewer::Application { application_id }
+        );
+        assert_eq!(
+            ChannelViewer::from_credentials(Some(user_workspace_id), Some(application_id)),
+            ChannelViewer::User { user_workspace_id }
+        );
+    }
+
+    #[test]
+    fn metadata_visibility_message_body_is_replaced_by_the_restriction_sentinel() {
+        let message_id = Uuid::new_v4();
+        let mut record = body_message(message_id);
+        redact_message(&mut record, &MessageVisibility::default());
+
+        assert_eq!(
+            record["subject"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(
+            record["text"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(record["attachments"], json!([]));
+    }
+
+    #[test]
+    fn subject_visibility_message_keeps_the_subject_and_drops_the_body() {
+        let message_id = Uuid::new_v4();
+        let mut fully = MessageVisibility::default();
+        fully.subject_visible.insert(message_id);
+        let mut record = body_message(message_id);
+        redact_message(&mut record, &fully);
+
+        assert_eq!(record["subject"], json!("Quarterly numbers"));
+        assert_eq!(
+            record["text"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(record["attachments"], json!([]));
+    }
+
+    #[test]
+    fn fully_visible_message_is_left_untouched_for_the_owner() {
+        let message_id = Uuid::new_v4();
+        let mut fully = MessageVisibility::default();
+        fully.fully_visible.insert(message_id);
+        let mut record = body_message(message_id);
+        redact_message(&mut record, &fully);
+
+        assert_eq!(record, body_message(message_id));
+    }
+
+    #[test]
+    fn redaction_only_touches_the_fields_the_viewer_selected() {
+        let message_id = Uuid::new_v4();
+        let mut record = json!({ "id": message_id.to_string(), "text": "secret body" });
+        redact_message(&mut record, &MessageVisibility::default());
+
+        assert_eq!(
+            record["text"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert!(record.get("subject").is_none());
+        assert!(record.get("attachments").is_none());
+    }
+
+    #[test]
+    fn a_message_without_a_persistable_id_cannot_claim_visibility() {
+        let mut record = json!({ "subject": "leaked", "text": "leaked body" });
+        redact_message(&mut record, &MessageVisibility::default());
+
+        assert_eq!(
+            record["text"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(
+            record["subject"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+    }
+
+    #[test]
+    fn restricted_calendar_event_loses_title_and_description_only() {
+        let event_id = Uuid::new_v4();
+        let mut record = calendar_event(event_id);
+        let mut restricted = HashSet::new();
+        restricted.insert(event_id);
+        redact_calendar_event(&mut record, &restricted);
+
+        assert_eq!(
+            record["title"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(
+            record["description"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(record["startsAt"], json!("2026-01-01T09:00:00.000Z"));
+    }
+
+    #[test]
+    fn visible_calendar_event_keeps_its_title_for_the_owner() {
+        let event_id = Uuid::new_v4();
+        let mut record = calendar_event(event_id);
+        redact_calendar_event(&mut record, &HashSet::new());
+
+        assert_eq!(record, calendar_event(event_id));
+    }
+
+    #[test]
+    fn restricted_attachment_empties_the_file_list() {
+        let attachment_id = Uuid::new_v4();
+        let mut record = json!({
+            "id": attachment_id.to_string(),
+            "name": "deck.pdf",
+            "fullPath": "core-attachments/deck.pdf",
+            "file": [{ "version": 1 }],
+        });
+        let mut restricted = HashSet::new();
+        restricted.insert(attachment_id);
+        redact_attachment(&mut record, &restricted);
+
+        assert_eq!(
+            record["name"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(
+            record["fullPath"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(record["file"], json!([]));
+    }
+
+    #[test]
+    fn attachment_target_is_read_from_the_projected_join_column() {
+        let message_id = Uuid::new_v4();
+        let projected =
+            attachment_target_in_record(&json!({ "targetMessageId": message_id.to_string() }));
+
+        assert!(!projected.unprojected);
+        assert_eq!(projected.projected, Some(message_id));
+
+        let null_target = attachment_target_in_record(&json!({ "targetMessageId": Value::Null }));
+
+        assert!(!null_target.unprojected);
+        assert_eq!(null_target.projected, None);
+
+        let loaded_relation = attachment_target_in_record(
+            &json!({ "targetMessage": { "id": message_id.to_string() } }),
+        );
+
+        assert!(!loaded_relation.unprojected);
+        assert_eq!(loaded_relation.projected, Some(message_id));
+
+        let absent = attachment_target_in_record(&json!({ "name": "deck.pdf" }));
+
+        assert!(absent.unprojected);
+    }
+
+    fn plain_field(object_id: Uuid, name: &str) -> FlatFieldMetadata {
+        FlatFieldMetadata {
+            id: Uuid::new_v4(),
+            object_metadata_id: object_id,
+            field_type: if name == "id" {
+                FieldMetadataType::Uuid
+            } else {
+                FieldMetadataType::Text
+            },
+            name: name.to_string(),
+            label: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn relation_field(
+        object_id: Uuid,
+        name: &str,
+        target_object_id: Uuid,
+        relation_type: &str,
+    ) -> FlatFieldMetadata {
+        FlatFieldMetadata {
+            id: Uuid::new_v4(),
+            object_metadata_id: object_id,
+            field_type: FieldMetadataType::Relation,
+            name: name.to_string(),
+            label: name.to_string(),
+            relation_target_object_metadata_id: Some(target_object_id),
+            settings: Some(json!({ "relationType": relation_type })),
+            ..Default::default()
+        }
+    }
+
+    fn thread_object(
+        workspace_id: Uuid,
+        id: Uuid,
+        name: &str,
+        fields: &[FlatFieldMetadata],
+    ) -> FlatObjectMetadata {
+        FlatObjectMetadata {
+            id,
+            workspace_id,
+            name_singular: name.to_string(),
+            name_plural: format!("{name}s"),
+            label_singular: name.to_string(),
+            label_plural: format!("{name}s"),
+            target_table_name: Some(name.to_string()),
+            field_ids: fields.iter().map(|field| field.id.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn thread_schema() -> RunnerSchema {
+        let workspace_id = Uuid::new_v4();
+        let thread_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        let mut message_fields = vec![
+            plain_field(message_id, "id"),
+            plain_field(message_id, "subject"),
+            plain_field(message_id, "text"),
+        ];
+        message_fields.push(relation_field(
+            message_id,
+            "messageThread",
+            thread_id,
+            "MANY_TO_ONE",
+        ));
+        let mut thread_fields = vec![plain_field(thread_id, "id")];
+        thread_fields.push(relation_field(thread_id, "messages", message_id, "ONE_TO_MANY"));
+        let mut fields = FlatEntityMaps::default();
+
+        for field in message_fields.iter().chain(thread_fields.iter()) {
+            fields.add(
+                field.id.to_string(),
+                field.clone(),
+                field.id.to_string(),
+                workspace_id.to_string(),
+            );
+        }
+        let objects = vec![
+            thread_object(workspace_id, thread_id, "messageThread", &thread_fields),
+            thread_object(workspace_id, message_id, "message", &message_fields),
+        ];
+
+        RunnerSchema::build(
+            &workspace_id,
+            &objects,
+            &fields,
+            &FlatEntityMaps::default(),
+        )
+        .expect("thread schema")
+    }
+
+    fn thread_with_messages(message_id: Uuid) -> Value {
+        json!({
+            "id": Uuid::new_v4().to_string(),
+            "messages": [{
+                "id": message_id.to_string(),
+                "subject": "Quarterly numbers",
+                "text": "The attached deck has the quarterly numbers.",
+            }],
+        })
+    }
+
+    #[test]
+    fn messages_nested_under_a_thread_are_scanned() {
+        let schema = thread_schema();
+        let message_id = Uuid::new_v4();
+        let mut thread = thread_with_messages(message_id);
+        let mut scan = VisibilityScan::default();
+        scan_record(&thread, "messageThread", &mut scan);
+        visit_nested_records(
+            &mut thread,
+            "messageThread",
+            &schema,
+            &mut |child, child_name| scan_record(child, child_name, &mut scan),
+        );
+
+        assert!(scan.message_ids.contains(&message_id));
+    }
+
+    #[test]
+    fn a_thread_read_hides_the_nested_message_body_from_a_non_owner() {
+        let schema = thread_schema();
+        let message_id = Uuid::new_v4();
+        let mut thread = thread_with_messages(message_id);
+        let decisions = VisibilityDecisions::default();
+        redact_record(&mut thread, "messageThread", &decisions);
+        visit_nested_records(
+            &mut thread,
+            "messageThread",
+            &schema,
+            &mut |child, child_name| redact_record(child, child_name, &decisions),
+        );
+
+        assert_eq!(
+            thread["messages"][0]["text"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+        assert_eq!(
+            thread["messages"][0]["subject"],
+            json!(FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED)
+        );
+    }
+
+    #[test]
+    fn a_thread_read_keeps_the_nested_message_body_for_the_channel_owner() {
+        let schema = thread_schema();
+        let message_id = Uuid::new_v4();
+        let mut thread = thread_with_messages(message_id);
+        let mut visibility = MessageVisibility::default();
+        visibility.fully_visible.insert(message_id);
+        let decisions = VisibilityDecisions {
+            message_visibility: visibility,
+            ..Default::default()
+        };
+        redact_record(&mut thread, "messageThread", &decisions);
+        visit_nested_records(
+            &mut thread,
+            "messageThread",
+            &schema,
+            &mut |child, child_name| redact_record(child, child_name, &decisions),
+        );
+
+        assert_eq!(
+            thread["messages"][0]["text"],
+            json!("The attached deck has the quarterly numbers.")
+        );
+    }
+
+    #[test]
+    fn reading_an_unknown_object_leaves_records_untouched() {
+        let schema = thread_schema();
+        let mut records = vec![json!({ "id": Uuid::new_v4().to_string(), "title": "keep me" })];
+        let before = records.clone();
+
+        assert!(schema.object("task").is_err());
+        visit_nested_records(&mut records[0], "task", &schema, &mut |_, _| {});
+
+        assert_eq!(records, before);
+    }
+
+    #[test]
+    fn a_schema_without_a_user_workspace_claims_no_channel_ownership() {
+        let schema = thread_schema();
+        assert_eq!(channel_viewer_for_schema(&schema), ChannelViewer::NoOwnership);
+
+        let user_workspace_id = Uuid::new_v4();
+        assert_eq!(
+            channel_viewer_for_schema(&schema.with_user_workspace_id(Some(user_workspace_id))),
+            ChannelViewer::User {
+                user_workspace_id
+            }
+        );
+    }
 }
