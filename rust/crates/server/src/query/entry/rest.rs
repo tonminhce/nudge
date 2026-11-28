@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
 use axum::extract::Path;
@@ -31,6 +32,7 @@ use crate::query::runner::aggregate::Aggregate;
 use crate::query::runner::aggregate::AggregateOperation;
 use crate::query::runner::create_many;
 use crate::query::runner::create_one;
+use crate::query::runner::find_duplicates;
 use crate::query::runner::find_many;
 use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
@@ -241,7 +243,7 @@ async fn rest_endpoint(
         Ok(permissions) => permissions,
         Err(error) => return rest_permission_error(error).response(),
     };
-    let runner_schema = match permissions {
+    let runner_schema = Arc::new(match permissions {
         Some(permissions) => match RunnerSchema::build_for_rest_with_permissions(
             &workspace_id,
             schema.objects(),
@@ -262,7 +264,7 @@ async fn rest_endpoint(
             Ok(schema) => schema,
             Err(error) => return RestError::internal(error.message().to_string()).response(),
         },
-    };
+    });
     let path_parts = path
         .split('/')
         .filter(|part| !part.is_empty())
@@ -336,7 +338,7 @@ async fn dispatch_rest(
     state: &AppState,
     _maps: &FlatWorkspaceMaps,
     schema: &WorkspaceSchema,
-    runner_schema: &RunnerSchema,
+    runner_schema: &Arc<RunnerSchema>,
     method: &Method,
     path: &[&str],
     parameters: &HashMap<String, String>,
@@ -445,11 +447,81 @@ async fn dispatch_rest(
 
                 return Ok(Json(Value::Array(output)).into_response());
             }
-            "duplicates" => {
-                return Err(RestError::bad_request(
-                    "findDuplicates requires duplicate criteria execution in a follow-on slice",
-                ));
+            "duplicates" if *method == Method::POST => {
+                let ids = match body.get("ids").filter(|value| !value.is_null()) {
+                    None => None,
+                    Some(Value::Array(values)) => Some(
+                        values
+                            .iter()
+                            .filter(|value| !value.is_null())
+                            .map(|value| {
+                                value
+                                    .as_str()
+                                    .and_then(|value| Uuid::parse_str(value).ok())
+                                    .ok_or_else(|| {
+                                        RestError::bad_request("ids must be a list of UUIDs")
+                                    })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                    Some(_) => return Err(RestError::bad_request("ids must be a list of UUIDs")),
+                };
+                let data = match body.get("data").filter(|value| !value.is_null()) {
+                    None => None,
+                    Some(Value::Array(values)) => Some(values.clone()),
+                    Some(_) => return Err(RestError::bad_request("data must be a list")),
+                };
+                match (&ids, &data) {
+                    (None, None) => {
+                        return Err(RestError::bad_request(
+                            "You have to provide either \"data\" or \"ids\" argument",
+                        ))
+                    }
+                    (Some(_), Some(_)) => {
+                        return Err(RestError::bad_request(
+                            "You cannot provide both \"data\" and \"ids\" arguments",
+                        ))
+                    }
+                    (None, Some(values)) if values.is_empty() => {
+                        return Err(RestError::bad_request(
+                            "The \"data\" condition can not be empty when \"ids\" input not provided",
+                        ))
+                    }
+                    _ => {}
+                }
+                let connections = find_duplicates(
+                    &state.core_pool,
+                    runner_schema.clone(),
+                    object,
+                    ids.as_deref().unwrap_or(&[]),
+                    data.as_deref(),
+                    picked_fields.unwrap_or_default(),
+                    nested.clone(),
+                )
+                .await
+                .map_err(rest_runner_error)?;
+                let output = connections
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|connection| {
+                        let records = connection["edges"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|edge| edge.get("node"))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        json!({
+                            (format!("{object}Duplicates")): records,
+                            "totalCount": connection["totalCount"],
+                            "pageInfo": connection["pageInfo"],
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                return Ok(Json(json!({"data": output})).into_response());
             }
+            "duplicates" => return Err(RestError::method_not_allowed()),
             "merge" => {
                 return Err(RestError::bad_request(
                     "mergeMany is deferred to the record merge slice",
