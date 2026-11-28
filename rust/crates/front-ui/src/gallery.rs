@@ -11,7 +11,11 @@ use crate::components::{
     Select, SelectItem, Separator, SidePanel, Switch, TabItem, TabList, TabPanel, TableColumn,
     TableRow, Tag, TagVariant, Textarea, ThemeScope, Toast, ToastTone, Tooltip, TooltipSide,
 };
-use crate::icons::{Icon, IconStroke};
+use crate::icons::{
+    CustomIcon, Icon, IconAddressBook, IconBrandAnthropic, IconChartBarHorizontal, IconLockCustom,
+    IconProviderOpenai, IconSparkle2, IconStroke, IllustrationIconUser, ThinkingOrbitLoaderIcon,
+    CUSTOM_ICON_DEFS,
+};
 use crate::tokens::Scheme;
 
 fn demo_columns() -> Vec<TableColumn> {
@@ -205,6 +209,26 @@ pub fn gallery_section(scheme: Scheme) -> impl IntoView {
                         <Icon name="table"/>
                         <Icon name="filter"/>
                         <Icon name="bell"/>
+                        <IconAddressBook/>
+                        <IconLockCustom/>
+                        <IconBrandAnthropic/>
+                        <IconProviderOpenai color="#123456"/>
+                        <IllustrationIconUser/>
+                        <IconSparkle2/>
+                        <ThinkingOrbitLoaderIcon/>
+                        <IconChartBarHorizontal/>
+                    </div>
+                </section>
+                <section class="gallery-cell">
+                    <h3>{"Custom icon catalog (46)"}</h3>
+                    <div class="gallery-row">
+                        <For
+                            each=|| CUSTOM_ICON_DEFS
+                            key=|def| def.name
+                            children=move |def| {
+                                view! { <span title=def.name><CustomIcon name=def.name /></span> }
+                            }
+                        />
                     </div>
                 </section>
                 <section class="gallery-cell">
@@ -336,7 +360,7 @@ pub fn gallery_page() -> impl IntoView {
 }
 
 pub fn render_gallery() -> String {
-    gallery_page().into_view().to_html()
+    Owner::default().with(|| gallery_page().into_view().to_html())
 }
 
 #[cfg(test)]

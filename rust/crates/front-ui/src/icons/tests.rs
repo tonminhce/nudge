@@ -8,11 +8,18 @@ use crate::icons::icon_def;
 use crate::icons::object_icon;
 use crate::icons::render_custom_icon;
 use crate::icons::render_icon;
-use crate::icons::IconAnimatedLoader;
+use crate::icons::Icon;
+use crate::icons::IconAddressBook;
+use crate::icons::IconBrandAnthropic;
 use crate::icons::IconChartBarHorizontal;
 use crate::icons::IconLock;
+use crate::icons::IconLockCustom;
+use crate::icons::IconSparkle2;
 use crate::icons::IconStroke;
+use crate::icons::IconTwentyStar;
+use crate::icons::IllustrationIconUser;
 use crate::icons::ThinkingOrbitLoaderIcon;
+use crate::icons::CUSTOM_ICON_CATALOG_TAG;
 use crate::icons::CUSTOM_ICON_COUNT;
 use crate::icons::CUSTOM_ICON_DEFS;
 use crate::icons::ICON_CATALOG_TAG;
@@ -140,7 +147,7 @@ fn rendered_svg_uses_the_upstream_root_attributes_and_inner_markup() {
 
 #[test]
 fn animated_loader_keeps_the_upstream_smil_animation() {
-    let html = view! { <IconAnimatedLoader size=14 /> }
+    let html = view! { <ThinkingOrbitLoaderIcon size=14 /> }
         .into_view()
         .to_html();
     assert!(html.contains("stroke-dashoffset"), "{html}");
@@ -185,8 +192,9 @@ fn custom_icon_render_preserves_svg_and_applies_size_stroke_and_color() {
 }
 
 #[test]
-fn custom_lock_replaces_the_tabler_lock_wrapper() {
-    let html = view! { <IconLock size=16 /> }.into_view().to_html();
+fn custom_lock_keeps_its_own_name_and_tabler_lock_stays_separate() {
+    let custom = view! { <IconLockCustom size=16 /> }.into_view().to_html();
+    let tabler = view! { <IconLock size=16 /> }.into_view().to_html();
     let def = custom_icon_def("lock").unwrap();
     let first_path = def
         .svg
@@ -196,7 +204,10 @@ fn custom_lock_replaces_the_tabler_lock_wrapper() {
         .split_once('>')
         .unwrap()
         .0;
-    assert!(html.contains(&format!("<path{first_path}>")), "{html}");
+    assert!(custom.contains(&format!("<path{first_path}>")), "{custom}");
+    assert!(custom.contains("data-twenty-icon"), "{custom}");
+    assert!(tabler.contains("tabler-icon tabler-icon-lock"), "{tabler}");
+    assert!(!tabler.contains(&format!("<path{first_path}>")), "{tabler}");
 }
 
 #[test]
@@ -206,6 +217,101 @@ fn horizontal_chart_keeps_the_upstream_quarter_turn() {
         .to_html();
     assert!(html.contains("rotate(90deg)"), "{html}");
     assert!(html.contains("tabler-icon-chart-bar"), "{html}");
+    assert!(html.contains("stroke-width=\"1.6\""), "{html}");
+    assert!(html.trim_start().starts_with("<div"), "{html}");
+}
+
+#[test]
+fn generic_icon_defaults_to_tabler_size_and_forwards_visual_props() {
+    let html = view! {
+        <Icon
+            name="user"
+            class_name="extra-class"
+            style="opacity:0.5"
+            aria_hidden=true
+        />
+    }
+    .into_view()
+    .to_html();
+    assert!(html.contains("width=\"24\""), "{html}");
+    assert!(html.contains("height=\"24\""), "{html}");
+    assert!(
+        html.contains("tabler-icon tabler-icon-user  extra-class"),
+        "{html}"
+    );
+    assert!(html.contains("style=\"opacity:0.5;\""), "{html}");
+    assert!(html.contains("aria-hidden=\"true\""), "{html}");
+    assert!(!html.contains("data-twenty-icon"), "{html}");
+}
+
+#[test]
+fn optional_aria_hidden_distinguishes_false_from_omitted() {
+    let hidden = view! { <Icon name="user" aria_hidden=false /> }
+        .into_view()
+        .to_html();
+    let omitted = view! { <Icon name="user" /> }.into_view().to_html();
+    assert!(hidden.contains("aria-hidden=\"false\""), "{hidden}");
+    assert!(!omitted.contains("aria-hidden"), "{omitted}");
+}
+
+#[test]
+fn custom_address_book_keeps_the_svgr_data_attribute() {
+    let html = view! { <Icon name="address-book" /> }.into_view().to_html();
+    assert!(html.contains("data-twenty-icon=\"\""), "{html}");
+    assert!(html.contains("icon-tabler-address-book"), "{html}");
+}
+
+#[test]
+fn custom_icon_defaults_follow_the_upstream_theme_tokens() {
+    let brand = view! { <IconBrandAnthropic /> }.into_view().to_html();
+    let address_book = view! { <IconAddressBook /> }.into_view().to_html();
+    let lock = view! { <IconLockCustom /> }.into_view().to_html();
+    let star = view! { <IconTwentyStar /> }.into_view().to_html();
+    assert!(brand.contains("width=\"20\""), "{brand}");
+    assert!(address_book.contains("width=\"24\""), "{address_book}");
+    assert!(lock.contains("width=\"20\""), "{lock}");
+    assert!(star.contains("width=\"24\""), "{star}");
+    assert!(star.contains("stroke-width=\"2\""), "{star}");
+    assert_eq!(CUSTOM_ICON_CATALOG_TAG, "twenty-v2.61.0-4bac2940dcdc");
+}
+
+#[test]
+fn illustration_icon_uses_the_upstream_wrapper_and_theme_colors() {
+    let html = view! { <IllustrationIconUser /> }.into_view().to_html();
+    assert!(
+        html.contains("class=\"t-illustration-icon-wrapper\""),
+        "{html}"
+    );
+    assert!(
+        html.contains(
+            "background-color:var(--t-background-primary);border:0.75px solid var(--t-border-color-medium);border-radius:var(--t-border-radius-md);display:flex;flex-shrink:0;justify-content:center"
+        ),
+        "{html}"
+    );
+    assert!(html.contains("width=\"20\""), "{html}");
+    assert!(html.contains("fill=\"var(--t-accent-accent3)\""), "{html}");
+    assert!(html.contains("currentFill"), "{html}");
+    assert!(html.contains("color=\"var(--t-accent-accent8)\""), "{html}");
+    assert!(html.contains("data-twenty-icon=\"\""), "{html}");
+}
+
+#[test]
+fn sparkle_two_forwards_class_style_and_accessibility_props() {
+    let html = view! {
+        <IconSparkle2
+            class_name="extra-class"
+            style="opacity:0.5"
+            aria_hidden=true
+        />
+    }
+    .into_view()
+    .to_html();
+    assert!(
+        html.contains("tabler-icon tabler-icon-sparkle-2 extra-class"),
+        "{html}"
+    );
+    assert!(html.contains("style=\"opacity:0.5;\""), "{html}");
+    assert!(html.contains("aria-hidden=\"true\""), "{html}");
 }
 
 #[test]

@@ -12,7 +12,7 @@ WRAPPER_NAMES = [
     "calendar", "filter", "arrows-sort", "selector", "dots", "dots-vertical",
     "pencil", "trash", "star", "bookmark", "menu-2", "refresh",
     "alert-triangle", "info-circle", "columns-3", "grip-vertical", "tag",
-    "phone", "external-link", "copy", "key", "terminal", "world",
+    "phone", "external-link", "copy", "key", "lock", "terminal", "world",
     "chevrons-left", "loader", "bell", "target-arrow", "checkbox", "notes",
     "settings-automation", "lego", "chart-bar",
 ]
@@ -47,6 +47,7 @@ const catalog = Object.entries(ALL_ICONS).map(([rust_name, Component]) => {
     tabler_name: tablerName[1],
     view_box: viewBox[1],
     class_name: className[1],
+    data_twenty_icon: /data-twenty-icon=/.test(svgTag),
     inner_svg: root[1],
   };
 }).sort((a, b) => a.tabler_name < b.tabler_name ? -1 : a.tabler_name > b.tabler_name ? 1 : 0);
@@ -97,6 +98,7 @@ def main():
         "    pub tabler_name: &'static str,",
         "    pub view_box: &'static str,",
         "    pub class_name: &'static str,",
+        "    pub data_twenty_icon: bool,",
         "    pub inner_svg: &'static str,",
         "}",
         "",
@@ -110,6 +112,7 @@ def main():
         lines.append(f"        tabler_name: {rust_str(entry['tabler_name'])},")
         lines.append(f"        view_box: {rust_str(entry['view_box'])},")
         lines.append(f"        class_name: {rust_str(entry['class_name'])},")
+        lines.append(f"        data_twenty_icon: {str(entry['data_twenty_icon']).lower()},")
         lines.append(f"        inner_svg: {rust_str(entry['inner_svg'])},")
         lines.append("    },")
     lines.extend([
@@ -122,13 +125,13 @@ def main():
         rust_name = "Icon" + pascal(name)
         lines.extend([
             "#[component]",
-            f"pub fn {rust_name}(#[prop(optional)] size: u16, #[prop(optional)] stroke: Option<IconStroke>, #[prop(optional)] color: &'static str) -> impl IntoView {{",
-            f"    view! {{ <Icon name={rust_str(name)} size=size stroke=stroke.unwrap_or_default() color=color/> }}",
+            f"pub fn {rust_name}(#[prop(optional)] size: u16, #[prop(optional)] stroke: Option<IconStroke>, #[prop(optional)] color: &'static str, #[prop(optional)] class_name: &'static str, #[prop(optional)] style: &'static str) -> impl IntoView {{",
+            f"    view! {{ <Icon name={rust_str(name)} size=size stroke=stroke.unwrap_or_default() color=color class_name=class_name style=style/> }}",
             "}",
             "",
         ])
     with open(sys.argv[1], "w", encoding="utf-8") as output:
-        output.write("\n".join(lines) + "\n")
+        output.write("\n".join(lines).rstrip() + "\n")
     print(f"wrote {len(catalog)} upstream icon defs to {sys.argv[1]}")
 
 

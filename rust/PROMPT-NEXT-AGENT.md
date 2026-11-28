@@ -12,9 +12,11 @@ MISSION: Finish the production-ready Rust port of Twenty CRM 2.61.0 into Nudge, 
 ## Read first, in order
 
 1. `rust/RULES.md` — R-001 through R-005, non-negotiable.
-2. `rust/HANDOFF-2026-11-28.md` — §4 gates/traps, §5 upstream facts, §6 open work, §7 safety.
-3. `rust/FEATURE-PARITY.md` — the "What is left, in order" section is the backlog, in priority order.
-4. `rust/MAP.md` and `rust/HANDOFF.md` — wave map. Load the `rust-anything` skill and follow `whole-app.md`: claim a unit in MAP.md, port it, and never mark a unit done without its gate passing.
+2. `rust/PORTING_STATUS.md`, `rust/UI_PARITY.md`, `rust/BACKEND_PARITY.md` and
+   `rust/KNOWN_ISSUES.md` — current status, evidence and open blockers.
+3. `rust/HANDOFF-2026-11-28.md` — §4 gates/traps, §5 upstream facts, §6 open work, §7 safety.
+4. `rust/FEATURE-PARITY.md` — the "What is left, in order" section is the backlog, in priority order.
+5. `rust/MAP.md` and `rust/HANDOFF.md` — wave map. Load the `rust-anything` skill and follow `whole-app.md`: claim a unit in MAP.md, port it, and never mark a unit done without its gate passing.
 
 ## Work loop, repeated per unit
 

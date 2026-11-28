@@ -66,10 +66,15 @@ pub fn render_icon(def: &IconDef, size: u16, stroke: IconStroke, color: &str) ->
     let mut out = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{width}\" \
          viewBox=\"{vb}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{sw}\" \
-         stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"{cls}\">",
+         stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"{cls}\"{data}>",
         vb = def.view_box,
         sw = stroke.value(),
         cls = icon_class(def),
+        data = if def.data_twenty_icon {
+            " data-twenty-icon=\"\""
+        } else {
+            ""
+        },
     );
     out.push_str(def.inner_svg);
     out.push_str("</svg>");
@@ -82,10 +87,13 @@ pub fn Icon(
     #[prop(optional)] size: u16,
     #[prop(optional)] stroke: Option<IconStroke>,
     #[prop(optional)] color: &'static str,
-    #[prop(optional)] aria_label: Option<&'static str>,
+    #[prop(optional)] class_name: &'static str,
+    #[prop(optional)] style: &'static str,
+    #[prop(optional)] aria_label: &'static str,
+    #[prop(optional)] aria_hidden: Option<bool>,
 ) -> impl IntoView {
     let def = icon_def(name).unwrap_or(&ICON_DEFS[0]);
-    let size = if size == 0 { 16 } else { size };
+    let size = if size == 0 { 24 } else { size };
     let stroke = stroke.unwrap_or(IconStroke::Md);
     let color = if color.is_empty() {
         "currentColor"
@@ -94,7 +102,20 @@ pub fn Icon(
     };
     let width = size.to_string();
     let view_box = def.view_box.to_string();
-    let class = icon_class(def);
+    let class = if class_name.is_empty() {
+        icon_class(def)
+    } else {
+        format!("{} {class_name}", icon_class(def))
+    };
+    let style = if style.is_empty() { None } else { Some(style) };
+    let aria_label = if aria_label.is_empty() {
+        None
+    } else {
+        Some(aria_label)
+    };
+    let aria_hidden = aria_hidden
+        .or_else(|| aria_label.is_some().then_some(false))
+        .map(|hidden| if hidden { "true" } else { "false" });
     view! {
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -107,8 +128,10 @@ pub fn Icon(
             stroke-linecap="round"
             stroke-linejoin="round"
             class=class
+            style=style
             aria-label=aria_label
-            aria-hidden=aria_label.map(|_| "false")
+            aria-hidden=aria_hidden
+            data-twenty-icon=def.data_twenty_icon.then_some("")
             inner_html=def.inner_svg
         />
     }
@@ -119,6 +142,9 @@ pub fn IconSparkle2(
     #[prop(optional)] size: u16,
     #[prop(optional)] stroke: Option<IconStroke>,
     #[prop(optional)] color: &'static str,
+    #[prop(optional)] class_name: &'static str,
+    #[prop(optional)] style: &'static str,
+    #[prop(optional)] aria_hidden: Option<bool>,
 ) -> impl IntoView {
     let size = if size == 0 { 24 } else { size };
     let stroke = stroke.unwrap_or(IconStroke::Md);
@@ -128,6 +154,13 @@ pub fn IconSparkle2(
         color
     };
     let width = size.to_string();
+    let class = if class_name.is_empty() {
+        "tabler-icon tabler-icon-sparkle-2".to_string()
+    } else {
+        format!("tabler-icon tabler-icon-sparkle-2 {class_name}")
+    };
+    let style = if style.is_empty() { None } else { Some(style) };
+    let aria_hidden = aria_hidden.map(|hidden| if hidden { "true" } else { "false" });
     view! {
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -139,7 +172,9 @@ pub fn IconSparkle2(
             stroke-width=stroke.value()
             stroke-linecap="round"
             stroke-linejoin="round"
-            class="tabler-icon tabler-icon-sparkle-2"
+            class=class
+            style=style
+            aria-hidden=aria_hidden
             inner_html=r#"<path d="M12 3c.375 0 .711 .231 .846 .581l1.65 4.29a2.85 2.85 0 0 0 1.632 1.633l4.291 1.65a.906 .906 0 0 1 0 1.692l-4.29 1.65a2.84 2.84 0 0 0 -1.633 1.632l-1.65 4.291a.906 .906 0 0 1 -1.692 0l-1.65 -4.29a2.84 2.84 0 0 0 -1.632 -1.633l-4.291 -1.65a.906 .906 0 0 1 0 -1.692l4.29 -1.65a2.84 2.84 0 0 0 1.633 -1.632l1.65 -4.291a.91 .91 0 0 1 .846 -.581"></path>"#
         />
     }
@@ -148,9 +183,28 @@ pub fn IconSparkle2(
 #[component]
 pub fn ThinkingOrbitLoaderIcon(
     #[prop(optional)] size: u16,
-    #[prop(optional)] color: &'static str,
+    #[prop(optional)] class_name: &'static str,
 ) -> impl IntoView {
-    view! { <IconAnimatedLoader size=size color=color /> }
+    let size = if size == 0 { 14 } else { size };
+    let width = size.to_string();
+    let class_name = if class_name.is_empty() {
+        None
+    } else {
+        Some(class_name)
+    };
+    view! {
+        <svg
+            data-twenty-icon=""
+            xmlns="http://www.w3.org/2000/svg"
+            width=width.clone()
+            height=width
+            viewBox="0 0 14 14"
+            aria-hidden="true"
+            focusable="false"
+            class=class_name
+            inner_html=r#"<path d="M3.1 7 C3.1 4.4 6.0 4.4 7.0 7 C8.0 9.6 10.9 9.6 10.9 7 C10.9 4.4 8.0 4.4 7.0 7 C6.0 9.6 3.1 9.6 3.1 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision" pathLength="100" stroke-dasharray="14 86" stroke-dashoffset="0"><animate attributeName="stroke-dashoffset" values="0;-100" dur="1.05s" repeatCount="indefinite"></animate><animate attributeName="stroke-dasharray" values="10 90;16 84;10 90" dur="1.05s" repeatCount="indefinite"></animate></path>"#
+        />
+    }
 }
 
 #[component]
@@ -159,37 +213,10 @@ pub fn IconChartBarHorizontal(
     #[prop(optional)] stroke: Option<IconStroke>,
     #[prop(optional)] color: &'static str,
 ) -> impl IntoView {
+    let size = if size == 0 { 16 } else { size };
     view! {
-        <span style="display:inline-flex;flex-shrink:0;transform:rotate(90deg)">
-            <IconChartBar size=size stroke=stroke.unwrap_or_default() color=color />
-        </span>
-    }
-}
-
-#[component]
-pub fn IconAnimatedLoader(
-    #[prop(optional)] size: u16,
-    #[prop(optional)] color: &'static str,
-) -> impl IntoView {
-    let size = if size == 0 { 14 } else { size };
-    let color = if color.is_empty() {
-        "currentColor"
-    } else {
-        color
-    };
-    let width = size.to_string();
-    view! {
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width=width.clone()
-            height=width
-            viewBox="0 0 14 14"
-            fill="none"
-            stroke=color
-            aria-hidden="true"
-            focusable="false"
-            class="t-icon-animated-loader"
-            inner_html=r#"<path d="M3.1 7 C3.1 4.4 6.0 4.4 7.0 7 C8.0 9.6 10.9 9.6 10.9 7 C10.9 4.4 8.0 4.4 7.0 7 C6.0 9.6 3.1 9.6 3.1 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision" pathLength="100" stroke-dasharray="14 86" stroke-dashoffset="0"><animate attributeName="stroke-dashoffset" values="0;-100" dur="1.05s" repeatCount="indefinite"></animate><animate attributeName="stroke-dasharray" values="10 90;16 84;10 90" dur="1.05s" repeatCount="indefinite"></animate></path>"#
-        />
+        <div style="display:inline-flex;flex-shrink:0;transform:rotate(90deg)">
+            <IconChartBar size=size stroke=stroke.unwrap_or(IconStroke::Sm) color=color />
+        </div>
     }
 }

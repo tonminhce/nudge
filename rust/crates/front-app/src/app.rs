@@ -275,7 +275,11 @@ mod tests {
 
     #[test]
     fn gallery_route_renders_title_link_and_both_themes() {
-        let html = GalleryPage().into_view().to_html();
+        let owner = Owner::default();
+        let html = owner.with(|| {
+            provide_meta_context();
+            GalleryPage().into_view().to_html()
+        });
         assert!(html.contains("<h1>Nudge front-ui gallery</h1>"));
         assert!(html.contains("href=\"/\""));
         assert!(html.contains(">Back to app<"));
