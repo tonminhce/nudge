@@ -37,14 +37,17 @@ pub fn config() -> Option<&'static EmailSendConfig> {
     EMAIL_CONFIG.get()?.as_ref().ok()
 }
 
-pub fn build_message(
+pub fn build_message_with_from(
     config: &EmailSendConfig,
+    from: Option<&str>,
     to: &str,
     subject: &str,
     rendered: &RenderedEmail,
 ) -> SendMailOptions {
+    let default_from = config.build_from_header();
+
     SendMailOptions {
-        from: config.build_from_header(),
+        from: from.unwrap_or(&default_from).to_string(),
         to: vec![to.to_string()],
         subject: subject.to_string(),
         text: rendered.text.clone(),
@@ -52,13 +55,23 @@ pub fn build_message(
     }
 }
 
-pub async fn deliver(
+pub fn build_message(
     config: &EmailSendConfig,
     to: &str,
     subject: &str,
     rendered: &RenderedEmail,
+) -> SendMailOptions {
+    build_message_with_from(config, None, to, subject, rendered)
+}
+
+pub async fn deliver_with_from(
+    config: &EmailSendConfig,
+    from: Option<&str>,
+    to: &str,
+    subject: &str,
+    rendered: &RenderedEmail,
 ) -> Result<(), EmailSendError> {
-    let message = build_message(config, to, subject, rendered);
+    let message = build_message_with_from(config, from, to, subject, rendered);
 
     if config.driver == EmailDriver::Smtp && config.smtp.is_none() {
         return Err(EmailSendError::MissingSmtpOptions);
@@ -67,13 +80,23 @@ pub async fn deliver(
     send_with_retry(config, &message, upstream_backoff_delay).await
 }
 
-pub async fn send_transactional_email(
+pub async fn deliver(
+    config: &EmailSendConfig,
+    to: &str,
+    subject: &str,
+    rendered: &RenderedEmail,
+) -> Result<(), EmailSendError> {
+    deliver_with_from(config, None, to, subject, rendered).await
+}
+
+pub async fn send_transactional_email_with_from(
+    from: Option<&str>,
     to: &str,
     subject: &str,
     rendered: &RenderedEmail,
 ) -> Result<(), EmailSendError> {
     match EMAIL_CONFIG.get() {
-        Some(Ok(config)) => deliver(config, to, subject, rendered).await,
+        Some(Ok(config)) => deliver_with_from(config, from, to, subject, rendered).await,
         Some(Err(error)) => Err(EmailSendError::Config(error.to_string())),
         None => Err(EmailSendError::Config(
             "email driver is not configured".to_string(),
@@ -81,17 +104,33 @@ pub async fn send_transactional_email(
     }
 }
 
-pub fn queue_transactional_email(to: &str, subject: &str, rendered: &RenderedEmail) -> bool {
+pub async fn send_transactional_email(
+    to: &str,
+    subject: &str,
+    rendered: &RenderedEmail,
+) -> Result<(), EmailSendError> {
+    send_transactional_email_with_from(None, to, subject, rendered).await
+}
+
+pub fn queue_transactional_email_with_from(
+    from: Option<&str>,
+    to: &str,
+    subject: &str,
+    rendered: &RenderedEmail,
+) -> bool {
     if tokio::runtime::Handle::try_current().is_err() {
         return false;
     }
 
+    let from = from.map(str::to_string);
     let to = to.to_string();
     let subject = subject.to_string();
     let rendered = rendered.clone();
 
     tokio::spawn(async move {
-        if let Err(error) = send_transactional_email(&to, &subject, &rendered).await {
+        if let Err(error) =
+            send_transactional_email_with_from(from.as_deref(), &to, &subject, &rendered).await
+        {
             tracing::error!(%error, "sending the transactional email failed");
         }
     });
@@ -99,10 +138,16 @@ pub fn queue_transactional_email(to: &str, subject: &str, rendered: &RenderedEma
     true
 }
 
+pub fn queue_transactional_email(to: &str, subject: &str, rendered: &RenderedEmail) -> bool {
+    queue_transactional_email_with_from(None, to, subject, rendered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::email::templates::send_email_verification_link_email;
+    use crate::email::config::SmtpTransportOptions;
+    use crate::email::smtp::spawn_fake_smtp_server;
+    use crate::email::templates::{send_email_verification_link_email, send_invite_link_email};
 
     fn config() -> EmailSendConfig {
         EmailSendConfig {
@@ -118,6 +163,23 @@ mod tests {
     }
 
     #[test]
+    fn an_explicit_from_header_replaces_the_configured_default() {
+        let rendered = rendered();
+        let message = build_message_with_from(
+            &config(),
+            Some("Ada Lovelace (via Nudge) <noreply@yourdomain.com>"),
+            "user@target.test",
+            "Join your team on Nudge",
+            &rendered,
+        );
+
+        assert_eq!(
+            message.from,
+            "Ada Lovelace (via Nudge) <noreply@yourdomain.com>"
+        );
+    }
+
+    #[test]
     fn message_uses_the_upstream_from_header_and_rendered_bodies() {
         let rendered = rendered();
         let message = build_message(&config(), "user@target.test", "Welcome", &rendered);
@@ -127,6 +189,59 @@ mod tests {
         assert_eq!(message.subject, "Welcome");
         assert_eq!(message.html, rendered.html);
         assert_eq!(message.text, rendered.text);
+    }
+
+    #[tokio::test]
+    async fn an_invitation_over_smtp_carries_the_sender_from_header() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server =
+            spawn_fake_smtp_server(listener, b"250-test greets\r\n250 AUTH PLAIN LOGIN\r\n").await;
+
+        let config = EmailSendConfig {
+            driver: EmailDriver::Smtp,
+            smtp: Some(SmtpTransportOptions {
+                host: addr.ip().to_string(),
+                port: addr.port(),
+                auth: None,
+                secure: false,
+                ignore_tls: true,
+                require_tls: false,
+                name: Some("nudge.test".to_string()),
+            }),
+            ..config()
+        };
+        let rendered = send_invite_link_email(
+            "https://app.test/invite?token=1",
+            Some("Acme"),
+            None,
+            "boss@acme.test",
+            "ada",
+            "https://app.test",
+            "en",
+        );
+        let from = config.build_invitation_from_header("Ada Lovelace");
+
+        deliver_with_from(
+            &config,
+            Some(&from),
+            "new@acme.test",
+            "Join your team on Nudge",
+            &rendered,
+        )
+        .await
+        .unwrap();
+
+        let transcript = server.await.unwrap();
+
+        assert!(transcript.contains("MAIL FROM:<noreply@yourdomain.com>\r\n"));
+        assert!(transcript.contains("RCPT TO:<new@acme.test>\r\n"));
+        assert!(transcript.contains("From: Ada Lovelace (via Nudge) <noreply@yourdomain.com>"));
+        assert!(transcript.contains("Subject: Join your team on Nudge"));
+        assert!(
+            transcript.contains("Accept invite https://app.test/invite?token=3D1"),
+            "transcript: {transcript}"
+        );
     }
 
     #[tokio::test]

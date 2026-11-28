@@ -14,6 +14,12 @@ use super::jwt_service::TokenType;
 use super::middleware::AuthContext;
 use super::session;
 use super::tokens::{self, AuthProvider};
+use crate::email::service::queue_transactional_email;
+use crate::email::service::queue_transactional_email_with_from;
+use crate::email::templates::{
+    format_duration_long, password_reset_link_email, password_update_notify_email,
+    send_email_verification_link_email, send_invite_link_email,
+};
 use crate::state::AppState;
 
 const EMAIL_VERIFICATION_TOKEN_EXPIRES_IN_SECS: i64 = 60 * 60;
@@ -796,13 +802,15 @@ async fn resend_email_verification_token(
 
     let email = super::service::normalize_email(&input.email)?;
 
-    let user: Option<(Uuid, bool)> =
-        sqlx::query_as("SELECT id, \"isEmailVerified\" FROM core.\"user\" WHERE email = $1")
-            .bind(&email)
-            .fetch_optional(&state.core_pool)
-            .await?;
+    let user: Option<(Uuid, bool, Option<String>)> = sqlx::query_as(
+        "SELECT id, \"isEmailVerified\", locale FROM core.\"user\" WHERE email = $1",
+    )
+    .bind(&email)
+    .fetch_optional(&state.core_pool)
+    .await?;
 
-    let (user_id, is_verified) = user.ok_or_else(|| AuthError::internal("Value not defined"))?;
+    let (user_id, is_verified, user_locale) =
+        user.ok_or_else(|| AuthError::internal("Value not defined"))?;
 
     if is_verified {
         return Err(AuthError::new(
@@ -872,13 +880,15 @@ async fn resend_email_verification_token(
     .await?;
 
     let link = verification_link(&state.config.frontend_url, &plain_token, &email);
+    let subject = "Welcome to Nudge: Please Confirm Your Email";
+    let rendered =
+        send_email_verification_link_email(&link, user_locale.as_deref().unwrap_or("en"), false);
 
-    tracing::info!(
-        to = %email,
-        subject = "Welcome to Nudge: Please Confirm Your Email",
-        link = %link,
-        "email verification link (EMAIL_DRIVER=LOGGER)"
-    );
+    if !queue_transactional_email(&email, subject, &rendered) {
+        tracing::error!(to = %email, subject, "the verification email could not be queued");
+    } else {
+        tracing::info!(to = %email, subject, "verification email queued");
+    }
 
     Ok(Json(json!({ "success": true })))
 }
@@ -1032,14 +1042,30 @@ async fn email_password_reset_link(
             let link = reset_password_link(&state.config.frontend_url, &plain_token);
             let subject = password_reset_subject(target.has_password);
 
-            tracing::info!(
-                to = %target.email,
-                subject = subject,
-                link = %link,
-                expiresAt = %expires_at.to_rfc3339(),
-                locale = target.locale.as_deref().unwrap_or("en"),
-                "password reset link email (EMAIL_DRIVER=LOGGER)"
+            let locale = target.locale.as_deref().unwrap_or("en");
+            let duration = (expires_at - Utc::now()).num_milliseconds();
+            let rendered = password_reset_link_email(
+                &format_duration_long(duration),
+                target.has_password,
+                &link,
+                locale,
             );
+
+            if !queue_transactional_email(&target.email, subject, &rendered) {
+                tracing::error!(
+                    to = %target.email,
+                    subject,
+                    "the password reset email could not be queued"
+                );
+            } else {
+                tracing::info!(
+                    to = %target.email,
+                    subject,
+                    locale,
+                    expires_at = %expires_at.to_rfc3339(),
+                    "password reset email queued"
+                );
+            }
         }
         None => {
             tracing::warn!(
@@ -1202,12 +1228,29 @@ async fn update_password(state: &AppState, user_id: Uuid, new_password: &str) ->
     .trim()
     .to_string();
 
-    tracing::info!(
-        to = %email,
-        subject = "Your Password Has Been Successfully Changed",
-        user = %display_name,
-        "password changed notification email (EMAIL_DRIVER=LOGGER)"
+    let subject = "Your Password Has Been Successfully Changed";
+    let rendered = password_update_notify_email(
+        &display_name,
+        &email,
+        &state.config.frontend_url,
+        locale.map(|(value,)| value).as_deref().unwrap_or("en"),
+        Utc::now(),
     );
+
+    if !queue_transactional_email(&email, subject, &rendered) {
+        tracing::error!(
+            to = %email,
+            subject,
+            "the password changed email could not be queued"
+        );
+    } else {
+        tracing::info!(
+            to = %email,
+            subject,
+            user = %display_name,
+            "password changed email queued"
+        );
+    }
 
     Ok(())
 }
@@ -1350,10 +1393,44 @@ struct InvitationOutcome {
     row: AppTokenRow,
 }
 
+struct InvitationSender {
+    name: String,
+    first_name: String,
+    email: String,
+    locale: String,
+}
+
+async fn load_invitation_sender(
+    state: &AppState,
+    sender_user_id: Uuid,
+    fallback_email: Option<&str>,
+) -> AuthResult<InvitationSender> {
+    let row: Option<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT \"firstName\", \"lastName\", locale FROM core.\"user\" WHERE id = $1",
+    )
+    .bind(sender_user_id)
+    .fetch_optional(&state.core_pool)
+    .await?;
+
+    let (first_name, last_name, locale) = row.unwrap_or((None, None, None));
+    let first_name = first_name.unwrap_or_default();
+    let name = format!("{first_name} {}", last_name.unwrap_or_default())
+        .trim()
+        .to_string();
+
+    Ok(InvitationSender {
+        email: fallback_email.unwrap_or_default().to_string(),
+        locale: locale.unwrap_or_else(|| "en".to_string()),
+        first_name,
+        name,
+    })
+}
+
 async fn create_workspace_invitation(
     state: &AppState,
     workspace_id: Uuid,
     workspace_display_name: Option<&str>,
+    sender: &InvitationSender,
     email: &str,
     role_id: Option<Uuid>,
     is_onboarding_invitation: bool,
@@ -1428,14 +1505,29 @@ async fn create_workspace_invitation(
     .await?;
 
     let link = invitation_link(&state.config.frontend_url, &plain_token, email);
-
-    tracing::info!(
-        to = %email,
-        subject = "Join your team on Nudge",
-        workspace = workspace_display_name.unwrap_or("Workspace"),
-        link = %link,
-        "workspace invitation email (EMAIL_DRIVER=LOGGER)"
+    let subject = "Join your team on Nudge";
+    let rendered = send_invite_link_email(
+        &link,
+        workspace_display_name,
+        None,
+        &sender.email,
+        &sender.first_name,
+        &state.config.frontend_url,
+        &sender.locale,
     );
+    let from = crate::email::service::config()
+        .map(|config| config.build_invitation_from_header(&sender.name));
+
+    if !queue_transactional_email_with_from(from.as_deref(), email, subject, &rendered) {
+        tracing::error!(to = %email, subject, "the invitation email could not be queued");
+    } else {
+        tracing::info!(
+            to = %email,
+            subject,
+            workspace = workspace_display_name.unwrap_or("Workspace"),
+            "invitation email queued"
+        );
+    }
 
     Ok(InvitationOutcome { row })
 }
@@ -1465,6 +1557,12 @@ async fn send_invitations_inner(
             .await?;
 
     let workspace_display_name = workspace.and_then(|(name,)| name);
+    let sender = load_invitation_sender(
+        state,
+        command.sender_user_id,
+        command.sender_email.as_deref(),
+    )
+    .await?;
 
     throttle_invitation_sending(
         state,
@@ -1491,6 +1589,7 @@ async fn send_invitations_inner(
             state,
             command.workspace_id,
             workspace_display_name.as_deref(),
+            &sender,
             &email,
             command.role_id,
             command.is_onboarding_invite_reward_override,

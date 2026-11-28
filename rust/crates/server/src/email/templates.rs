@@ -76,6 +76,28 @@ pub fn format_medium_long_utc(value: DateTime<Utc>) -> String {
     )
 }
 
+pub fn format_duration_long(milliseconds: i64) -> String {
+    let abs = milliseconds.unsigned_abs();
+    let units = [
+        (86_400_000_u64, "day"),
+        (3_600_000_u64, "hour"),
+        (60_000_u64, "minute"),
+        (1_000_u64, "second"),
+    ];
+
+    let Some((size, name)) = units.into_iter().find(|(size, _)| abs >= *size) else {
+        return format!("{milliseconds} ms");
+    };
+
+    let value = (milliseconds as f64 / size as f64).round() as i64;
+
+    if abs >= size * 3 / 2 {
+        format!("{value} {name}s")
+    } else {
+        format!("{value} {name}")
+    }
+}
+
 fn fill(skeleton: &str, replacements: &[(&str, String)]) -> String {
     let mut out = skeleton.to_string();
 
@@ -1286,6 +1308,42 @@ mod tests {
 
     fn sha256_hex(bytes: &[u8]) -> String {
         hex::encode(Sha256::digest(bytes))
+    }
+
+    #[test]
+    fn duration_long_formatting_matches_the_ms_package() {
+        let measured = [
+            (86_400_000_i64, "1 day"),
+            (3_600_000, "1 hour"),
+            (1_800_000, "30 minutes"),
+            (90_000, "2 minutes"),
+            (45_000, "45 seconds"),
+            (86_461_000, "1 day"),
+            (90_061_000, "1 day"),
+            (1_000, "1 second"),
+            (59_999, "60 seconds"),
+            (60_000, "1 minute"),
+            (86_399_000, "24 hours"),
+            (172_800_000, "2 days"),
+            (365_000_000, "4 days"),
+            (300_000, "5 minutes"),
+            (89_999, "1 minute"),
+            (120_960_000, "1 day"),
+            (129_600_000, "2 days"),
+            (1_499_999, "25 minutes"),
+            (999, "999 ms"),
+            (1, "1 ms"),
+            (0, "0 ms"),
+            (-45_000, "-45 seconds"),
+        ];
+
+        for (milliseconds, expected) in measured {
+            assert_eq!(
+                format_duration_long(milliseconds),
+                expected,
+                "ms({milliseconds}, {{ long: true }})"
+            );
+        }
     }
 
     fn golden_hashes() -> Vec<(&'static str, &'static str, &'static str)> {

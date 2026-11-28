@@ -205,6 +205,10 @@ impl EmailSendConfig {
     pub fn build_from_header(&self) -> String {
         format!("{} <{}>", self.from_name, self.from_address)
     }
+
+    pub fn build_invitation_from_header(&self, sender_name: &str) -> String {
+        format!("{sender_name} (via Nudge) <{}>", self.from_address)
+    }
 }
 
 #[cfg(test)]
@@ -301,6 +305,21 @@ mod tests {
         assert!(!options.secure);
         assert!(options.ignore_tls);
         assert!(!options.require_tls);
+    }
+
+    #[test]
+    fn invitation_from_header_carries_the_sender_and_the_shared_address() {
+        let config = EmailSendConfig {
+            driver: EmailDriver::Logger,
+            from_name: "Acme Mailer".to_string(),
+            from_address: "bot@acme.example".to_string(),
+            smtp: None,
+        };
+
+        assert_eq!(
+            config.build_invitation_from_header("Ada Lovelace"),
+            "Ada Lovelace (via Nudge) <bot@acme.example>"
+        );
     }
 
     #[test]
