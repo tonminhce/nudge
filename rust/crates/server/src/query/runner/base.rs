@@ -560,10 +560,13 @@ pub fn select_columns(
     } else {
         for field_name in &selection.field_names {
             if let Some(column) = model.shape.column(field_name) {
-                if column.composite_parent_field_name.is_none() {
+                if !selected
+                    .iter()
+                    .any(|pushed| pushed.column_name == column.column_name)
+                {
                     selected.push(column.clone());
-                    continue;
                 }
+                continue;
             }
 
             let mut composite = model

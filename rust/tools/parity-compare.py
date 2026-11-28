@@ -8,10 +8,14 @@ import time
 import urllib.error
 import urllib.request
 
-NODE_BASE = "http://127.0.0.1:3001"
-RUST_BASE = "http://127.0.0.1:3000"
-REFERENCE_ORIGIN = "http://refhq.localhost:3001"
-REFERENCE_EMAIL = "owner-1795713371@refhq.test"
+NODE_BASE = os.environ.get("NUDGE_NODE_BASE", "http://127.0.0.1:3001")
+RUST_BASE = os.environ.get("NUDGE_RUST_BASE", "http://127.0.0.1:3000")
+REFERENCE_ORIGIN = os.environ.get(
+    "NUDGE_REFERENCE_ORIGIN", "http://refhq.localhost:3001"
+)
+REFERENCE_EMAIL = os.environ.get(
+    "NUDGE_REFERENCE_EMAIL", "owner-1795713371@refhq.test"
+)
 REFERENCE_PASSWORD = os.environ.get("TWENTY_REFERENCE_PASSWORD")
 
 UUID_RE = re.compile(
@@ -164,6 +168,158 @@ def fetch_reference_token():
                 "accessOrWorkspaceAgnosticToken"
             ]["token"]
     raise RuntimeError("token exchange failed: %s" % body[:200])
+
+
+PARITY_STATE = os.environ.get("NUDGE_PARITY_STATE", "/tmp/.nudge-parity-pair.json")
+DB_CONTAINER = os.environ.get("NUDGE_DB_CONTAINER", "infra-db-1")
+DB_NAME = os.environ.get("NUDGE_DB_NAME", "twenty_ref")
+
+
+def psql(statement):
+    return subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            DB_NAME,
+            "-At",
+            "-c",
+            statement,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def authorize(base, path, token, extra=None):
+    headers = {"content-type": "application/json"}
+    if token:
+        headers["authorization"] = "Bearer " + token
+    headers.update(extra or {})
+    return request_raw(
+        base, "POST", path, json.dumps({"query": "query { __typename }"}), headers
+    )
+
+
+def reference_token_for(email, password):
+    sign_in = (
+        'mutation { signIn(email: "%s", password: "%s") '
+        "{ availableWorkspaces { availableWorkspacesForSignIn { id loginToken } } } }"
+        % (email, password)
+    )
+    status, raw = request_raw(
+        NODE_BASE, "POST", "/metadata", json.dumps({"query": sign_in}),
+        {"content-type": "application/json"},
+    )
+    body = json.loads(raw) if raw.startswith("{") else {}
+    workspaces = (
+        ((body.get("data") or {}).get("signIn") or {}).get("availableWorkspaces") or {}
+    ).get("availableWorkspacesForSignIn") or []
+    if not workspaces:
+        raise RuntimeError("reference signIn failed: %s" % str(body.get("errors"))[:180])
+    login_token = workspaces[0]["loginToken"]
+    workspace_id = workspaces[0]["id"]
+    subdomain = psql(
+        "select subdomain from core.workspace where id=$$%s$$;" % workspace_id
+    ).stdout.strip()
+    port = REFERENCE_ORIGIN.rsplit(":", 1)[-1].strip("/")
+    candidates = [
+        ("http://%s.localhost:%s" % (subdomain, port), None),
+        ("http://%s.localhost:%s" % (subdomain, port), "http://%s.localhost:%s" % (subdomain, port)),
+        (REFERENCE_ORIGIN, None),
+    ]
+    last = None
+    for origin, header in candidates:
+        if not subdomain and origin != REFERENCE_ORIGIN:
+            continue
+        exchange = (
+            'mutation { getAuthTokensFromLoginToken(loginToken: "%s", origin: "%s") '
+            "{ tokens { accessOrWorkspaceAgnosticToken { token } } } }"
+            % (login_token, origin)
+        )
+        headers = {"content-type": "application/json"}
+        if header:
+            headers["origin"] = header
+        status, raw = request_raw(
+            NODE_BASE, "POST", "/metadata", json.dumps({"query": exchange}), headers
+        )
+        body = json.loads(raw) if raw.startswith("{") else {}
+        tokens = (
+            ((body.get("data") or {}).get("getAuthTokensFromLoginToken") or {}).get("tokens")
+            or {}
+        )
+        access = (tokens.get("accessOrWorkspaceAgnosticToken") or {}).get("token")
+        if access:
+            return access, workspace_id, origin
+        last = str(body.get("errors"))[:140]
+    raise RuntimeError(
+        "reference exchange failed for %s: %s" % (workspace_id[:8], last)
+    )
+
+
+def fetch_parity_pair(force=False):
+    global REFERENCE_ORIGIN
+    state = {}
+    if os.path.exists(PARITY_STATE):
+        with open(PARITY_STATE) as handle:
+            state = json.load(handle)
+    if state.get("origin"):
+        REFERENCE_ORIGIN = state["origin"]
+    if state and not force:
+        node_ok = "__typename" in authorize(NODE_BASE, "/graphql", state.get("node_token"),
+                                           {"origin": REFERENCE_ORIGIN})[1]
+        rust_ok = "__typename" in authorize(RUST_BASE, "/graphql", state.get("rust_token"))[1]
+        if node_ok and rust_ok:
+            return state["node_token"], state["rust_token"], state.get("workspaceId")
+    if state.get("email") and state.get("rust_token") and not force:
+        try:
+            node_token, workspace_id, origin = reference_token_for(
+                state["email"], state["password"]
+            )
+        except RuntimeError:
+            node_token = None
+        if node_token:
+            REFERENCE_ORIGIN = origin
+            state.update({"node_token": node_token, "workspaceId": workspace_id, "origin": origin})
+            _write_parity_state(state)
+            return node_token, state["rust_token"], workspace_id
+    email = "parity-" + secrets.token_hex(6) + "@nudge.test"
+    password = secrets.token_hex(12)
+    status, raw = request_raw(
+        RUST_BASE, "POST", "/auth/sign-up", json.dumps({"email": email, "password": password}),
+        {"content-type": "application/json"},
+    )
+    if status != 201:
+        raise RuntimeError("rust sign-up failed %s: %s" % (status, raw[:180]))
+    rust_body = json.loads(raw)
+    fresh = {
+        "email": email,
+        "password": password,
+        "workspaceId": rust_body.get("workspaceId"),
+        "rust_token": rust_body["accessToken"],
+        "written": int(time.time()),
+    }
+    _write_parity_state(fresh)
+    node_token, workspace_id, origin = reference_token_for(email, password)
+    REFERENCE_ORIGIN = origin
+    psql(
+        'update core.workspace set "activationStatus"=$$ACTIVE$$ where id=$$%s$$;'
+        % workspace_id
+    )
+    fresh.update({"node_token": node_token, "workspaceId": workspace_id, "origin": origin})
+    _write_parity_state(fresh)
+    return node_token, fresh["rust_token"], workspace_id
+
+
+def _write_parity_state(state):
+    fd = os.open(PARITY_STATE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(state, handle)
 
 
 def graphql(base, query, token, variables=None, path="/graphql"):
