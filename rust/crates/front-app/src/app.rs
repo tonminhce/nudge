@@ -82,15 +82,22 @@ pub fn server_url() -> String {
 }
 
 pub fn system_prefers_dark() -> bool {
-    web_sys::window()
-        .and_then(|window| {
-            window
-                .match_media("(prefers-color-scheme: dark)")
-                .ok()
-                .flatten()
-        })
-        .map(|query| query.matches())
-        .unwrap_or(false)
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| {
+                window
+                    .match_media("(prefers-color-scheme: dark)")
+                    .ok()
+                    .flatten()
+            })
+            .map(|query| query.matches())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
 }
 
 pub fn resolve_theme(stored: Option<&str>) -> Scheme {
@@ -128,22 +135,28 @@ pub fn App() -> impl IntoView {
     {
         use wasm_bindgen::JsCast;
         let theme_for_change = theme;
-        let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move |event: web_sys::Event| {
-            if read_storage("nudge.theme").is_some() {
-                return;
-            }
-            if let Some(target) = event.target() {
-                let query: web_sys::MediaQueryList = target.unchecked_into();
-                theme_for_change.set(if query.matches() { Scheme::Dark } else { Scheme::Light });
-            }
-        }) as Box<dyn FnMut(web_sys::Event)>);
+        let callback =
+            wasm_bindgen::closure::Closure::wrap(Box::new(move |event: web_sys::Event| {
+                if read_storage("nudge.theme").is_some() {
+                    return;
+                }
+                if let Some(target) = event.target() {
+                    let query: web_sys::MediaQueryList = target.unchecked_into();
+                    theme_for_change.set(if query.matches() {
+                        Scheme::Dark
+                    } else {
+                        Scheme::Light
+                    });
+                }
+            }) as Box<dyn FnMut(web_sys::Event)>);
         if let Some(query) = web_sys::window().and_then(|window| {
             window
                 .match_media("(prefers-color-scheme: dark)")
                 .ok()
                 .flatten()
         }) {
-            let _ = query.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref());
+            let _ =
+                query.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref());
             callback.forget();
         }
     }
@@ -230,6 +243,13 @@ mod tests {
         assert_eq!(resolve_theme(Some("dark")), Scheme::Dark);
         assert_eq!(resolve_theme(Some("light")), Scheme::Light);
         assert_eq!(resolve_theme(Some("System")), Scheme::Light);
-        assert_eq!(resolve_theme(None), if system_prefers_dark() { Scheme::Dark } else { Scheme::Light });
+        assert_eq!(
+            resolve_theme(None),
+            if system_prefers_dark() {
+                Scheme::Dark
+            } else {
+                Scheme::Light
+            }
+        );
     }
 }

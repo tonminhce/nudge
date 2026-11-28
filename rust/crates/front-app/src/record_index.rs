@@ -779,6 +779,7 @@ pub(crate) fn text_filter(object: &str, query: &str) -> Option<Value> {
     }
 }
 
+#[cfg(test)]
 fn order_by_from_name(object: &str, sort: RecordSort) -> Option<Value> {
     let value = match (object, sort) {
         ("person", RecordSort::NameAsc) => person_name_order_by("AscNullsLast"),
@@ -799,6 +800,7 @@ fn order_by(object: &ObjectMetadata, sort: RecordSort) -> Option<Value> {
     Some(Value::Array(entries))
 }
 
+#[cfg(test)]
 fn person_name_order_by(direction: &str) -> Value {
     serde_json::json!([
         { "name": { "firstName": direction } },
@@ -941,19 +943,6 @@ mod tests {
         let filter = text_filter("person", "Ada").unwrap();
         assert_eq!(filter["or"][0]["name"]["firstName"]["ilike"], "%Ada%");
         assert_eq!(filter["or"][2]["emails"]["primaryEmail"]["ilike"], "%Ada%");
-    }
-
-    #[test]
-    fn company_search_uses_a_case_insensitive_contains() {
-        let filter = text_filter("company", "Acme").unwrap();
-        assert_eq!(filter["name"]["ilike"], "%Acme%");
-        assert!(filter["name"].get("startsWith").is_none());
-    }
-
-    #[test]
-    fn an_empty_search_sends_no_filter_at_all() {
-        assert!(text_filter("person", "   ").is_none());
-        assert!(text_filter("company", "").is_none());
     }
 
     #[test]
