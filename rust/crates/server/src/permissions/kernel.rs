@@ -8,6 +8,7 @@ use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::flat::FlatFieldMetadata;
 use crate::metadata::flat::FlatObjectMetadata;
 
+use super::access_group::CompanyAccessStrategy;
 use super::context::PermissionsContext;
 use super::model::full_access_records_permissions;
 use super::model::ObjectRecordsOperationType;
@@ -451,7 +452,11 @@ pub fn compute_context_records_permissions(
     context: &PermissionsContext,
 ) -> RoleRecordsPermissions {
     if context.is_system {
-        return full_access_records_permissions(workspace.object_ids.iter().copied());
+        return attach_company_access(
+            full_access_records_permissions(workspace.object_ids.iter().copied()),
+            workspace,
+            context,
+        );
     }
     let mut main_role_ids = context.main_role_ids.clone();
     if main_role_ids.is_empty() {
@@ -465,7 +470,7 @@ pub fn compute_context_records_permissions(
     );
     main.relation_hop_enabled = workspace.relation_hop_enabled();
     if context.limiting_role_ids.is_empty() {
-        return main;
+        return attach_company_access(main, workspace, context);
     }
     let limiting_permissions = context
         .limiting_role_ids
@@ -478,6 +483,50 @@ pub fn compute_context_records_permissions(
         compute_permission_intersection(&limiting_permissions.iter().collect::<Vec<_>>());
     let mut permissions = compute_permission_intersection(&[&main, &limiting]);
     permissions.relation_hop_enabled = main.relation_hop_enabled;
+    attach_company_access(permissions, workspace, context)
+}
+
+fn attach_company_access(
+    mut permissions: RoleRecordsPermissions,
+    workspace: &WorkspacePermissionSet,
+    context: &PermissionsContext,
+) -> RoleRecordsPermissions {
+    let Some(company_object_id) = workspace.company_object_id else {
+        return permissions;
+    };
+    let mut main_role_ids = context.main_role_ids.clone();
+    if main_role_ids.is_empty() && !context.is_system {
+        main_role_ids = context.role_ids().into_iter().collect();
+    }
+    let role_permissions = main_role_ids
+        .iter()
+        .filter_map(|role_id| workspace.role(*role_id))
+        .filter_map(|role| role.object(company_object_id).cloned())
+        .collect();
+    permissions.company_access = Some(CompanyAccessStrategy {
+        workspace_id: context.workspace_id.unwrap_or_default(),
+        company_object_id,
+        principal_kind: context.principal_kind,
+        workspace_member_id: context.workspace_member_id,
+        role_permissions,
+        enabled: workspace
+            .feature_flags
+            .get("IS_ACCESS_GROUPS_ENABLED")
+            .copied()
+            .unwrap_or(false),
+        relation_hop_enabled: workspace.relation_hop_enabled(),
+        overlays_enabled: workspace
+            .feature_flags
+            .get("IS_PRIVATE_RECORDS_ENABLED")
+            .copied()
+            .unwrap_or(false)
+            || workspace
+                .feature_flags
+                .get("IS_RECORD_LEVEL_SHARING_ENABLED")
+                .copied()
+                .unwrap_or(false),
+        limiting_roles: !context.limiting_role_ids.is_empty(),
+    });
     permissions
 }
 

@@ -49,6 +49,7 @@ pub async fn load_nested_relations(
             crate::permissions::ObjectRecordsOperationType::Read,
             &child_alias,
             &mut suffixes,
+            true,
         )
         .await?;
         let access_sql = access

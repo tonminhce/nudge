@@ -559,6 +559,9 @@ async fn add_user_to_workspace(
     .execute(&state.core_pool)
     .await?;
 
+    crate::metadata::cache::invalidate_workspace_maps(state, workspace_id).await;
+    crate::metadata::cache::rebuild_access_groups_after_invalidation(state, workspace_id).await;
+
     invalidate_workspace_invitation(state, workspace_id, user_email).await?;
 
     Ok(user_workspace_id.0)

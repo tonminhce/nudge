@@ -150,6 +150,23 @@ pub fn migration_is_schema_affecting(migration: &WorkspaceMigration) -> bool {
         .any(|action| is_schema_affecting(action.metadata_name()))
 }
 
+pub(crate) fn migration_affects_access_groups(migration: &WorkspaceMigration) -> bool {
+    migration.actions.iter().any(|action| {
+        matches!(
+            action.metadata_name(),
+            MetadataName::ObjectMetadata
+                | MetadataName::FieldMetadata
+                | MetadataName::Role
+                | MetadataName::RoleTarget
+                | MetadataName::ObjectPermission
+                | MetadataName::FieldPermission
+                | MetadataName::RowLevelPermissionRule
+                | MetadataName::RowLevelPermissionPredicate
+                | MetadataName::RowLevelPermissionPredicateGroup
+        )
+    })
+}
+
 pub struct RunnerInput<'a> {
     pub workspace_id: Uuid,
     pub migration: &'a WorkspaceMigration,
@@ -302,6 +319,10 @@ pub async fn run_workspace_migration(
     transaction.commit().await?;
 
     crate::metadata::cache::invalidate_workspace_maps(state, input.workspace_id).await;
+    if migration_affects_access_groups(input.migration) {
+        crate::metadata::cache::rebuild_access_groups_after_invalidation(state, input.workspace_id)
+            .await;
+    }
 
     let metadata_version = if schema_affecting {
         Some(bump_metadata_version(&state.core_pool, input.workspace_id).await?)

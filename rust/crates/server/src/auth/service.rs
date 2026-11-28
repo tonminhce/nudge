@@ -287,6 +287,9 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
         }
     }
 
+    crate::metadata::cache::invalidate_workspace_maps(state, workspace_id).await;
+    crate::metadata::cache::rebuild_access_groups_after_invalidation(state, workspace_id).await;
+
     let issued =
         tokens::issue_token_pair(state, user_id.0, workspace_id, AuthProvider::Password).await?;
 

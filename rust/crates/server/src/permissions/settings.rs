@@ -42,7 +42,7 @@ pub async fn user_workspace_permissions_for_auth(
     state: &AppState,
     auth: &AuthContext,
 ) -> Result<Option<Value>, PermissionError> {
-    let Some((context, workspace)) = load_context_and_set(state, auth).await? else {
+    let Some((context, workspace, _)) = load_context_and_set(state, auth).await? else {
         return Ok(None);
     };
     Ok(Some(user_workspace_permissions(&workspace, &context)))
@@ -52,19 +52,19 @@ pub async fn records_permissions_for_auth(
     state: &AppState,
     auth: &AuthContext,
 ) -> Result<Option<RoleRecordsPermissions>, PermissionError> {
-    let Some((context, workspace)) = load_context_and_set(state, auth).await? else {
+    let Some((context, workspace, maps)) = load_context_and_set(state, auth).await? else {
         return Ok(None);
     };
-    Ok(Some(compute_context_records_permissions(
-        &workspace, &context,
-    )))
+    let mut permissions = compute_context_records_permissions(&workspace, &context);
+    super::access_group::prepare_company_read(state, &maps, &mut permissions).await?;
+    Ok(Some(permissions))
 }
 
 pub async fn current_user_workspace_permissions_for_auth(
     state: &AppState,
     auth: &AuthContext,
 ) -> Result<Option<Value>, PermissionError> {
-    let Some((context, workspace)) = load_context_and_set(state, auth).await? else {
+    let Some((context, workspace, _)) = load_context_and_set(state, auth).await? else {
         return Ok(None);
     };
     Ok(Some(current_user_workspace_permissions(
@@ -77,7 +77,14 @@ pub async fn current_user_workspace_permissions_for_auth(
 async fn load_context_and_set(
     state: &AppState,
     auth: &AuthContext,
-) -> Result<Option<(PermissionsContext, WorkspacePermissionSet)>, PermissionError> {
+) -> Result<
+    Option<(
+        PermissionsContext,
+        WorkspacePermissionSet,
+        crate::metadata::flat::FlatWorkspaceMaps,
+    )>,
+    PermissionError,
+> {
     let Some(workspace_id) = auth.workspace_id else {
         return Ok(None);
     };
@@ -108,7 +115,7 @@ async fn load_context_and_set(
         &state.permission_cache,
     )
     .await?;
-    Ok(Some((context, workspace)))
+    Ok(Some((context, workspace, maps)))
 }
 
 pub fn user_workspace_permissions(

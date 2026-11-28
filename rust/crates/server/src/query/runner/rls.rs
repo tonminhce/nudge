@@ -42,6 +42,26 @@ pub async fn row_access_filter(
         operation,
         object_name_singular,
         suffixes,
+        true,
+    )
+    .await
+}
+
+pub async fn row_write_access_filter(
+    pool: &PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    operation: ObjectRecordsOperationType,
+    suffixes: &mut Suffixes,
+) -> Result<Option<CompiledFilter>, RunnerError> {
+    row_access_filter_with_alias(
+        pool,
+        schema,
+        object_name_singular,
+        operation,
+        object_name_singular,
+        suffixes,
+        false,
     )
     .await
 }
@@ -53,7 +73,38 @@ pub(super) async fn row_access_filter_with_alias(
     operation: ObjectRecordsOperationType,
     alias: &str,
     suffixes: &mut Suffixes,
+    allow_company_access_groups: bool,
 ) -> Result<Option<CompiledFilter>, RunnerError> {
+    let model = schema.object(object_name_singular)?;
+    if operation == ObjectRecordsOperationType::Read && model.object.name_singular == "company" {
+        if schema.denies_company_overlays(object_name_singular) {
+            return Ok(Some(unsatisfiable_filter()));
+        }
+        let all_records = schema
+            .records_permissions()
+            .and_then(|permissions| permissions.object(model.object.id))
+            .is_some_and(|object| object.can_read_all_records);
+        if !all_records && allow_company_access_groups {
+            if let Some(compact_ids) = schema.company_access_group_ids() {
+                let ids = compact_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Ok(Some(CompiledFilter {
+                    clauses: vec![WhereClause::sql(
+                        JoinOp::And,
+                        format!(
+                            "{}.{} && CAST(ARRAY[{ids}] AS integer[])",
+                            quote_identifier(alias)?,
+                            quote_identifier("_accessGroupIds")?
+                        ),
+                    )],
+                    params: Vec::new(),
+                }));
+            }
+        }
+    }
     let mut compiler = AccessCompiler {
         pool,
         schema,
@@ -564,6 +615,59 @@ pub fn requires_row_access(
             .any(|rule| rule_allows(rule, operation)))
 }
 
+pub(crate) fn row_level_rule_supported(
+    schema: &RunnerSchema,
+    object_name: &str,
+    rule: &RowLevelRecordsPermissions,
+) -> bool {
+    let Ok(model) = schema.object(object_name) else {
+        return false;
+    };
+    rule.predicates.iter().all(|predicate| {
+        if optional_uuid(predicate, "relationFieldMetadataId").is_ok_and(|value| value.is_some())
+            || optional_uuid(predicate, "workspaceMemberRelationFieldMetadataId")
+                .is_ok_and(|value| value.is_some())
+        {
+            return false;
+        }
+        let (Ok(field_id), Ok(operand)) = (
+            required_uuid(predicate, "fieldMetadataId"),
+            required_string(predicate, "operand"),
+        ) else {
+            return false;
+        };
+        let sub_field = optional_string(predicate, "subFieldName");
+        if optional_uuid(predicate, "workspaceMemberFieldMetadataId")
+            .is_ok_and(|value| value.is_some())
+            && matches!(operand, "IS_EMPTY" | "IS_NOT_EMPTY")
+        {
+            return false;
+        }
+        schema.field_metadata(field_id).is_some_and(|field| {
+            field.object_metadata_id == model.object.id
+                && operand_supported(field.field_type, operand, sub_field.as_deref())
+        })
+    })
+}
+
+pub(crate) async fn compile_access_group_rule(
+    pool: &PgPool,
+    schema: &RunnerSchema,
+    object_name: &str,
+    rule: &RowLevelRecordsPermissions,
+    alias: &str,
+    suffixes: &mut Suffixes,
+) -> Result<CompiledFilter, RunnerError> {
+    let mut compiler = AccessCompiler {
+        pool,
+        schema,
+        suffixes,
+        member_values: HashMap::new(),
+        relation_stack: HashSet::new(),
+    };
+    compiler.compile_rule(object_name, alias, rule).await
+}
+
 pub async fn validate_created_rows<'e, E>(
     executor: E,
     pool: &PgPool,
@@ -574,7 +678,7 @@ pub async fn validate_created_rows<'e, E>(
 where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
-    let Some(access) = row_access_filter(
+    let Some(access) = row_write_access_filter(
         pool,
         schema,
         object_name_singular,

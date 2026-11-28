@@ -21,7 +21,7 @@ use super::base::ObjectModel;
 use super::base::RunnerSchema;
 use super::permissions::validate_filter_read;
 use super::permissions::validate_write;
-use super::rls::row_access_filter;
+use super::rls::row_write_access_filter;
 use super::rls::validate_updated_rows;
 use super::RunnerError;
 
@@ -123,7 +123,7 @@ pub async fn run_mutation(
         &data,
         &returning_columns,
     )?;
-    let access = row_access_filter(
+    let access = row_write_access_filter(
         pool,
         schema,
         object_name_singular,
@@ -144,12 +144,24 @@ pub async fn run_mutation(
         parameter_map.extend(access.params);
     }
     let validate_update = update_access.is_some();
+    let recompute_access_groups = schema.requires_access_group_recompute(object_name_singular);
     let mut returning_columns = returning_columns;
-    if validate_update && !return_id {
+    if (validate_update || recompute_access_groups) && !return_id {
         returning_columns.push(String::from("id"));
     }
-    let mut transaction = if validate_update {
-        Some(pool.begin().await.map_err(RunnerError::database)?)
+    let mut transaction = if validate_update || recompute_access_groups {
+        let mut transaction = pool.begin().await.map_err(RunnerError::database)?;
+        if recompute_access_groups {
+            crate::permissions::access_group::lock_company_access_groups(
+                &mut transaction,
+                schema,
+            )
+            .await
+            .map_err(|error| {
+                RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
+            })?;
+        }
+        Some(transaction)
     } else {
         None
     };
@@ -252,14 +264,29 @@ pub async fn run_mutation(
             .map(|row| row.try_get::<Uuid, _>(id_alias.as_str()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(RunnerError::database)?;
-        validate_updated_rows(
-            &mut *transaction,
-            schema,
-            object_name_singular,
-            &ids,
-            update_access.as_ref().expect("update access"),
-        )
-        .await?;
+        if validate_update {
+            validate_updated_rows(
+                &mut *transaction,
+                schema,
+                object_name_singular,
+                &ids,
+                update_access.as_ref().expect("update access"),
+            )
+            .await?;
+        }
+        if recompute_access_groups {
+            crate::permissions::access_group::recompute_after_write(
+                pool,
+                &mut *transaction,
+                schema,
+                object_name_singular,
+                &ids,
+            )
+            .await
+            .map_err(|error| {
+                RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
+            })?;
+        }
         transaction.commit().await.map_err(RunnerError::database)?;
         rows
     } else {
@@ -272,7 +299,10 @@ pub async fn run_mutation(
         let mut record = Map::new();
 
         for column in row.columns() {
-            if validate_update && !return_id && column.name() == id_alias {
+            if (validate_update || recompute_access_groups)
+                && !return_id
+                && column.name() == id_alias
+            {
                 continue;
             }
             let value = super::base::json_cell(&row, column.name())?;

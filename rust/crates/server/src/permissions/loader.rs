@@ -180,8 +180,18 @@ pub async fn load_workspace_permission_set(
     Ok(permission_set)
 }
 
-async fn load_permission_set(
+pub(crate) async fn load_permission_set(
     pool: &PgPool,
+    workspace_id: Uuid,
+    objects: &[FlatObjectMetadata],
+    fields: &[FlatFieldMetadata],
+) -> Result<WorkspacePermissionSet, PermissionError> {
+    let mut connection = pool.acquire().await.map_err(database_error)?;
+    load_permission_set_with_executor(&mut connection, workspace_id, objects, fields).await
+}
+
+pub(crate) async fn load_permission_set_with_executor(
+    connection: &mut sqlx::PgConnection,
     workspace_id: Uuid,
     objects: &[FlatObjectMetadata],
     fields: &[FlatFieldMetadata],
@@ -194,7 +204,7 @@ async fn load_permission_set(
          FROM core.role WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(database_error)?;
     let mut roles = role_rows
@@ -224,7 +234,7 @@ async fn load_permission_set(
          FROM core.\"objectPermission\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(database_error)?;
     for row in object_rows {
@@ -252,7 +262,7 @@ async fn load_permission_set(
               OR \"rowLevelPermissionPredicateGroupId\" IS NULL)",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(database_error)?;
     for row in field_rows {
@@ -274,7 +284,7 @@ async fn load_permission_set(
          FROM core.\"rowLevelPermissionRule\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(database_error)?;
     for row in rule_rows {
@@ -304,7 +314,7 @@ async fn load_permission_set(
          WHERE \"workspaceId\" = $1 AND \"deletedAt\" IS NULL",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(database_error)?;
     for row in predicate_rows {
@@ -343,7 +353,7 @@ async fn load_permission_set(
          WHERE \"workspaceId\" = $1 AND \"deletedAt\" IS NULL",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(database_error)?;
     for row in predicate_group_rows {
@@ -375,7 +385,7 @@ async fn load_permission_set(
          WHERE rpf.\"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(database_error)?;
     for row in flag_rows {
@@ -387,7 +397,7 @@ async fn load_permission_set(
     let feature_flag_rows: Vec<FeatureFlagRow> =
         sqlx::query_as("SELECT key, value FROM core.\"featureFlag\" WHERE \"workspaceId\" = $1")
             .bind(workspace_id)
-            .fetch_all(pool)
+            .fetch_all(&mut *connection)
             .await
             .map_err(database_error)?;
     let feature_flags = feature_flag_rows
@@ -398,7 +408,7 @@ async fn load_permission_set(
     let object_order_rows: Vec<ObjectOrderRow> =
         sqlx::query_as("SELECT id FROM core.\"objectMetadata\" WHERE \"workspaceId\" = $1")
             .bind(workspace_id)
-            .fetch_all(pool)
+            .fetch_all(&mut *connection)
             .await
             .map_err(database_error)?;
 
@@ -417,6 +427,10 @@ async fn load_permission_set(
         object_ids: objects.iter().map(|object| object.id).collect(),
         object_order: object_order_rows.into_iter().map(|row| row.id).collect(),
         feature_flags,
+        company_object_id: objects
+            .iter()
+            .find(|object| object.name_singular == "company" && object.is_active)
+            .map(|object| object.id),
     })
 }
 

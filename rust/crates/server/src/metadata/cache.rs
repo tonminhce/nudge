@@ -206,6 +206,35 @@ pub async fn invalidate_workspace_maps(state: &crate::state::AppState, workspace
         .await;
 }
 
+pub async fn rebuild_access_groups_after_invalidation(
+    state: &crate::state::AppState,
+    workspace_id: Uuid,
+) {
+    match crate::permissions::access_group::rebuild_company_access_groups(
+        &state.core_pool,
+        workspace_id,
+    )
+    .await
+    {
+        Ok(crate::permissions::access_group::RebuildOutcome::Materialized(outcome)) => {
+            tracing::debug!(
+                workspace_id = %workspace_id,
+                group_count = outcome.group_count,
+                updated_record_count = outcome.updated_record_count,
+                "company access groups materialized"
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(
+                workspace_id = %workspace_id,
+                error = %error,
+                "company access group rebuild failed; reads will use live RLS"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
