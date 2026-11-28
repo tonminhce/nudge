@@ -693,31 +693,6 @@ pub fn composite_column(
     ))
 }
 
-pub fn replace_placeholder(sql: &str, parameter: &str, replacement: &str) -> String {
-    let characters: Vec<char> = sql.chars().collect();
-    let needle: Vec<char> = parameter.chars().collect();
-    let mut output = String::with_capacity(sql.len());
-    let mut index = 0;
-
-    while index < characters.len() {
-        let at_boundary = characters[index..].starts_with(needle.as_slice())
-            && !characters
-                .get(index + needle.len())
-                .is_some_and(char::is_ascii_digit);
-
-        if at_boundary {
-            output.push_str(replacement);
-            index += needle.len();
-            continue;
-        }
-
-        output.push(characters[index]);
-        index += 1;
-    }
-
-    output
-}
-
 pub fn lowercase_first(value: &str) -> String {
     let mut characters = value.chars();
     match characters.next() {
@@ -870,53 +845,4 @@ pub fn validate_complexity(
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::replace_placeholder;
-
-    #[test]
-    fn a_short_placeholder_never_rewrites_the_head_of_a_longer_one() {
-        let sql = "insert into t (a, b) values ($1, $2), ($19, $20), ($21, $2)";
-        let cast = replace_placeholder(sql, "$2", "$2::uuid");
-
-        assert_eq!(
-            cast,
-            "insert into t (a, b) values ($1, $2::uuid), ($19, $20), ($21, $2::uuid)"
-        );
-        assert!(!cast.contains("$2::uuid0"));
-        assert!(!cast.contains("$2::uuid9"));
-    }
-
-    #[test]
-    fn ordering_of_placeholder_passes_does_not_change_the_result() {
-        let sql = "select $2, $23, $234";
-        let uuid_first = replace_placeholder(
-            &replace_placeholder(sql, "$2", "$2::uuid"),
-            "$23",
-            "$23::text",
-        );
-        let wide_first = replace_placeholder(
-            &replace_placeholder(sql, "$23", "$23::text"),
-            "$2",
-            "$2::uuid",
-        );
-
-        assert_eq!(uuid_first, wide_first);
-        assert_eq!(uuid_first, "select $2::uuid, $23::text, $234");
-    }
-
-    #[test]
-    fn an_enum_cast_survives_a_multi_row_parameter_list() {
-        let sql = "values ($1, $2), ($3, $4), ($5, $6), ($7, $8), ($9, $10), ($11, $12)";
-        let cast = replace_placeholder(
-            sql,
-            "$1",
-            "$1::text::workspace_x.\"person_createdBySource\"",
-        );
-
-        assert!(cast.contains("$12"));
-        assert!(!cast.contains("$1::text::workspace_x.\"person_createdBySource\"2"));
-    }
 }

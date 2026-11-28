@@ -7,8 +7,8 @@ use crate::metadata::flat::FieldMetadataType;
 use crate::query::compile::compile_named_parameters;
 use crate::query::filter::Suffixes;
 use crate::query::repository::build_column_result_alias;
+use crate::query::repository::build_insert_execution;
 use crate::query::repository::build_insert_rows;
-use crate::query::repository::build_insert_statement;
 use crate::query::repository::quote_identifier;
 use crate::query::repository::table_shape::TableShape;
 use crate::query::repository::QUERY_MAX_RECORDS;
@@ -16,7 +16,6 @@ use crate::query::repository::QUERY_MAX_RECORDS;
 use super::actors::inject_actor_fields_on_create;
 use super::actors::ActorContext;
 use super::base::compile_runner_filter;
-use super::base::replace_placeholder;
 use super::base::resolve_where_clauses;
 use super::base::ObjectModel;
 use super::base::RunnerSchema;
@@ -271,50 +270,18 @@ where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
     let rows = build_insert_rows(shape, records).map_err(RunnerError::from_repository)?;
-    let sql = build_insert_statement(
-        shape,
-        &rows.column_names,
-        &rows.rows,
-        &["id".to_string()],
-        false,
-    )
-    .map_err(RunnerError::from_repository)?;
-    let compiled = compile_named_parameters(&sql, &rows.parameters)
+    let execution = build_insert_execution(shape, &rows, &["id".to_string()], false)
+        .map_err(RunnerError::from_repository)?;
+    let compiled = compile_named_parameters(&execution.sql, &rows.parameters)
         .map_err(|error| RunnerError::new(error.code(), error.message()))?;
-    let mut compiled_text = compiled.text;
 
-    for (parameter_index, column_name) in rows
-        .column_names
-        .iter()
-        .cycle()
-        .take(compiled.values.len())
-        .enumerate()
-    {
-        if matches!(column_name.as_str(), "createdBySource" | "updatedBySource") {
-            let enum_name =
-                crate::metadata::names::compute_postgres_enum_name(&shape.table_name, column_name);
-            let parameter = format!("${}", parameter_index + 1);
-            let cast = format!(
-                "{parameter}::text::{}.{}",
-                crate::query::repository::quote_identifier(&shape.schema_name)?,
-                crate::query::repository::quote_identifier(&enum_name)?
-            );
-            compiled_text = replace_placeholder(&compiled_text, &parameter, &cast);
-        } else if column_name.ends_with("WorkspaceMemberId") {
-            let parameter = format!("${}", parameter_index + 1);
-            compiled_text =
-                replace_placeholder(&compiled_text, &parameter, &format!("{parameter}::uuid"));
-        }
+    if compiled.values.len() != execution.columns.len() {
+        return Err(RunnerError::invalid_parameter());
     }
 
-    let compiled_statement = crate::query::compile::CompiledStatement {
-        text: compiled_text,
-        values: compiled.values,
-    };
-    let mut query = sqlx::query_scalar::<_, Uuid>(&compiled_statement.text);
+    let mut query = sqlx::query_scalar::<_, Uuid>(&compiled.text);
 
-    for (index, value) in compiled_statement.values.iter().enumerate() {
-        let column_name = &rows.column_names[index % rows.column_names.len()];
+    for (column_name, value) in execution.columns.iter().zip(compiled.values.iter()) {
         query = bind_insert_value(query, shape, column_name, value)?;
     }
 
