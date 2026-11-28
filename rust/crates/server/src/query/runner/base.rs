@@ -64,6 +64,7 @@ pub struct RunnerSchema {
     records_permissions: Option<crate::permissions::RoleRecordsPermissions>,
     mask_unreadable_fields: bool,
     workspace_member_id: Option<Uuid>,
+    user_workspace_id: Option<Uuid>,
 }
 
 impl RunnerSchema {
@@ -211,7 +212,13 @@ impl RunnerSchema {
             records_permissions,
             mask_unreadable_fields,
             workspace_member_id,
+            user_workspace_id: None,
         })
+    }
+
+    pub fn with_user_workspace_id(mut self, user_workspace_id: Option<Uuid>) -> Self {
+        self.user_workspace_id = user_workspace_id;
+        self
     }
 
     pub fn records_permissions(&self) -> Option<&crate::permissions::RoleRecordsPermissions> {
@@ -224,6 +231,10 @@ impl RunnerSchema {
 
     pub fn workspace_member_id(&self) -> Option<Uuid> {
         self.workspace_member_id
+    }
+
+    pub fn user_workspace_id(&self) -> Option<Uuid> {
+        self.user_workspace_id
     }
 
     pub(crate) fn company_access(

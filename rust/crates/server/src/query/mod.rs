@@ -7,6 +7,7 @@ pub mod filter;
 pub mod order;
 pub mod repository;
 pub mod runner;
+pub mod visibility;
 
 pub use runner::aggregate;
 pub use runner::create_many;
