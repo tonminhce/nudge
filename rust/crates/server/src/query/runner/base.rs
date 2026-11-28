@@ -892,8 +892,16 @@ mod tests {
     #[test]
     fn ordering_of_placeholder_passes_does_not_change_the_result() {
         let sql = "select $2, $23, $234";
-        let uuid_first = replace_placeholder(&replace_placeholder(sql, "$2", "$2::uuid"), "$23", "$23::text");
-        let wide_first = replace_placeholder(&replace_placeholder(sql, "$23", "$23::text"), "$2", "$2::uuid");
+        let uuid_first = replace_placeholder(
+            &replace_placeholder(sql, "$2", "$2::uuid"),
+            "$23",
+            "$23::text",
+        );
+        let wide_first = replace_placeholder(
+            &replace_placeholder(sql, "$23", "$23::text"),
+            "$2",
+            "$2::uuid",
+        );
 
         assert_eq!(uuid_first, wide_first);
         assert_eq!(uuid_first, "select $2::uuid, $23::text, $234");

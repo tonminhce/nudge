@@ -302,11 +302,8 @@ where
             compiled_text = replace_placeholder(&compiled_text, &parameter, &cast);
         } else if column_name.ends_with("WorkspaceMemberId") {
             let parameter = format!("${}", parameter_index + 1);
-            compiled_text = replace_placeholder(
-                &compiled_text,
-                &parameter,
-                &format!("{parameter}::uuid"),
-            );
+            compiled_text =
+                replace_placeholder(&compiled_text, &parameter, &format!("{parameter}::uuid"));
         }
     }
 
