@@ -21,7 +21,7 @@ def _load_parity_compare():
 pc = _load_parity_compare()
 
 DIFF_DEPTH = int(os.environ.get("PARITY_DIFF_DEPTH", "4"))
-DETAIL_WIDTH = int(os.environ.get("PARITY_DETAIL_WIDTH", "60"))
+DETAIL_WIDTH = int(os.environ.get("PARITY_DETAIL_WIDTH", "200"))
 _MISSING = object()
 
 
