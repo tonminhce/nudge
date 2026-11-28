@@ -541,7 +541,7 @@ async fn search_locale(
                 .await
                 .map_err(|error| GraphQlError::internal(error.to_string()))?;
         if let Some(locale) = locale.flatten() {
-            return Ok(locale);
+            return Ok(normalize_locale(Some(&locale)));
         }
     }
     Ok(normalize_locale(header_locale))

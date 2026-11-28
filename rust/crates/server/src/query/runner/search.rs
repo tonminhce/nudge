@@ -1,9 +1,12 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use base64::Engine;
 use regex::Regex;
 use serde_json::Map;
 use serde_json::Value;
+use sha2::Digest;
+use sha2::Sha256;
 
 use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::flat::FlatObjectMetadata;
@@ -29,6 +32,7 @@ use super::RunnerError;
 
 const OBJECT_METADATA_ITEMS_CHUNK_SIZE: usize = 5;
 const SEARCH_VECTOR_FIELD_NAME: &str = "searchVector";
+const SEARCH_OBJECT_LABEL_CATALOG: &str = include_str!("search_object_labels.json");
 const CHANNEL_VISIBILITY_OBJECTS: [&str; 10] = [
     "blocklist",
     "message",
@@ -97,7 +101,25 @@ fn effective_label_singular(object: &FlatObjectMetadata, locale: &str) -> String
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+        .or_else(|| standard_label_translation(&object.label_singular, locale).map(str::to_string))
         .unwrap_or_else(|| object.label_singular.clone())
+}
+
+fn standard_label_translation(label: &str, locale: &str) -> Option<&'static str> {
+    static CATALOG: OnceLock<Value> = OnceLock::new();
+    let catalog = CATALOG.get_or_init(|| {
+        serde_json::from_str(SEARCH_OBJECT_LABEL_CATALOG).expect("valid label catalog")
+    });
+    let message_id = object_label_message_id(label);
+    catalog.get(locale)?.get(message_id.as_str())?.as_str()
+}
+
+fn object_label_message_id(label: &str) -> String {
+    let mut hash = Sha256::new();
+    hash.update(label.as_bytes());
+    hash.update([0x1f]);
+    hash.update(b"objectMetadata.labelSingular");
+    base64::engine::general_purpose::STANDARD.encode(hash.finalize())[..6].to_string()
 }
 
 fn override_property_at_path<'a>(
@@ -1145,6 +1167,57 @@ mod tests {
         }));
         assert_eq!(effective_label_singular(&object, "vi-VN"), "Công ty");
         assert_eq!(effective_label_singular(&object, "en"), "Legacy Company");
+    }
+
+    #[test]
+    fn standard_label_catalog_matches_the_pinned_twenty_release() {
+        assert_eq!(object_label_message_id("Company"), "Jk7iDd");
+        assert_eq!(object_label_message_id("Person"), "n+OC6R");
+        assert_eq!(
+            standard_label_translation("Company", "fr-FR"),
+            Some("Entreprise")
+        );
+        assert_eq!(
+            standard_label_translation("Company", "vi-VN"),
+            Some("Công ty")
+        );
+        assert_ne!(
+            standard_label_translation("Company", "pseudo-en"),
+            Some("Company")
+        );
+        assert_eq!(standard_label_translation("Unknown label", "fr-FR"), None);
+
+        let catalog: Value =
+            serde_json::from_str(SEARCH_OBJECT_LABEL_CATALOG).expect("valid label catalog");
+        let locales = catalog.as_object().expect("locale catalog");
+        assert_eq!(locales.len(), 35);
+        assert!(locales.values().all(|entries| entries
+            .as_object()
+            .is_some_and(|entries| entries.len() == 39)));
+    }
+
+    #[test]
+    fn standard_labels_follow_authored_translation_and_rename_precedence() {
+        let mut object = FlatObjectMetadata {
+            label_singular: String::from("Company"),
+            application_universal_identifier: String::from("owner"),
+            overrides: Some(json!({"owner": {"labelSingular": ""}})),
+            ..Default::default()
+        };
+        assert_eq!(effective_label_singular(&object, "fr-FR"), "Entreprise");
+
+        object.overrides = Some(json!({"owner": {"labelSingular": "Custom Company"}}));
+        assert_eq!(effective_label_singular(&object, "fr-FR"), "Custom Company");
+
+        object.overrides = Some(json!({
+            "owner": {"translations": {"fr-FR": {"labelSingular": "Société"}}}
+        }));
+        assert_eq!(effective_label_singular(&object, "fr-FR"), "Société");
+
+        object.overrides = Some(json!({
+            "owner": {"translations": {"fr-FR": {"labelSingular": ""}}}
+        }));
+        assert_eq!(effective_label_singular(&object, "fr-FR"), "");
     }
 
     #[test]
