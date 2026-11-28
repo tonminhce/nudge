@@ -1,0 +1,49 @@
+{
+  "normalized": {
+    "reverse": {
+      "data": {
+        "companies": {
+          "edges": [
+            {
+              "node": {
+                "name": "Acme Corp",
+                "people": {
+                  "edges": [],
+                  "totalCount": 0
+                }
+              }
+            },
+            {
+              "node": {
+                "name": "Acme Corp",
+                "people": {
+                  "edges": [],
+                  "totalCount": 0
+                }
+              }
+            },
+            {
+              "node": {
+                "name": "Acme Corp",
+                "people": {
+                  "edges": [],
+                  "totalCount": 0
+                }
+              }
+            },
+            {
+              "node": {
+                "name": "Acme Corp",
+                "people": {
+                  "edges": [],
+                  "totalCount": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "scenario": "reverse-relation"
+}

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -19,12 +19,14 @@ use super::state_store::{
     pkce_code_challenge_s256, pkce_code_verifier, take_state, OidcStatePayload,
 };
 use super::{optional_query_string, redirect_response};
+use crate::secure_http::client::SecureHttpClient;
 use crate::state::AppState;
 
 const OIDC_SCOPE: &str = "openid email profile";
 const PREFERRED_ID_TOKEN_SIGNING_ALGORITHM: &str = "RS256";
 const DISCOVERY_CACHE_TTL_SECS: u64 = 600;
 const JWKS_CACHE_TTL_SECS: u64 = 600;
+const ENDPOINT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveryDocument {
@@ -170,11 +172,8 @@ fn jwks_cache() -> &'static Mutex<HashMap<String, (Instant, JsonWebKeySet)>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-async fn http_client() -> AuthResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|error| AuthError::internal(error.to_string()))
+async fn http_client() -> AuthResult<Arc<SecureHttpClient>> {
+    SecureHttpClient::shared().map_err(|error| AuthError::internal(error.message()))
 }
 
 async fn fetch_discovery_document(issuer: &str) -> AuthResult<DiscoveryDocument> {
@@ -194,6 +193,7 @@ async fn fetch_discovery_document(issuer: &str) -> AuthResult<DiscoveryDocument>
     let response = http_client()
         .await?
         .get(&url)
+        .timeout(ENDPOINT_TIMEOUT)
         .send()
         .await
         .map_err(|error| idp_issuer_invalid_error(&format!("Invalid issuer: {}", error)))?;
@@ -244,6 +244,7 @@ async fn fetch_jwks(jwks_uri: &str) -> AuthResult<JsonWebKeySet> {
     let response = http_client()
         .await?
         .get(jwks_uri)
+        .timeout(ENDPOINT_TIMEOUT)
         .send()
         .await
         .map_err(|error| AuthError::internal(error.to_string()))?;
@@ -410,7 +411,7 @@ async fn load_oidc_identity_provider(
     let id = Uuid::parse_str(identity_provider_id).map_err(|_| idp_not_found_error())?;
 
     let row: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
-        "SELECT issuer, \"clientID\", \"clientSecret\", type \
+        "SELECT issuer, \"clientID\", \"clientSecret\", type::text \
          FROM core.\"workspaceSSOIdentityProvider\" WHERE id = $1",
     )
     .bind(id)
@@ -613,18 +614,22 @@ async fn exchange_code_for_tokens(
         })
         .unwrap_or(true);
 
-    let mut request = http_client().await?.post(&discovery.token_endpoint).form(&[
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", callback_url(state).as_str()),
-        ("code_verifier", code_verifier),
-        ("client_id", identity_provider.client_id.as_str()),
-    ]);
+    let client = http_client().await?;
+    let mut request = client
+        .post(&discovery.token_endpoint)
+        .timeout(ENDPOINT_TIMEOUT)
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", callback_url(state).as_str()),
+            ("code_verifier", code_verifier),
+            ("client_id", identity_provider.client_id.as_str()),
+        ]);
 
     if use_basic_auth {
         request = request.basic_auth(
             &identity_provider.client_id,
-            Some(&identity_provider.client_secret),
+            &identity_provider.client_secret,
         );
     } else {
         request = request.form(&[("client_secret", identity_provider.client_secret.as_str())]);
@@ -661,7 +666,8 @@ async fn fetch_user_info(userinfo_endpoint: &str, access_token: &str) -> AuthRes
     let response = http_client()
         .await?
         .get(userinfo_endpoint)
-        .header("Authorization", format!("Bearer {access_token}"))
+        .timeout(ENDPOINT_TIMEOUT)
+        .bearer_auth(access_token)
         .send()
         .await
         .map_err(|error| AuthError::internal(error.to_string()))?;
@@ -683,6 +689,54 @@ async fn fetch_user_info(userinfo_endpoint: &str, access_token: &str) -> AuthRes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn discovery_refuses_an_issuer_on_the_loopback_interface() {
+        let error = fetch_discovery_document("http://127.0.0.1:9456")
+            .await
+            .expect_err("a private issuer cannot be discovered");
+
+        assert_eq!(error.code, "INVALID_ISSUER_URL");
+        assert_eq!(
+            error.messages,
+            vec![
+                "Invalid issuer: Request to internal IP address 127.0.0.1 is not allowed."
+                    .to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_refuses_a_hostname_resolving_into_the_blocked_ranges() {
+        let error = fetch_discovery_document("http://localhost:9456")
+            .await
+            .expect_err("a hostname answer inside the ranges is refused");
+
+        assert_eq!(error.code, "INVALID_ISSUER_URL");
+        assert!(
+            error.messages[0].starts_with("Invalid issuer: Connection to internal IP address ")
+                && error.messages[0].ends_with(" is not allowed."),
+            "{:?}",
+            error.messages
+        );
+    }
+
+    #[tokio::test]
+    async fn jwks_and_userinfo_endpoints_refuse_private_addresses() {
+        let jwks_error = fetch_jwks("http://169.254.169.254/latest/jwks")
+            .await
+            .expect_err("the metadata address stays closed for jwks");
+
+        assert_eq!(
+            jwks_error.messages[0],
+            "Request to internal IP address 169.254.169.254 is not allowed."
+        );
+        assert!(fetch_user_info("http://192.168.7.9/userinfo", "token")
+            .await
+            .expect_err("a private userinfo endpoint is refused")
+            .messages[0]
+            .contains("internal IP address 192.168.7.9 is not allowed"));
+    }
 
     const DISCOVERY_FIXTURE: &str = r#"{
         "issuer": "https://idp.example.com",
