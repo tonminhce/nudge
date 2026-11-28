@@ -74,47 +74,74 @@ const scenarios = {
   },
   password: {
     route: '/welcome',
-    prepare: async (tab) => {
-      await tab.clickText('Forgot your password');
-      await tab.settle(900);
+    email: 'parity-1795757388@nudge.test',
+    prepare: async (tab, context) => {
+      await tab.fill('input[autocomplete="email"]', context.email);
+      await tab.click('button[type="submit"]');
+      await tab.wait('Boolean(document.querySelector("input[type=password]"))', 12000);
+      await tab.settle(700);
     },
-    ignoreSelectors: [...ATTR_IGNORES, 'selectors.*.svg.markup.innerHTML', 'selectors.*.attributes.href'],
-    textSelectors: ['badgeFallback', 'headingText', 'hint'],
+    ignoreSelectors: [...ATTR_IGNORES, 'selectors.*.svg.markup.innerHTML', 'selectors.*.attributes.placeholder', 'selectors.*.attributes.aria-describedby', 'selectors.*.attributes.type'],
+    textSelectors: ['headingText', 'badgeGlyph', 'hint'],
     reference: {
       layout: '.swdi819',
       headingText: '.sfyinng > div > div',
       form: 'form',
       email: 'input[autocomplete="email"]',
+      passwordWrap: '.s1773qnc',
+      password: 'input[type="password"]',
       submit: 'button[type="submit"]',
-      back: 'form button:not([type="submit"])',
+      forgot: 'form + button',
     },
     nudge: {
       layout: '.auth-card',
       headingText: '.auth-heading-text',
       form: '.auth-form',
-      email: '.auth-input',
+      email: '.auth-field .auth-input',
+      passwordWrap: '.auth-password',
+      password: 'input[type="password"]',
       submit: '.auth-submit',
-      back: '.auth-forgot',
+      forgot: '.auth-forgot',
     },
   },
   toast: {
     route: '/welcome',
-    prepare: async (tab) => {
-      await tab.fill('input[autocomplete="email"]', 'parity@nudge.test');
+    email: 'parity-1795757388@nudge.test',
+    prepare: async (tab, context) => {
+      await tab.fill('input[autocomplete="email"]', context.email);
       await tab.click('button[type="submit"]');
-      await tab.wait('Boolean(document.querySelector("[class*=toast], [role=status], [role=alert]"))', 9000);
+      await tab.wait('Boolean(document.querySelector("input[type=password]"))', 12000);
+      await tab.clickText('Forgot your password');
+      await tab.wait('Boolean(document.querySelector("[class*=toast], [role=status]"))', 12000);
     },
-    ignoreSelectors: [...ATTR_IGNORES, 'selectors.*.svg.markup.innerHTML', 'selectors.*.animationName'],
-    textSelectors: ['message', 'heading'],
+    settleMs: 250,
+    ignoreSelectors: [...ATTR_IGNORES, 'selectors.*.svg.markup.innerHTML', 'selectors.*.animationName', 'selectors.*.animationDuration'],
+    textSelectors: [],
     reference: {
-      toast: '[class*="toast"], [role="status"]',
-      icon: '[class*="toast"] svg, [role="status"] svg',
-      close: '[class*="toast"] button, [role="status"] button',
+      viewport: 'body > div[class*="1q2cc_"]',
+      item: '[class^="_item_1q2cc"]',
+      content: '[class^="_itemContent_1q2cc"]',
+      toast: '#toast-1',
+      progress: '[class^="_progress_181ka"]',
+      countdown: '[class^="_countdown_"]',
+      header: '[class^="_header_181ka"]',
+      icon: '[class^="_icon_181ka"]',
+      message: '[class^="_message_181ka"]',
+      actions: '[class^="_actions_181ka"]',
+      close: '[class*="closeButton"]',
     },
     nudge: {
-      toast: '[class*="toast"], [role="status"]',
-      icon: '[class*="toast"] svg, [role="status"] svg',
-      close: '[class*="toast"] button, [role="status"] button',
+      viewport: '.t-toast-viewport',
+      item: '.t-toast-item',
+      content: '.t-toast-item-content',
+      toast: '.t-toast',
+      progress: '.t-toast-progress',
+      countdown: '.t-toast-countdown',
+      header: '.t-toast-header',
+      icon: '.t-toast-icon',
+      message: '.t-toast-message',
+      actions: '.t-toast-actions',
+      close: '.t-toast-dismiss',
     },
   },
   'welcome-common': {
@@ -161,11 +188,7 @@ function ignoresFor(scenario) {
   const keys = Object.keys(scenario.nudge);
   const names = ['document.title', 'document.url', 'document.bodyBackground', 'document.bodyFont'];
   for (const suffix of scenario.ignoreSelectors ?? []) {
-    if (!suffix.includes('*')) {
-      names.push(suffix);
-      continue;
-    }
-    const tail = suffix.split('.').pop();
+    const tail = suffix.replace(/^selectors\.\*\./, '').replace(/^\*\./, '');
     for (const key of keys) names.push(`selectors.${key}.${tail}`);
   }
   for (const key of scenario.textSelectors ?? []) names.push(`selectors.${key}.text`);
@@ -180,9 +203,12 @@ async function runScenario(name, scenario, options) {
     sessions.push(session);
     await session.goto(base + scenario.route);
     await session.wait('Boolean(document.querySelector("form"))', 30000);
+    if (surface === 'nudge') {
+      await session.storage({ 'nudge.serverUrl': NUDGE });
+    }
     await session.settle(1200);
     if (scenario.prepare) {
-      await scenario.prepare(session);
+      await scenario.prepare(session, scenario);
     }
     if (options.outline) {
       console.log(`\n===== ${name} / ${surface} outline =====`);
