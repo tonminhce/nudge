@@ -560,9 +560,11 @@ fn dedup_preserving_order(values: &mut Vec<String>) {
 mod tests {
     use super::super::model::FieldPermissionDefinition;
     use super::super::model::PermissionPrincipalKind;
+    use super::super::model::RecordsAccessSource;
     use super::super::model::RowLevelPermissionPredicateDefinition;
     use super::super::model::RowLevelPermissionPredicateGroupDefinition;
     use super::super::model::RowLevelPermissionRuleDefinition;
+    use super::super::validate::assert_operation_allowed;
     use super::*;
     use serde_json::json;
 
@@ -1274,6 +1276,152 @@ mod tests {
         assert_eq!(
             rule.uneditable_fields,
             vec![label_field_id.to_string(), update_only_field_id.to_string()]
+        );
+    }
+
+    fn context_with_roles(
+        main_role_ids: Vec<Uuid>,
+        limiting_role_ids: Vec<Uuid>,
+    ) -> PermissionsContext {
+        PermissionsContext {
+            workspace_id: Some(Uuid::new_v4()),
+            principal_kind: PermissionPrincipalKind::WorkspaceMember,
+            user_id: None,
+            user_workspace_id: None,
+            workspace_member_id: None,
+            api_key_id: None,
+            agent_id: None,
+            application_id: None,
+            main_role_ids,
+            limiting_role_ids,
+            is_system: false,
+        }
+    }
+
+    #[test]
+    fn an_all_records_main_role_reads_the_collection_unfiltered_despite_a_rule() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let mut definition = role_with_read_rule(role_id, object_id, Uuid::new_v4());
+        definition.can_read_all_object_records = true;
+        let permissions = compute_role_records_permissions(
+            &definition,
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let object = permissions.object(object_id).expect("company entry");
+        assert_eq!(
+            object.access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::AllRecords
+        );
+        assert!(object.operation_allowed(ObjectRecordsOperationType::Read));
+    }
+
+    #[test]
+    fn a_criteria_only_main_role_without_limiting_roles_keeps_the_filter() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let definition = role_with_read_rule(role_id, object_id, Uuid::new_v4());
+        let permissions = compute_role_records_permissions(
+            &definition,
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        assert_eq!(
+            permissions
+                .object(object_id)
+                .expect("company entry")
+                .access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::Criteria
+        );
+        assert!(assert_operation_allowed(
+            &permissions,
+            object_id,
+            ObjectRecordsOperationType::Read
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn criteria_rules_survive_the_all_records_boolean() {
+        let object_id = Uuid::new_v4();
+        let mut role = role_with_read_rule(Uuid::new_v4(), object_id, Uuid::new_v4());
+        role.can_read_all_object_records = true;
+        let permissions = compute_role_records_permissions(
+            &role,
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        let object_permissions = permissions.object(object_id).expect("company entry");
+        assert_eq!(
+            object_permissions
+                .row_level_records_permissions
+                .as_ref()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            object_permissions.access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::AllRecords
+        );
+    }
+
+    #[test]
+    fn a_criteria_only_limiting_role_denies_the_whole_collection_read() {
+        let object_id = Uuid::new_v4();
+        let main_role_id = Uuid::new_v4();
+        let limiting_role_id = Uuid::new_v4();
+        let mut main_definition = role_with_read_rule(main_role_id, object_id, Uuid::new_v4());
+        main_definition.can_read_all_object_records = true;
+        let limiting_definition = role_with_read_rule(limiting_role_id, object_id, Uuid::new_v4());
+        let workspace = WorkspacePermissionSet {
+            roles: [
+                (
+                    main_role_id,
+                    compute_role_records_permissions(
+                        &main_definition,
+                        &[object(object_id, "company", false)],
+                        &[],
+                        false,
+                        None,
+                    ),
+                ),
+                (
+                    limiting_role_id,
+                    compute_role_records_permissions(
+                        &limiting_definition,
+                        &[object(object_id, "company", false)],
+                        &[],
+                        false,
+                        None,
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let context = context_with_roles(vec![main_role_id], vec![limiting_role_id]);
+        let permissions = compute_context_records_permissions(&workspace, &context);
+        assert_eq!(
+            permissions
+                .object(object_id)
+                .expect("company entry")
+                .access_source(ObjectRecordsOperationType::Read),
+            RecordsAccessSource::Denied
+        );
+        let error =
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read)
+                .expect_err("limiting role narrows the collection read away");
+        assert_eq!(
+            error.message,
+            "Entity performing the request does not have permission"
         );
     }
 }
