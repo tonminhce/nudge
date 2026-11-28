@@ -22,6 +22,7 @@ pc = _load_parity_compare()
 
 DIFF_DEPTH = int(os.environ.get("PARITY_DIFF_DEPTH", "4"))
 DETAIL_WIDTH = int(os.environ.get("PARITY_DETAIL_WIDTH", "60"))
+_MISSING = object()
 
 
 def as_json(raw):
@@ -100,7 +101,19 @@ def seed_if_empty(client):
     return seeded
 
 
+SEEDED_PERSON_NAMES = ["Ivan", "Alice", "Bob"]
+
+
 def resolve_person_id(client):
+    for first in SEEDED_PERSON_NAMES:
+        _, body = client.gql(
+            "query($n: String) { people(filter: { name: { firstName: { eq: $n } } }, first: 1) "
+            "{ edges { node { id } } } }",
+            {"n": first},
+        )
+        edges = ((body.get("data") or {}).get("people") or {}).get("edges") or []
+        if edges:
+            return edges[0]["node"]["id"]
     _, body = client.gql("query { people(first: 1) { edges { node { id } } } }")
     edges = ((body.get("data") or {}).get("people") or {}).get("edges") or []
     if not edges:
@@ -109,6 +122,15 @@ def resolve_person_id(client):
 
 
 def resolve_company_name(client):
+    for name in SEED_COMPANIES:
+        _, body = client.gql(
+            "query($n: String) { companies(filter: { name: { eq: $n } }) "
+            "{ edges { node { name } } } }",
+            {"n": name},
+        )
+        edges = ((body.get("data") or {}).get("companies") or {}).get("edges") or []
+        if edges:
+            return name
     _, body = client.gql("query { companies(first: 1) { edges { node { name } } } }")
     edges = ((body.get("data") or {}).get("companies") or {}).get("edges") or []
     if not edges:
@@ -446,9 +468,38 @@ def is_gap(status, body):
     return "UNAUTHENTICATED" in codes and not (body.get("data") if isinstance(body, dict) else None)
 
 
+ABSENT_CODES = {
+    "GRAPHQL_VALIDATION_FAILED",
+    "GRAPHQL_PARSE_FAILED",
+    "FEATURE_NOT_SUPPORTED",
+    "METHOD_NOT_ALLOWED",
+    "NOT_FOUND",
+}
+
+ABSENT_MARKERS = ("Cannot ", "does not exist", "Unknown type", "Cannot query field")
+
+
+def missing_feature(body):
+    if not isinstance(body, dict):
+        return None
+    if body.get("statusCode") in (404, 501):
+        return "rest %s" % body["statusCode"]
+    for err in body.get("errors") or []:
+        ext = err.get("extensions") or {}
+        code = ext.get("code")
+        message = err.get("message") or ""
+        if code in ABSENT_CODES:
+            return code
+        if any(marker in message for marker in ABSENT_MARKERS):
+            return code or "unknown_field"
+    return None
+
+
 def compare_capture(node_val, rust_val, rust_reachable):
     if not rust_reachable:
         return "GAP", "record endpoint not implemented on Rust server"
+    if rust_val is _MISSING:
+        return "GAP", "Rust scenario never answered this capture"
     node_norm = pc.normalize_json(node_val)
     rust_norm = pc.normalize_json(rust_val)
     if node_norm == rust_norm:
@@ -460,6 +511,9 @@ def compare_capture(node_val, rust_val, rust_reachable):
     )
     if len(diffs) > DIFF_DEPTH:
         preview += "; +%d more" % (len(diffs) - DIFF_DEPTH)
+    hint = missing_feature(rust_val)
+    if hint:
+        preview = "[absent: %s] %s" % (hint, preview)
     return "DIFF", preview
 
 
@@ -562,6 +616,25 @@ def selftest():
     print("selftest iso + epoch normalizers -> %s" % pc.normalize_json(iso))
     mv = {"metadataVersion": 42}
     print("selftest metadataVersion normalizer -> %s" % pc.normalize_json(mv))
+    absent_body = {
+        "errors": [{"message": "Cannot query field \"company\" on type \"Person\"", "extensions": {"code": "GRAPHQL_VALIDATION_FAILED"}}]
+    }
+    other_body = {"errors": [{"message": "boom", "extensions": {"code": "INTERNAL"}}]}
+    print("selftest missing_feature validation error -> %s" % missing_feature(absent_body))
+    print("selftest missing_feature internal error -> %s" % missing_feature(other_body))
+    print("selftest missing_feature rest 404 -> %s" % missing_feature({"statusCode": 404, "message": "Cannot .."}))
+    if missing_feature(absent_body) != "GRAPHQL_VALIDATION_FAILED":
+        failures += 1
+    if missing_feature(other_body) is not None:
+        failures += 1
+    absent_diff = compare_capture({"data": {"x": 1}}, absent_body, True)
+    print("selftest absent diff keeps DIFF but hints -> %s" % absent_diff[0])
+    if absent_diff[0] != "DIFF" or not absent_diff[1].startswith("[absent:"):
+        failures += 1
+    unanswered = compare_capture({"data": {"x": 1}}, _MISSING, True)
+    print("selftest unanswered capture -> %s %s" % unanswered)
+    if unanswered[0] != "GAP":
+        failures += 1
     return 1 if failures else 0
 
 
@@ -624,24 +697,36 @@ def run(args):
     print("-" * 92)
     failures = 0
     gaps = 0
+    absent = 0
     for name, fn in scenarios:
         node_caps = run_node(node, name, fn)[0] if not args.offline else load_fixture(name)
         if node_caps is None:
             print(row % (name, "-", "ERROR", "no fixture; run without --offline first"))
             failures += 1
             continue
+        crash = None
         try:
             rust_caps = {} if not rust_reachable else fn(rust)
         except Exception as error:
-            rust_caps = {"__error__": str(error)}
-        for key in sorted(node_caps):
+            crash = "%s: %s" % (type(error).__name__, error)
+            rust_caps = {}
+        for key in sorted(set(node_caps) | set(rust_caps)):
             if not rust_reachable:
                 status, detail = "GAP", "record plane not implemented"
                 gaps += 1
+            elif crash:
+                status, detail = "ERROR", "rust scenario raised: %s" % crash
+            elif key not in rust_caps:
+                status, detail = "GAP", "rust never answered this capture"
+                gaps += 1
+            elif key not in node_caps:
+                status, detail = "DIFF", "rust-only capture: %s" % json.dumps(
+                    rust_caps[key]
+                )[:48]
             else:
-                status, detail = compare_capture(
-                    node_caps[key], rust_caps.get(key), True
-                )
+                status, detail = compare_capture(node_caps[key], rust_caps[key], True)
+            if status == "DIFF" and detail.startswith("[absent:"):
+                absent += 1
             if status in ("DIFF", "ERROR"):
                 failures += 1
             print(row % (name, key, status, detail[:DETAIL_WIDTH]))
@@ -649,6 +734,7 @@ def run(args):
     label = "Rust record plane reachable" if rust_reachable else "Rust record plane NOT reachable"
     print("\n%s | %d gaps | %d diffs" % (label, gaps, failures))
     print("GAP means the record plane never answered; DIFF means it answered differently from 2.61.0.")
+    print("%d of the diffs name a field, column or endpoint the Rust plane does not implement." % absent)
     return 1 if failures else 0
 
 
