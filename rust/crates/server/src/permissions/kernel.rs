@@ -1510,6 +1510,94 @@ mod tests {
             .object(object_id)
             .is_some_and(|object| object.can_read_some_records()));
     }
+
+    fn criteria_probe_role(
+        role_id: Uuid,
+        object_id: Uuid,
+        rule_id: Uuid,
+        can_read_records: bool,
+    ) -> RoleDefinition {
+        let mut role = role_with_read_rule(role_id, object_id, rule_id);
+        role.can_read_all_object_records = true;
+        role.row_level_permission_rules[0].can_read_records = can_read_records;
+        role.object_permissions.insert(
+            object_id,
+            ObjectPermissionDefinition {
+                object_metadata_id: object_id,
+                can_read_object_records: Some(false),
+                can_update_object_records: Some(false),
+                can_soft_delete_object_records: Some(false),
+                can_destroy_object_records: Some(false),
+                can_create_object_records: Some(false),
+            },
+        );
+        role
+    }
+
+    fn criteria_probe_permissions(
+        role_id: Uuid,
+        object_id: Uuid,
+        rule_id: Uuid,
+        can_read_records: bool,
+    ) -> RoleRecordsPermissions {
+        let permissions = compute_role_records_permissions(
+            &criteria_probe_role(role_id, object_id, rule_id, can_read_records),
+            &[object(object_id, "company", false)],
+            &[],
+            false,
+            None,
+        );
+        compute_context_records_permissions(
+            &workspace_with_roles(vec![(role_id, permissions)]),
+            &principal_context(vec![role_id], vec![]),
+        )
+    }
+
+    #[test]
+    fn a_criteria_rule_keeps_the_company_read_allowed_and_filtered() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let rule_id = Uuid::new_v4();
+        let permissions = criteria_probe_permissions(role_id, object_id, rule_id, true);
+        let object = permissions
+            .object(object_id)
+            .expect("company entry with criteria");
+        assert!(!object.can_read_all_records);
+        assert_eq!(
+            object
+                .row_level_records_permissions
+                .as_ref()
+                .expect("criteria attached")
+                .len(),
+            1
+        );
+        assert!(object.can_read_some_records());
+        assert!(matches!(
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read),
+            Ok(())
+        ));
+    }
+
+    #[test]
+    fn the_same_role_without_a_readable_rule_denies_the_company_read() {
+        let object_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        let rule_id = Uuid::new_v4();
+        let permissions = criteria_probe_permissions(role_id, object_id, rule_id, false);
+        let object = permissions
+            .object(object_id)
+            .expect("company entry without readable criteria");
+        assert!(!object.can_read_all_records);
+        assert!(!object.can_read_some_records());
+        let error =
+            assert_operation_allowed(&permissions, object_id, ObjectRecordsOperationType::Read)
+                .expect_err("the read is denied once the rule stops allowing it");
+        assert_eq!(error.code, PermissionErrorCode::PermissionDenied);
+        assert_eq!(
+            error.message,
+            "Entity performing the request does not have permission"
+        );
+    }
 }
 
 #[cfg(test)]
