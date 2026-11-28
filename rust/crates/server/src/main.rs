@@ -1,5 +1,6 @@
 mod auth;
 mod db;
+mod email;
 mod events;
 mod file;
 mod metadata;
@@ -8,6 +9,7 @@ pub mod query;
 mod routes;
 mod standard_objects;
 mod state;
+mod webhook;
 mod workspace_migrations;
 
 use anyhow::Context;
