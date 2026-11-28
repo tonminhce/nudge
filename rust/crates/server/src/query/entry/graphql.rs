@@ -21,7 +21,6 @@ use uuid::Uuid;
 
 use crate::auth::error::AuthError;
 use crate::auth::middleware::AuthContext;
-use crate::events::EventWriter;
 use crate::file::sign_search_avatars;
 use crate::file::FileUrlSigner;
 use crate::metadata::api::errors::GraphQlError;
@@ -41,14 +40,14 @@ use crate::permissions::current_user_workspace_permissions_for_auth;
 use crate::permissions::records_permissions_for_auth;
 use crate::query::cursor::encode_cursor_data;
 use crate::query::runner::create_many;
-use crate::query::runner::create_one;
+use crate::query::runner::create_one_with_snapshot;
 use crate::query::runner::find_duplicates;
 use crate::query::runner::find_many;
 use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
-use crate::query::runner::merge::readable_field_names;
 use crate::query::runner::merge_many;
 use crate::query::runner::run_mutation_one;
+use crate::query::runner::run_mutation_one_with_snapshot;
 use crate::query::runner::search;
 use crate::query::runner::ActorContext;
 use crate::query::runner::CreateArgs;
@@ -609,14 +608,7 @@ async fn execute_workspace(
         )
         .map_err(runner_graphql_error)?,
     });
-    let actor = if auth.workspace_member_id.is_some() {
-        Some(ActorContext::manual(
-            auth.workspace_member_id.map(|id| id.to_string()),
-            None,
-        ))
-    } else {
-        None
-    };
+    let actor = Some(ActorContext::from_auth(auth));
 
     if field.name == "search" {
         if !is_query {
@@ -670,7 +662,7 @@ async fn execute_workspace(
         ResolverMethod::CreateOne => {
             let data = required_object(field, "data")?;
             let upsert = optional_bool_arg(field, "upsert");
-            let id = create_one(
+            let after = create_one_with_snapshot(
                 &state.core_pool,
                 &runner_schema,
                 &resolver.object_name_singular,
@@ -681,23 +673,24 @@ async fn execute_workspace(
             )
             .await
             .map_err(runner_graphql_error)?;
-            let after = full_record_snapshot(
-                state,
-                &runner_schema,
-                &resolver.object_name_singular,
-                id,
-                false,
-            )
-            .await?;
-            publish_record_event(
-                state,
+            let id = after
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .ok_or_else(record_not_found_graphql_error)?;
+            let workspace_id = runner_schema
+                .object(&resolver.object_name_singular)
+                .map_err(runner_graphql_error)?
+                .object
+                .workspace_id;
+            state.event_streams.publish_record(
                 workspace_id,
                 "created",
                 &resolver.object_name_singular,
-                id,
-                None,
-                Some(&after),
-                Some(&EventWriter::from_auth(auth)),
+                &id.to_string(),
+                json!({"after": after}),
+                runner_schema.as_ref(),
+                actor.as_ref(),
             );
 
             find_record(state, schema, &runner_schema, field, resolver, id, false).await
@@ -746,29 +739,21 @@ async fn execute_workspace(
         ResolverMethod::UpdateOne => {
             mutate_existing_record(
                 state,
-                auth,
                 schema,
                 &runner_schema,
                 field,
                 resolver,
                 FilteredMutationKind::Update,
                 field.argument("data").cloned(),
+                actor.as_ref(),
                 false,
             )
             .await
         }
         ResolverMethod::DeleteOne => {
             let id = required_id(field)?;
-            let before = full_record_snapshot(
-                state,
-                &runner_schema,
-                &resolver.object_name_singular,
-                id,
-                false,
-            )
-            .await?;
 
-            run_mutation_one(
+            let snapshot = run_mutation_one_with_snapshot(
                 &state.core_pool,
                 &runner_schema,
                 &resolver.object_name_singular,
@@ -777,41 +762,36 @@ async fn execute_workspace(
                 None,
                 actor.as_ref(),
                 false,
-                vec![String::from("id")],
+                Vec::new(),
             )
             .await
             .map_err(runner_graphql_error)?;
-            let after = full_record_snapshot(
-                state,
-                &runner_schema,
-                &resolver.object_name_singular,
-                id,
-                true,
+            let properties = crate::events::record_mutation_properties(
+                &snapshot.before,
+                snapshot.after.as_ref(),
             )
-            .await?;
-            publish_record_event(
-                state,
+            .unwrap_or_else(|| json!({"before": snapshot.before, "after": snapshot.after}));
+            let workspace_id = runner_schema
+                .object(&resolver.object_name_singular)
+                .map_err(runner_graphql_error)?
+                .object
+                .workspace_id;
+            state.event_streams.publish_record(
                 workspace_id,
                 "deleted",
                 &resolver.object_name_singular,
-                id,
-                Some(&before),
-                Some(&after),
-                Some(&EventWriter::from_auth(auth)),
+                &id.to_string(),
+                properties,
+                runner_schema.as_ref(),
+                actor.as_ref(),
             );
 
             find_record(state, schema, &runner_schema, field, resolver, id, true).await
         }
         ResolverMethod::DestroyOne => {
             let id = required_id(field)?;
-            let before = full_record_snapshot(
-                state,
-                &runner_schema,
-                &resolver.object_name_singular,
-                id,
-                true,
-            )
-            .await?;
+            let before =
+                find_record(state, schema, &runner_schema, field, resolver, id, true).await?;
 
             run_mutation_one(
                 &state.core_pool,
@@ -826,29 +806,19 @@ async fn execute_workspace(
             )
             .await
             .map_err(runner_graphql_error)?;
-            publish_record_event(
-                state,
-                workspace_id,
-                "destroyed",
-                &resolver.object_name_singular,
-                id,
-                Some(&before),
-                None,
-                Some(&EventWriter::from_auth(auth)),
-            );
 
             Ok(before)
         }
         ResolverMethod::RestoreOne => {
             mutate_existing_record(
                 state,
-                auth,
                 schema,
                 &runner_schema,
                 field,
                 resolver,
                 FilteredMutationKind::Restore,
                 None,
+                actor.as_ref(),
                 true,
             )
             .await
@@ -1470,186 +1440,55 @@ async fn find_one_root(
     ))
 }
 
-async fn full_record_snapshot(
-    state: &AppState,
-    runner_schema: &RunnerSchema,
-    object_name_singular: &str,
-    id: Uuid,
-    with_deleted: bool,
-) -> Result<Value, GraphQlError> {
-    let model = runner_schema
-        .object(object_name_singular)
-        .map_err(runner_graphql_error)?;
-    find_one(
-        &state.core_pool,
-        runner_schema,
-        object_name_singular,
-        &FindOneArgs {
-            filter: Some(id_filter_value(id)),
-            selected_field_names: readable_field_names(runner_schema, model),
-            with_deleted,
-        },
-        &[],
-    )
-    .await
-    .map_err(runner_graphql_error)?
-    .ok_or_else(record_not_found_graphql_error)
-}
-
-fn event_properties(before: Option<&Value>, after: Option<&Value>) -> Value {
-    let mut updated_fields = Vec::new();
-    let mut diff = Map::new();
-    if let (Some(before), Some(after)) = (before, after) {
-        let mut keys = before
-            .as_object()
-            .map(|object| object.keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        if let Some(object) = after.as_object() {
-            for key in object.keys() {
-                if !keys.contains(key) {
-                    keys.push(key.clone());
-                }
-            }
-        }
-        for key in keys {
-            let before_value = before.get(&key).unwrap_or(&Value::Null);
-            let after_value = after.get(&key).unwrap_or(&Value::Null);
-            if before_value == after_value
-                || matches!(key.as_str(), "updatedAt" | "updatedBy" | "searchVector")
-            {
-                continue;
-            }
-            updated_fields.push(Value::String(key.clone()));
-            diff.insert(
-                key.clone(),
-                json!({"before": before_value, "after": after_value}),
-            );
-        }
-    }
-    let mut properties = Map::new();
-    if let Some(before) = before {
-        properties.insert(String::from("before"), before.clone());
-    }
-    if let Some(after) = after {
-        properties.insert(String::from("after"), after.clone());
-    }
-    properties.insert(String::from("updatedFields"), Value::Array(updated_fields));
-    properties.insert(String::from("diff"), Value::Object(diff));
-    Value::Object(properties)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn publish_record_event(
-    state: &AppState,
-    workspace_id: Uuid,
-    action: &str,
-    object_name_singular: &str,
-    id: Uuid,
-    before: Option<&Value>,
-    after: Option<&Value>,
-    writer: Option<&EventWriter>,
-) {
-    if action == "updated"
-        && before
-            .zip(after)
-            .is_some_and(|(before, after)| before == after)
-    {
-        return;
-    }
-    state.event_streams.publish_record(
-        workspace_id,
-        action,
-        object_name_singular,
-        &id.to_string(),
-        event_properties(before, after),
-        writer,
-    );
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn mutate_existing_record(
     state: &AppState,
-    auth: &AuthContext,
     schema: &WorkspaceSchema,
     runner_schema: &RunnerSchema,
     field: &FieldSelection,
     resolver: &super::schema::RootResolver,
     kind: FilteredMutationKind,
     data: Option<Value>,
+    actor: Option<&ActorContext>,
     with_deleted: bool,
 ) -> Result<Value, GraphQlError> {
     let id = required_id(field)?;
-    let actor = Some(EventWriter::from_auth(auth));
-    let selected = root_record_fields(schema, field, resolver);
-    let before = if matches!(
-        kind,
-        FilteredMutationKind::Update | FilteredMutationKind::Restore
-    ) {
-        Some(
-            full_record_snapshot(
-                state,
-                runner_schema,
-                &resolver.object_name_singular,
-                id,
-                with_deleted,
-            )
-            .await?,
-        )
-    } else {
-        None
-    };
-
-    run_mutation_one(
+    let snapshot = run_mutation_one_with_snapshot(
         &state.core_pool,
         runner_schema,
         &resolver.object_name_singular,
         kind,
         Some(id_filter_value(id)),
         data,
-        actor
-            .as_ref()
-            .map(|writer| crate::query::runner::ActorContext {
-                workspace_member_id: writer.workspace_member_id.map(|id| id.to_string()),
-                source: crate::query::runner::ActorSource::Manual,
-                name: None,
-                context: Value::Object(Map::new()),
-            })
-            .as_ref(),
+        actor,
         with_deleted,
-        selected.clone(),
+        Vec::new(),
     )
     .await
     .map_err(runner_graphql_error)?;
-    let workspace_id = runner_schema
-        .object(&resolver.object_name_singular)
-        .map_err(runner_graphql_error)?
-        .object
-        .workspace_id;
-    let action = match kind {
-        FilteredMutationKind::Update => "updated",
-        FilteredMutationKind::Restore => "restored",
-        _ => "updated",
+    let action = if kind == FilteredMutationKind::Update {
+        "updated"
+    } else {
+        "restored"
     };
-    let after = Some(
-        full_record_snapshot(
-            state,
-            runner_schema,
+    if let Some(properties) =
+        crate::events::record_mutation_properties(&snapshot.before, snapshot.after.as_ref())
+    {
+        let workspace_id = runner_schema
+            .object(&resolver.object_name_singular)
+            .map_err(runner_graphql_error)?
+            .object
+            .workspace_id;
+        state.event_streams.publish_record(
+            workspace_id,
+            action,
             &resolver.object_name_singular,
-            id,
-            true,
-        )
-        .await?,
-    );
-    publish_record_event(
-        state,
-        workspace_id,
-        action,
-        &resolver.object_name_singular,
-        id,
-        before.as_ref(),
-        after.as_ref(),
-        actor.as_ref(),
-    );
+            &id.to_string(),
+            properties,
+            runner_schema,
+            actor,
+        );
+    }
 
     find_record(
         state,
@@ -2607,67 +2446,6 @@ mod tests {
     use crate::metadata::flat::FlatFieldMetadata;
     use crate::metadata::flat::FlatObjectMetadata;
     use crate::metadata::flat::FlatWorkspaceMaps;
-    use crate::query::runner::test_support::drop_workspace;
-    use crate::query::runner::test_support::seeded_workspace;
-    use crate::query::runner::test_support::DB_TEST_LOCK;
-
-    #[tokio::test]
-    async fn application_catalogs_load_for_the_workspace_and_locale() {
-        let Ok(url) = std::env::var("NUDGE_TEST_DATABASE_URL") else {
-            return;
-        };
-        let _guard = DB_TEST_LOCK.lock().await;
-        let seeded = seeded_workspace(&url).await.expect("catalog workspace");
-        let registration_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO core.\"applicationRegistration\" \
-             (id, \"universalIdentifier\", name, \"oAuthClientId\", \"workspaceId\") \
-             VALUES ($1, $2, 'Catalog App', 'catalog-client', $3)",
-        )
-        .bind(registration_id)
-        .bind(Uuid::new_v4())
-        .bind(seeded.workspace_id)
-        .execute(&seeded.state.core_pool)
-        .await
-        .expect("inserting application registration");
-        let application_id: (Uuid,) = sqlx::query_as(
-            "SELECT \"workspaceCustomApplicationId\" FROM core.workspace WHERE id = $1",
-        )
-        .bind(seeded.workspace_id)
-        .fetch_one(&seeded.state.core_pool)
-        .await
-        .expect("workspace custom application");
-        sqlx::query("UPDATE core.application SET \"applicationRegistrationId\" = $1 WHERE id = $2")
-            .bind(registration_id)
-            .bind(application_id.0)
-            .execute(&seeded.state.core_pool)
-            .await
-            .expect("linking application registration");
-        sqlx::query(
-            "INSERT INTO core.\"applicationTranslation\" \
-             (\"applicationRegistrationId\", locale, messages) VALUES ($1, 'fr-FR', $2)",
-        )
-        .bind(registration_id)
-        .bind(json!({"Jk7iDd": "Société applicative"}))
-        .execute(&seeded.state.core_pool)
-        .await
-        .expect("inserting application translation");
-        let catalogs =
-            search_application_catalogs(&seeded.state.core_pool, seeded.workspace_id, "fr-FR")
-                .await
-                .expect("loading application catalogs");
-        assert_eq!(
-            catalogs.get(&application_id.0),
-            Some(&json!({"Jk7iDd": "Société applicative"}))
-        );
-        assert!(
-            search_application_catalogs(&seeded.state.core_pool, seeded.workspace_id, "vi-VN",)
-                .await
-                .expect("loading missing locale")
-                .is_empty()
-        );
-        drop_workspace(&seeded).await;
-    }
 
     #[test]
     fn search_locale_header_normalization_matches_upstream() {

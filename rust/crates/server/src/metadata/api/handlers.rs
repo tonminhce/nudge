@@ -121,11 +121,12 @@ async fn add_query_to_event_stream(ctx: &OperationContext<'_>) -> Result<Value, 
         .ok_or_else(|| GraphQlError::user_input("eventStreamId is required"))?;
     let query_id = optional_string(input, "queryId")?
         .ok_or_else(|| GraphQlError::user_input("queryId is required"))?;
-    let operation_signature = input.get("operationSignature").cloned();
-    let operation_signature = serde_json::from_value::<crate::events::RecordOperationSignature>(
-        operation_signature.unwrap_or(Value::Null),
-    )
-    .map_err(|error| GraphQlError::user_input(format!("Invalid operationSignature: {error}")))?;
+    let operation_signature = input
+        .get("operationSignature")
+        .cloned()
+        .ok_or_else(|| GraphQlError::user_input("operationSignature is required"))?;
+    let operation_signature = crate::events::RecordOperationSignature::parse(operation_signature)
+        .map_err(GraphQlError::user_input)?;
     let auth = ctx
         .auth
         .ok_or_else(|| GraphQlError::unauthenticated("Authentication required"))?;

@@ -21,6 +21,7 @@ pub mod permissions;
 pub mod position;
 pub mod rls;
 pub mod search;
+pub(crate) mod snapshots;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -39,7 +40,9 @@ pub use base::NESTED_RELATION_QUERY_MAX_CONCURRENCY;
 pub use base::QUERY_MAX_RECORDS;
 pub use base::QUERY_MAX_RECORDS_FROM_RELATION;
 pub use create::create_many;
+pub use create::create_many_with_snapshots;
 pub use create::create_one;
+pub use create::create_one_with_snapshot;
 pub use create::CreateArgs;
 pub use duplicates::find_duplicates;
 pub use find_many::find_many;
@@ -58,7 +61,10 @@ pub use merge::MergeManyArgs;
 pub use mutation::require_filtered_mutation;
 pub use mutation::run_mutation;
 pub use mutation::run_mutation_one;
+pub use mutation::run_mutation_one_with_snapshot;
+pub use mutation::run_mutation_with_snapshots;
 pub use mutation::FilteredMutationKind;
+pub use mutation::MutationSnapshot;
 pub use search::search;
 pub use search::SearchArgs;
 pub use search::SearchRecord;

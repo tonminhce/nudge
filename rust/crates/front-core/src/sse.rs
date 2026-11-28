@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Map;
 use serde_json::Value;
 
 use crate::client::BrowserGraphQLClient;
@@ -32,6 +33,42 @@ pub const ON_EVENT_SUBSCRIPTION_QUERY: &str = r#"subscription OnEventSubscriptio
     queueJobEvents { jobId state attemptsMade failedReason progress enqueuedAt startedAt finishedAt }
   }
 }"#;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordOperationSignature {
+    pub object_name_singular: String,
+    pub variables: RecordOperationVariables,
+    #[serde(default)]
+    pub fields: Option<Map<String, Value>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordOperationVariables {
+    #[serde(default)]
+    pub filter: Option<Value>,
+    #[serde(default)]
+    pub order_by: Option<Value>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub cursor_filter: Option<RecordCursorFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordCursorFilter {
+    pub cursor: String,
+    pub cursor_direction: RecordCursorDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordCursorDirection {
+    Before,
+    After,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SseEvent {
@@ -212,7 +249,7 @@ pub async fn register_event_query(
     token: &str,
     event_stream_id: &str,
     query_id: &str,
-    operation_signature: serde_json::Value,
+    operation_signature: &RecordOperationSignature,
 ) -> Result<bool, ClientError> {
     let query = r#"mutation AddQueryToEventStream($input: AddQuerySubscriptionInput!) {
       addQueryToEventStream(input: $input)
@@ -437,6 +474,33 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0], SseEvent::Ping);
         assert!(matches!(events[1], SseEvent::QueueJob(_)));
+    }
+
+    #[test]
+    fn operation_signature_serializes_as_a_typed_camel_case_object() {
+        let signature = RecordOperationSignature {
+            object_name_singular: String::from("person"),
+            variables: RecordOperationVariables {
+                filter: Some(json!({"name": {"firstName": {"eq": "Ada"}}})),
+                order_by: Some(json!([{"name": {"lastName": "AscNullsFirst"}}])),
+                limit: Some(60),
+                cursor_filter: None,
+            },
+            fields: Some(serde_json::from_value(json!({"id": true})).expect("fields")),
+        };
+        assert_eq!(
+            serde_json::to_value(signature).unwrap(),
+            json!({
+                "objectNameSingular": "person",
+                "variables": {
+                    "filter": {"name": {"firstName": {"eq": "Ada"}}},
+                    "orderBy": [{"name": {"lastName": "AscNullsFirst"}}],
+                    "limit": 60,
+                    "cursorFilter": null
+                },
+                "fields": {"id": true}
+            })
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@
 pub mod arg_processor;
 pub mod model;
 pub mod null_equiv;
+pub mod snapshot;
 pub mod sql;
 
 pub use arg_processor::assert_safe_ts_vector_expression;
@@ -43,6 +44,10 @@ pub use null_equiv::is_null_equivalent_array_value;
 pub use null_equiv::is_null_equivalent_text_value;
 pub use null_equiv::POSTGRES_DEFAULT_ARRAY_FIELD_NULL_EQUIVALENT_VALUE;
 pub use null_equiv::POSTGRES_DEFAULT_TEXT_FIELD_NULL_EQUIVALENT_VALUE;
+pub use snapshot::record_matches_filter;
+pub use snapshot::SnapshotCompositeSubField;
+pub use snapshot::SnapshotFilterKey;
+pub use snapshot::SnapshotFilterSchema;
 pub use sql::compute_where_condition_parts;
 pub use sql::format_search_terms;
 pub use sql::WhereConditionInput;

@@ -36,6 +36,7 @@ impl ActorSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActorContext {
+    pub user_id: Option<String>,
     pub workspace_member_id: Option<String>,
     pub source: ActorSource,
     pub name: Option<String>,
@@ -45,9 +46,35 @@ pub struct ActorContext {
 impl ActorContext {
     pub fn manual(workspace_member_id: Option<String>, name: Option<String>) -> Self {
         Self {
+            user_id: None,
             workspace_member_id,
             source: ActorSource::Manual,
             name,
+            context: Value::Object(serde_json::Map::new()),
+        }
+    }
+
+    pub fn from_auth(auth: &crate::auth::middleware::AuthContext) -> Self {
+        let is_api_key = auth.token_type == crate::auth::jwt_service::TokenType::ApiKey;
+        Self {
+            user_id: if is_api_key {
+                None
+            } else {
+                auth.user_id.map(|id| id.to_string())
+            },
+            workspace_member_id: if is_api_key {
+                None
+            } else {
+                auth.workspace_member_id.map(|id| id.to_string())
+            },
+            source: if is_api_key {
+                ActorSource::ApiKey
+            } else if auth.agent_id.is_some() {
+                ActorSource::Agent
+            } else {
+                ActorSource::Manual
+            },
+            name: None,
             context: Value::Object(serde_json::Map::new()),
         }
     }
@@ -123,4 +150,48 @@ fn inject_actor_field(
     }
 
     record.insert(field_name.to_string(), actor.to_value());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::jwt_service::TokenType;
+    use uuid::Uuid;
+
+    #[test]
+    fn auth_actor_preserves_writer_identity_but_not_api_key_identity() {
+        let user_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let auth = crate::auth::middleware::AuthContext {
+            token_type: TokenType::Access,
+            user_id: Some(user_id),
+            workspace_id: Some(Uuid::new_v4()),
+            user_workspace_id: None,
+            workspace_member_id: Some(member_id),
+            api_key_id: None,
+            agent_id: None,
+            auth_provider: None,
+            is_impersonating: false,
+        };
+        let actor = ActorContext::from_auth(&auth);
+        assert_eq!(actor.user_id, Some(user_id.to_string()));
+        assert_eq!(actor.workspace_member_id, Some(member_id.to_string()));
+        assert_eq!(actor.source, ActorSource::Manual);
+
+        let api_key = crate::auth::middleware::AuthContext {
+            token_type: TokenType::ApiKey,
+            user_id: Some(user_id),
+            workspace_id: Some(Uuid::new_v4()),
+            user_workspace_id: None,
+            workspace_member_id: Some(member_id),
+            api_key_id: Some(Uuid::new_v4()),
+            agent_id: None,
+            auth_provider: None,
+            is_impersonating: false,
+        };
+        let actor = ActorContext::from_auth(&api_key);
+        assert_eq!(actor.user_id, None);
+        assert_eq!(actor.workspace_member_id, None);
+        assert_eq!(actor.source, ActorSource::ApiKey);
+    }
 }
