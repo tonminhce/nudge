@@ -4,6 +4,8 @@ pub const APPLICATION_KEEPALIVE_INTERVAL_MS: u64 = 30 * 1_000;
 
 pub const WORKFLOWS_PERMISSION_FLAG: &str = "WORKFLOWS";
 
+pub const TIMELINE_ACTIVITY_OBJECT_NAME: &str = "timelineActivity";
+
 const REQUIRED_PERMISSION_FLAG_BY_BROADCAST_ENTITY_NAME: &[(&str, &str)] = &[
     ("workflow", WORKFLOWS_PERMISSION_FLAG),
     ("workflowVersion", WORKFLOWS_PERMISSION_FLAG),

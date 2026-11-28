@@ -386,6 +386,7 @@ mod tests {
 
         registry.publish_record(
             workspace_id,
+            Uuid::new_v4(),
             "updated",
             "person",
             "person-1",
@@ -414,6 +415,7 @@ mod tests {
         assert!(registry.remove_query(workspace_id, "stream-1", &user, "people-query"));
         registry.publish_record(
             workspace_id,
+            Uuid::new_v4(),
             "updated",
             "person",
             "person-1",
@@ -478,6 +480,7 @@ mod tests {
         ));
         registry.publish_record(
             workspace_id,
+            Uuid::new_v4(),
             "updated",
             "person",
             "person-1",

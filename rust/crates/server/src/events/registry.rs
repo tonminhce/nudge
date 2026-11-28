@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 
+use serde_json::json;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -18,6 +19,7 @@ use super::clock::SystemClock;
 use super::constants::ttl_refresh_interval_ms;
 use super::constants::APPLICATION_KEEPALIVE_INTERVAL_MS;
 use super::constants::EVENT_STREAM_TTL_MS;
+use super::constants::TIMELINE_ACTIVITY_OBJECT_NAME;
 use super::gate::resolve_broadcast_events;
 use super::gate::MetadataBroadcastContext;
 use super::gate::MetadataBroadcastEvent;
@@ -288,6 +290,7 @@ impl EventStreamRegistry {
     pub fn publish_record(
         &self,
         workspace_id: Uuid,
+        object_metadata_id: Uuid,
         action: &str,
         object_name_singular: &str,
         record_id: &str,
@@ -295,6 +298,23 @@ impl EventStreamRegistry {
         schema: &dyn SnapshotFilterSchema,
         actor: Option<&ActorContext>,
     ) {
+        if crate::webhook::service::is_installed()
+            && object_name_singular != TIMELINE_ACTIVITY_OBJECT_NAME
+        {
+            let (user_id, workspace_member_id) = actor_ids(actor);
+            let event = json!({
+                "userId": user_id,
+                "workspaceMemberId": workspace_member_id,
+                "properties": &properties,
+            });
+            crate::webhook::service::spawn_record_event_batch(
+                &workspace_id.to_string(),
+                &object_metadata_id.to_string(),
+                object_name_singular,
+                action,
+                vec![event],
+            );
+        }
         let streams = self.locked();
         for ((stream_workspace_id, event_stream_id), stream) in streams.iter() {
             if *stream_workspace_id != workspace_id {

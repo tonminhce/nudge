@@ -1,5 +1,6 @@
 mod auth;
 mod db;
+mod email;
 mod events;
 mod file;
 mod metadata;
@@ -9,6 +10,7 @@ mod routes;
 mod secure_http;
 mod standard_objects;
 mod state;
+mod webhook;
 mod workspace_migrations;
 
 use anyhow::Context;
@@ -28,6 +30,12 @@ async fn main() -> anyhow::Result<()> {
     db::migrate::run(&state)
         .await
         .context("running the core schema migrations")?;
+
+    crate::email::init_from_env().context("configuring the email driver")?;
+
+    if crate::webhook::install_webhook_dispatcher(state.core_pool.clone(), state.redis.clone()) {
+        tracing::info!("webhook dispatcher installed");
+    }
 
     tokio::spawn(crate::auth::session::cleanup_loop(state.clone()));
     tokio::spawn(crate::file::upload::cleanup_loop(state.clone()));

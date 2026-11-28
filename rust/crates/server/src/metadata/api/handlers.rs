@@ -1,6 +1,9 @@
+use chrono::{DateTime, Utc};
 use serde_json::json;
 use serde_json::Map;
 use serde_json::Value;
+use sqlx::FromRow;
+use url::Url;
 use uuid::Uuid;
 
 use super::errors::GraphQlError;
@@ -11,6 +14,7 @@ use super::service::field_dto;
 use super::service::flat_field_universal;
 use super::service::flat_index_universal;
 use super::service::flat_object_universal;
+use super::service::format_timestamp;
 use super::service::index_dto;
 use super::service::input_argument;
 use super::service::inputs_argument;
@@ -41,6 +45,7 @@ use crate::metadata::flat::UniversalFlatIndexFieldMetadata;
 use crate::metadata::flat::UniversalFlatIndexMetadata;
 use crate::metadata::flat::UniversalFlatObjectMetadata;
 use crate::permissions::current_user_workspace_permissions_for_auth;
+use crate::webhook::signature::generate_webhook_secret;
 use crate::workspace_migrations::runner::run_workspace_migration;
 use crate::workspace_migrations::runner::RunnerInput;
 
@@ -90,6 +95,11 @@ pub async fn dispatch(ctx: &OperationContext<'_>) -> ResponsePayload {
         "deleteOneField" | "deleteFieldMetadata" if !ctx.is_query => delete_one_field(ctx).await,
         "createOneIndex" if !ctx.is_query => create_one_index(ctx).await,
         "deleteOneIndex" if !ctx.is_query => delete_one_index(ctx).await,
+        "createWebhook" if !ctx.is_query => create_webhook(ctx).await,
+        "updateWebhook" if !ctx.is_query => update_webhook(ctx).await,
+        "deleteWebhook" if !ctx.is_query => delete_webhook(ctx).await,
+        "webhooks" if ctx.is_query => list_webhooks(ctx).await,
+        "webhook" if ctx.is_query => get_webhook(ctx).await,
         "objects" if ctx.is_query => list_objects(ctx).await,
         "fields" if ctx.is_query => list_fields(ctx).await,
         "object" if ctx.is_query => get_object(ctx).await,
@@ -1715,6 +1725,260 @@ fn push_param(
     params.push(FilterParam::Scalar(value.clone()));
 
     Ok(())
+}
+
+#[derive(FromRow)]
+struct WebhookRow {
+    id: Uuid,
+    target_url: String,
+    operations: Vec<String>,
+    description: Option<String>,
+    secret: String,
+    application_id: Uuid,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+fn require_webhook_uuid(value: &str) -> Result<Uuid, GraphQlError> {
+    Uuid::parse_str(value).map_err(|_| GraphQlError::validation("id must be a valid UUID"))
+}
+
+fn trim_and_collapse_whitespaces(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+fn normalize_target_url(value: &str) -> String {
+    match Url::parse(value) {
+        Ok(url) => url.to_string(),
+        Err(_) => value.to_string(),
+    }
+}
+
+#[allow(clippy::type_complexity)]
+async fn find_webhook_row(
+    ctx: &OperationContext<'_>,
+    id: Uuid,
+) -> Result<Option<WebhookRow>, GraphQlError> {
+    let row = sqlx::query_as::<_, WebhookRow>(
+        "SELECT id, \"targetUrl\", operations, description, secret, \"applicationId\", \
+         \"createdAt\", \"updatedAt\" FROM core.webhook \
+         WHERE id = $1 AND \"workspaceId\" = $2 AND \"deletedAt\" IS NULL",
+    )
+    .bind(id)
+    .bind(ctx.workspace_id)
+    .fetch_optional(&ctx.state.core_pool)
+    .await
+    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+
+    Ok(row)
+}
+
+async fn list_webhooks(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let rows = sqlx::query_as::<_, WebhookRow>(
+        "SELECT id, \"targetUrl\", operations, description, secret, \"applicationId\", \
+         \"createdAt\", \"updatedAt\" FROM core.webhook \
+         WHERE \"workspaceId\" = $1 AND \"deletedAt\" IS NULL \
+         ORDER BY \"createdAt\" ASC, id ASC",
+    )
+    .bind(ctx.workspace_id)
+    .fetch_all(&ctx.state.core_pool)
+    .await
+    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+
+    Ok(Value::Array(
+        rows.iter().map(webhook_dto).collect::<Vec<Value>>(),
+    ))
+}
+
+async fn get_webhook(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let id = argument_value(ctx, "id");
+    let id = id
+        .as_str()
+        .ok_or_else(|| GraphQlError::validation("id must be a string"))?;
+    let id = require_webhook_uuid(id)?;
+
+    Ok(find_webhook_row(ctx, id)
+        .await?
+        .map(|row| webhook_dto(&row))
+        .unwrap_or(Value::Null))
+}
+
+async fn create_webhook(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let input = input_argument(ctx.selection, ctx.variables);
+    let input = input
+        .as_object()
+        .ok_or_else(|| GraphQlError::user_input("input is required"))?;
+    let applications = resolve_applications(ctx.state, ctx.workspace_id).await?;
+    let role_id = optional_string(input, "roleId")?
+        .filter(|role_id| !role_id.trim().is_empty())
+        .ok_or_else(|| GraphQlError::user_input("A role is required to create a webhook"))?;
+    let target_url = optional_string(input, "targetUrl")?
+        .map(|target_url| normalize_target_url(&trim_and_collapse_whitespaces(&target_url)))
+        .filter(|target_url| !target_url.is_empty())
+        .ok_or_else(|| GraphQlError::user_input("targetUrl must not be empty"))?;
+    let operations = input
+        .get("operations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| GraphQlError::user_input("operations must be an array of strings"))?
+        .iter()
+        .map(|operation| {
+            operation
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| GraphQlError::user_input("operations must be an array of strings"))
+        })
+        .collect::<Result<Vec<String>, GraphQlError>>()?;
+    let description = optional_string(input, "description")?
+        .map(|description| trim_and_collapse_whitespaces(&description));
+    let secret = optional_string(input, "secret")?
+        .filter(|secret| !secret.is_empty())
+        .unwrap_or_else(generate_webhook_secret);
+    let id = match optional_string(input, "id")? {
+        Some(id) => require_webhook_uuid(&id)?,
+        None => Uuid::new_v4(),
+    };
+
+    require_webhook_uuid(&role_id)?;
+
+    let row: (Uuid, DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
+        "INSERT INTO core.webhook (id, \"targetUrl\", operations, description, secret, \
+         \"workspaceId\", \"applicationId\", \"universalIdentifier\") \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+         RETURNING id, \"createdAt\", \"updatedAt\"",
+    )
+    .bind(id)
+    .bind(&target_url)
+    .bind(&operations)
+    .bind(&description)
+    .bind(&secret)
+    .bind(ctx.workspace_id)
+    .bind(applications.custom_id)
+    .bind(id.to_string())
+    .fetch_one(&ctx.state.core_pool)
+    .await
+    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+
+    Ok(json!({
+        "id": row.0.to_string(),
+        "targetUrl": target_url,
+        "operations": operations,
+        "description": description,
+        "secret": secret,
+        "applicationId": applications.custom_id.to_string(),
+        "createdAt": format_timestamp(row.1),
+        "updatedAt": format_timestamp(row.2),
+        "deletedAt": Value::Null,
+    }))
+}
+
+async fn update_webhook(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let input = input_argument(ctx.selection, ctx.variables);
+    let input = input
+        .as_object()
+        .ok_or_else(|| GraphQlError::user_input("input is required"))?;
+    let id = optional_string(input, "id")?
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| GraphQlError::user_input("The id of the webhook to update is required"))?;
+    let id = require_webhook_uuid(&id)?;
+    let update = input
+        .get("update")
+        .and_then(Value::as_object)
+        .ok_or_else(|| GraphQlError::user_input("update is required"))?;
+
+    let current = find_webhook_row(ctx, id)
+        .await?
+        .ok_or_else(|| GraphQlError::not_found("Webhook not found"))?;
+
+    let mut target_url = current.target_url.clone();
+    let mut operations = current.operations.clone();
+    let mut description = current.description.clone();
+    let mut secret = current.secret.clone();
+
+    if let Some(value) = optional_string(update, "targetUrl")? {
+        target_url = normalize_target_url(&trim_and_collapse_whitespaces(&value));
+    }
+    if let Some(value) = update.get("operations") {
+        operations = value
+            .as_array()
+            .ok_or_else(|| GraphQlError::user_input("operations must be an array of strings"))?
+            .iter()
+            .map(|operation| {
+                operation.as_str().map(str::to_string).ok_or_else(|| {
+                    GraphQlError::user_input("operations must be an array of strings")
+                })
+            })
+            .collect::<Result<Vec<String>, GraphQlError>>()?;
+    }
+    if update.contains_key("description") {
+        description = optional_string(update, "description")?
+            .map(|description| trim_and_collapse_whitespaces(&description));
+    }
+    if let Some(value) = optional_string(update, "secret")? {
+        if !value.is_empty() {
+            secret = value;
+        }
+    }
+
+    let updated_at: (DateTime<Utc>,) = sqlx::query_as(
+        "UPDATE core.webhook SET \"targetUrl\" = $3, operations = $4, description = $5, \
+         secret = $6, \"updatedAt\" = now() WHERE id = $1 AND \"workspaceId\" = $2 \
+         AND \"deletedAt\" IS NULL RETURNING \"updatedAt\"",
+    )
+    .bind(id)
+    .bind(ctx.workspace_id)
+    .bind(&target_url)
+    .bind(&operations)
+    .bind(&description)
+    .bind(&secret)
+    .fetch_one(&ctx.state.core_pool)
+    .await
+    .map_err(|error| GraphQlError::internal(error.to_string()))?;
+
+    Ok(json!({
+        "id": id.to_string(),
+        "targetUrl": target_url,
+        "operations": operations,
+        "description": description,
+        "secret": secret,
+        "applicationId": current.application_id.to_string(),
+        "createdAt": format_timestamp(current.created_at),
+        "updatedAt": format_timestamp(updated_at.0),
+        "deletedAt": Value::Null,
+    }))
+}
+
+async fn delete_webhook(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let id = argument_value(ctx, "id");
+    let id = id
+        .as_str()
+        .ok_or_else(|| GraphQlError::validation("id must be a string"))?;
+    let id = require_webhook_uuid(id)?;
+    let current = find_webhook_row(ctx, id)
+        .await?
+        .ok_or_else(|| GraphQlError::not_found("Webhook not found"))?;
+
+    sqlx::query("DELETE FROM core.webhook WHERE id = $1 AND \"workspaceId\" = $2")
+        .bind(id)
+        .bind(ctx.workspace_id)
+        .execute(&ctx.state.core_pool)
+        .await
+        .map_err(|error| GraphQlError::internal(error.to_string()))?;
+
+    Ok(webhook_dto(&current))
+}
+
+fn webhook_dto(row: &WebhookRow) -> Value {
+    json!({
+        "id": row.id.to_string(),
+        "targetUrl": row.target_url,
+        "operations": row.operations,
+        "description": row.description,
+        "secret": row.secret,
+        "applicationId": row.application_id.to_string(),
+        "createdAt": format_timestamp(row.created_at),
+        "updatedAt": format_timestamp(row.updated_at),
+        "deletedAt": Value::Null,
+    })
 }
 
 #[cfg(test)]
