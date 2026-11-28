@@ -16,6 +16,7 @@ use crate::query::repository::QUERY_MAX_RECORDS;
 use super::actors::inject_actor_fields_on_create;
 use super::actors::ActorContext;
 use super::base::compile_runner_filter;
+use super::base::normalize_record_links;
 use super::base::resolve_where_clauses;
 use super::base::ObjectModel;
 use super::base::RunnerSchema;
@@ -49,6 +50,10 @@ pub async fn create_many(
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
     let mut records = args.records.clone();
+
+    for record in &mut records {
+        normalize_record_links(model, record);
+    }
 
     resolve_relation_nested_queries(
         pool,

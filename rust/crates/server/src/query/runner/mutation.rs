@@ -16,6 +16,7 @@ use crate::query::repository::MutationWhereClause;
 use super::actors::inject_updated_by_on_update;
 use super::actors::ActorContext;
 use super::base::compile_runner_filter;
+use super::base::normalize_record_links;
 use super::base::resolve_where_clauses;
 use super::base::ObjectModel;
 use super::base::RunnerSchema;
@@ -206,6 +207,8 @@ async fn run_mutation_inner(
     }
 
     if kind == FilteredMutationKind::Update {
+        normalize_record_links(model, &mut set_columns);
+
         if !set_columns.is_empty() {
             let mut relation_records = vec![set_columns];
             resolve_relation_nested_queries(

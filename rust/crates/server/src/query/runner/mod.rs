@@ -72,7 +72,11 @@ pub use search::SearchRecord;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunnerError {
-    Code { code: &'static str, message: String },
+    Code {
+        code: &'static str,
+        message: String,
+        user_friendly_message: Option<String>,
+    },
     Database(String),
 }
 
@@ -81,6 +85,19 @@ impl RunnerError {
         Self::Code {
             code,
             message: message.into(),
+            user_friendly_message: None,
+        }
+    }
+
+    pub fn new_with_user_friendly(
+        code: &'static str,
+        message: impl Into<String>,
+        user_friendly_message: impl Into<String>,
+    ) -> Self {
+        Self::Code {
+            code,
+            message: message.into(),
+            user_friendly_message: Some(user_friendly_message.into()),
         }
     }
 
@@ -95,6 +112,16 @@ impl RunnerError {
         match self {
             Self::Code { message, .. } => message,
             Self::Database(message) => message,
+        }
+    }
+
+    pub fn user_friendly_message(&self) -> Option<&str> {
+        match self {
+            Self::Code {
+                user_friendly_message,
+                ..
+            } => user_friendly_message.as_deref(),
+            Self::Database(_) => None,
         }
     }
 

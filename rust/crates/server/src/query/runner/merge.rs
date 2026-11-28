@@ -137,9 +137,10 @@ async fn fetch_records_to_merge(
             .unwrap_or(usize::MAX)
     });
     if records.len() != args.ids.len() {
-        return Err(RunnerError::new(
+        return Err(RunnerError::new_with_user_friendly(
             "RECORD_NOT_FOUND",
             "One or more records not found",
+            "One or more records were not found.",
         ));
     }
     Ok(records)
@@ -593,7 +594,16 @@ fn merge_field_value(
         }
         FieldMetadataType::Emails => Some(merge_emails(present, priority_id)),
         FieldMetadataType::Phones => Some(merge_phones(present, priority_id)),
-        FieldMetadataType::Links => Some(merge_links(present, priority_id)),
+        FieldMetadataType::Links => {
+            let is_domain = field
+                .settings
+                .as_ref()
+                .and_then(|s| s.get("type"))
+                .and_then(Value::as_str)
+                == Some("domain")
+                || field.name == "domainName";
+            Some(merge_links(present, priority_id, is_domain))
+        }
         FieldMetadataType::Relation if dry_run => Some(merge_relation_for_dry_run(
             present,
             priority_id,
@@ -837,7 +847,19 @@ fn push_phone_unique(
     }));
 }
 
-fn merge_links(present: &[(Value, Uuid)], priority_id: Uuid) -> Value {
+fn merge_links(present: &[(Value, Uuid)], priority_id: Uuid, is_domain: bool) -> Value {
+    let normalize_url = |url: String| -> String {
+        if is_domain {
+            let normalized = crate::validation::net::normalize_domain(&url);
+            if normalized.is_empty() {
+                url
+            } else {
+                normalized
+            }
+        } else {
+            url
+        }
+    };
     let source = present
         .iter()
         .find(|(value, id)| {
@@ -854,7 +876,7 @@ fn merge_links(present: &[(Value, Uuid)], priority_id: Uuid) -> Value {
         if let Some(url) = meaningful_string(value.get("primaryLinkUrl")) {
             push_link_unique(
                 &mut links,
-                url,
+                normalize_url(url),
                 value
                     .get("primaryLinkLabel")
                     .cloned()
@@ -866,7 +888,7 @@ fn merge_links(present: &[(Value, Uuid)], priority_id: Uuid) -> Value {
                 if let Some(url) = meaningful_string(item.get("url")) {
                     push_link_unique(
                         &mut links,
-                        url,
+                        normalize_url(url),
                         item.get("label").cloned().unwrap_or(Value::Null),
                     );
                 }
@@ -875,7 +897,8 @@ fn merge_links(present: &[(Value, Uuid)], priority_id: Uuid) -> Value {
     }
     let primary = source
         .as_ref()
-        .and_then(|value| meaningful_string(value.get("primaryLinkUrl")));
+        .and_then(|value| meaningful_string(value.get("primaryLinkUrl")))
+        .map(normalize_url);
     if let Some(primary) = primary.as_ref() {
         links.retain(|link| link["url"].as_str() != Some(primary.as_str()));
     }
@@ -921,8 +944,10 @@ fn validate_args(
         )));
     }
     if args.ids.len() < 2 {
-        return Err(RunnerError::invalid_query(
+        return Err(RunnerError::new_with_user_friendly(
+            "INVALID_QUERY_INPUT",
             "At least 2 record IDs are required for merge",
+            "Please select at least 2 records to merge.",
         ));
     }
     if args.ids.len() > MUTATION_MAX_MERGE_RECORDS {
@@ -1046,7 +1071,7 @@ mod tests {
             })
         );
         assert_eq!(
-            merge_links(&present, priority),
+            merge_links(&present, priority, false),
             json!({
                 "primaryLinkUrl": "https://first.example.com",
                 "primaryLinkLabel": "First",
@@ -1133,7 +1158,8 @@ mod tests {
                         other
                     ),
                 ],
-                priority
+                priority,
+                false
             ),
             json!({
                 "primaryLinkUrl": "https://a.example.com",

@@ -625,6 +625,51 @@ pub fn select_columns(
     Ok(selected)
 }
 
+pub fn normalize_record_links(model: &ObjectModel, record: &mut serde_json::Map<String, Value>) {
+    for field in model.fields_by_name.values() {
+        if field.field_type != FieldMetadataType::Links {
+            continue;
+        }
+        let is_domain = field
+            .settings
+            .as_ref()
+            .and_then(|s| s.get("type"))
+            .and_then(Value::as_str)
+            == Some("domain")
+            || field.name == "domainName";
+        if !is_domain {
+            continue;
+        }
+        if let Some(links_obj) = record.get_mut(&field.name).and_then(Value::as_object_mut) {
+            if let Some(url_val) = links_obj.get_mut("primaryLinkUrl") {
+                if let Some(url_str) = url_val.as_str() {
+                    let norm = crate::validation::net::normalize_domain(url_str);
+                    if !norm.is_empty() {
+                        *url_val = Value::String(norm);
+                    }
+                }
+            }
+            if let Some(items) = links_obj
+                .get_mut("secondaryLinks")
+                .and_then(Value::as_array_mut)
+            {
+                for item in items {
+                    if let Some(item_obj) = item.as_object_mut() {
+                        if let Some(url_val) = item_obj.get_mut("url") {
+                            if let Some(url_str) = url_val.as_str() {
+                                let norm = crate::validation::net::normalize_domain(url_str);
+                                if !norm.is_empty() {
+                                    *url_val = Value::String(norm);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn push_selected_column(selected: &mut Vec<ColumnShape>, column: &ColumnShape) {
     if !selected
         .iter()

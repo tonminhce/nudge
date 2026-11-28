@@ -6,6 +6,7 @@ use serde_json::Map;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::flat::RelationType;
 use crate::metadata::names::compute_composite_column_name;
 use crate::query::repository::quote_identifier;
@@ -392,11 +393,21 @@ async fn fetch_connect_candidates(
     let mut parameters = Vec::new();
 
     for condition in conditions {
+        let is_uuid = condition.column == "id"
+            || target
+                .shape
+                .column(&condition.column)
+                .is_some_and(|col| col.field_metadata_type == FieldMetadataType::Uuid);
+        let placeholder = if is_uuid {
+            format!("${}::uuid", predicates.len() + 1)
+        } else {
+            format!("${}", predicates.len() + 1)
+        };
         predicates.push(format!(
-            "{}.{} = ${}",
+            "{}.{} = {}",
             quoted_alias,
             quote_identifier(&condition.column)?,
-            predicates.len() + 1
+            placeholder
         ));
 
         parameters.push(condition.value.clone());

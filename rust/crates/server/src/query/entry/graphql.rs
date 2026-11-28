@@ -373,8 +373,15 @@ fn error_response_for_key(
 fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlError {
     let message = error.message().to_string();
     let code = error.code();
+    let user_friendly = error.user_friendly_message();
 
     if code == "RECORD_NOT_FOUND" {
+        if let Some(user_friendly) = user_friendly {
+            return GraphQlError::not_found(message).with_extensions(json!({
+                "subCode": "RECORD_NOT_FOUND",
+                "userFriendlyMessage": user_friendly,
+            }));
+        }
         return record_not_found_graphql_error();
     }
 
@@ -390,7 +397,7 @@ fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlErro
         return friendly_graphql_error(
             GraphQlError::forbidden(message),
             code,
-            "User does not have permission.",
+            user_friendly.unwrap_or("User does not have permission."),
         );
     }
 
@@ -420,7 +427,7 @@ fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlErro
         return friendly_graphql_error(
             GraphQlError::user_input(message),
             code,
-            "An error occurred.",
+            user_friendly.unwrap_or("An error occurred."),
         );
     }
 
@@ -428,7 +435,7 @@ fn runner_graphql_error(error: crate::query::runner::RunnerError) -> GraphQlErro
         return friendly_graphql_error(
             GraphQlError::user_input(message),
             code,
-            "An error occurred.",
+            user_friendly.unwrap_or("An error occurred."),
         );
     }
 
@@ -751,7 +758,22 @@ async fn execute_workspace(
                 &nested_relations(schema, field, resolver),
             )
             .await
-            .map(|result| Value::Array(result.records))
+            .map(|result| {
+                let mut records = result.records;
+                let order_map = ids
+                    .iter()
+                    .enumerate()
+                    .map(|(index, id)| (id.to_string(), index))
+                    .collect::<std::collections::HashMap<_, _>>();
+                records.sort_by_key(|record| {
+                    record
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .and_then(|id| order_map.get(id).copied())
+                        .unwrap_or(usize::MAX)
+                });
+                Value::Array(records)
+            })
             .map_err(runner_graphql_error)
         }
         ResolverMethod::UpdateOne => {
@@ -1305,12 +1327,48 @@ fn project_record(record: &Value, selections: &[FieldSelection], type_name: &str
                         .is_some_and(|items| items.iter().any(|item| !item.is_object()))
                 {
                     child
-                } else if !selection.selection.iter().any(|s| {
+                } else if selection.selection.iter().any(|s| {
                     s.name == "edges"
                         || s.name == "totalCount"
                         || s.name == "pageInfo"
-                        || s.name == "node"
                 }) {
+                    let edges = child
+                        .as_array()
+                        .expect("array checked")
+                        .iter()
+                        .map(|record| {
+                            json!({
+                                "node": record,
+                                "cursor": record.get("id").and_then(Value::as_str).unwrap_or_default()
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    let connection = json!({
+                        "edges": edges,
+                        "totalCount": edges.len(),
+                        "pageInfo": {
+                            "hasNextPage": false,
+                            "hasPreviousPage": false,
+                            "startCursor": edges.first().and_then(|e| e.get("cursor")).cloned().unwrap_or(Value::Null),
+                            "endCursor": edges.last().and_then(|e| e.get("cursor")).cloned().unwrap_or(Value::Null),
+                        }
+                    });
+                    project_connection(&connection, &selection.selection, &pascal_case(&selection.name))
+                } else if matches!(
+                    selection.name.as_str(),
+                    "secondaryLinks" | "additionalEmails" | "additionalPhones"
+                ) {
+                    Value::Array(
+                        child
+                            .as_array()
+                            .expect("array checked")
+                            .iter()
+                            .map(|item| {
+                                project_record(item, &selection.selection, selection.name.as_str())
+                            })
+                            .collect(),
+                    )
+                } else {
                     let mut null_map = Map::new();
                     for sel in &selection.selection {
                         null_map.insert(
@@ -1323,17 +1381,6 @@ fn project_record(record: &Value, selections: &[FieldSelection], type_name: &str
                         );
                     }
                     Value::Object(null_map)
-                } else {
-                    Value::Array(
-                        child
-                            .as_array()
-                            .expect("array checked")
-                            .iter()
-                            .map(|item| {
-                                project_record(item, &selection.selection, selection.name.as_str())
-                            })
-                            .collect(),
-                    )
                 }
             } else {
                 child
@@ -1680,11 +1727,17 @@ fn nested_relations(
             continue;
         }
 
-        let mut selected = selection
-            .selection
+        let inner_selections = node_selection(selection);
+        let mut selected = inner_selections
             .iter()
             .map(|nested| nested.name.clone())
-            .filter(|name| name != "__typename")
+            .filter(|name| {
+                name != "__typename"
+                    && name != "edges"
+                    && name != "totalCount"
+                    && name != "pageInfo"
+                    && name != "node"
+            })
             .collect::<Vec<_>>();
 
         if !selected.iter().any(|name| name == "id") {
