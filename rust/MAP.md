@@ -1,6 +1,10 @@
 # Port map: Twenty CRM -> Rust (axum + Postgres) + Leptos UI + Tauri 2
 
-Reference (read-only): `C:\Users\tonminh123\Documents\crm-research\twenty`
+Reference (read-only): `/Users/tonminh-mac/Documents/GitHub/twenty-2610` — a detached git worktree
+pinned at tag 2.61.0 (`ff9f69022fc3c16c6c03adcc164260fe54de29cc`). Read upstream only from there:
+`/Users/tonminh-mac/Documents/GitHub/twenty` is a normal checkout that has moved past 2.61.0, and its
+paths and line numbers produce false findings (this already produced an invented
+`engine/permissions/internal/channel-visibility/` module and a wrong feature-flag inventory).
 Decisions: [DECISIONS.md](DECISIONS.md) (ADR-001..009). Research: [research/](research/).
 Handoff: [HANDOFF.md](HANDOFF.md). Glossary: [GLOSSARY.md](GLOSSARY.md). Rules: [RULES.md](RULES.md).
 Feature status: [FEATURE-PARITY.md](FEATURE-PARITY.md).
