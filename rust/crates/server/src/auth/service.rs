@@ -219,7 +219,7 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
         "INSERT INTO core.\"user\" \
          (email, \"isEmailVerified\", \"passwordHash\", locale, \
           \"canImpersonate\", \"canAccessFullAdminPanel\") \
-         VALUES ($1, true, $2, $3, $4, $4) RETURNING id",
+         VALUES ($1, false, $2, $3, $4, $4) RETURNING id",
     )
     .bind(&email)
     .bind(&password_hash)
@@ -293,6 +293,11 @@ pub async fn sign_up(state: &AppState, input: SignUpInput) -> AuthResult<SignedU
     let issued =
         tokens::issue_token_pair(state, user_id.0, workspace_id, AuthProvider::Password).await?;
 
+    crate::auth::account_tokens::send_verification_email_if_required(
+        state, user_id.0, &email, &locale,
+    )
+    .await?;
+
     Ok(SignedUp {
         user_id: user_id.0,
         workspace_id,
@@ -331,15 +336,15 @@ pub async fn get_login_token_from_credentials(
 
     assert_password_auth_allowed(state, &input.workspace_id).await?;
 
-    let row: Option<(Uuid, Option<String>)> = sqlx::query_as(
-        "SELECT id, \"passwordHash\" FROM core.\"user\" \
+    let row: Option<(Uuid, Option<String>, bool)> = sqlx::query_as(
+        "SELECT id, \"passwordHash\", \"isEmailVerified\" FROM core.\"user\" \
          WHERE email = $1 AND \"deletedAt\" IS NULL",
     )
     .bind(&email)
     .fetch_optional(&state.core_pool)
     .await?;
 
-    let (user_id, password_hash) =
+    let (user_id, password_hash, is_email_verified) =
         row.ok_or_else(|| AuthError::user_not_found("User not found"))?;
 
     let member_row: Option<(Uuid,)> = sqlx::query_as(
@@ -364,6 +369,14 @@ pub async fn get_login_token_from_credentials(
 
     if !matches {
         return Err(AuthError::unauthenticated("Wrong password."));
+    }
+
+    if crate::auth::account_tokens::is_email_verification_required() && !is_email_verified {
+        return Err(AuthError::new(
+            403,
+            "EMAIL_NOT_VERIFIED",
+            "Email is not verified",
+        ));
     }
 
     tokens::issue_login_token(state, &email, input.workspace_id, AuthProvider::Password).await

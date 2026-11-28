@@ -133,7 +133,7 @@ fn bucket_admits(count: i64, limit: i64) -> bool {
     count <= limit
 }
 
-fn is_email_verification_required() -> bool {
+pub(crate) fn is_email_verification_required() -> bool {
     std::env::var("IS_EMAIL_VERIFICATION_REQUIRED")
         .map(|raw| raw.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
@@ -788,6 +788,61 @@ struct ResendEmailVerificationTokenInput {
     email: String,
 }
 
+async fn issue_verification_email(
+    state: &AppState,
+    user_id: Uuid,
+    email: &str,
+    locale: &str,
+) -> AuthResult<()> {
+    sqlx::query("DELETE FROM core.\"appToken\" WHERE \"userId\" = $1 AND type = $2")
+        .bind(user_id)
+        .bind(APP_TOKEN_TYPE_EMAIL_VERIFICATION)
+        .execute(&state.core_pool)
+        .await?;
+
+    let plain_token = generate_plain_token();
+    let expires_at = Utc::now() + Duration::seconds(EMAIL_VERIFICATION_TOKEN_EXPIRES_IN_SECS);
+
+    sqlx::query(
+        "INSERT INTO core.\"appToken\" (\"userId\", type, value, \"expiresAt\", context) \
+         VALUES ($1, $2, $3, $4, $5::jsonb)",
+    )
+    .bind(user_id)
+    .bind(APP_TOKEN_TYPE_EMAIL_VERIFICATION)
+    .bind(hash_token(&plain_token))
+    .bind(expires_at)
+    .bind(json!({ "email": email }).to_string())
+    .execute(&state.core_pool)
+    .await?;
+
+    let link = verification_link(&state.config.frontend_url, &plain_token, email);
+    let subject = "Welcome to Nudge: Please Confirm Your Email";
+    let rendered = send_email_verification_link_email(&link, locale, false);
+
+    if !queue_transactional_email(email, subject, &rendered) {
+        tracing::error!(to = %email, subject, "the verification email could not be queued");
+    } else {
+        tracing::info!(to = %email, subject, "verification email queued");
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn send_verification_email_if_required(
+    state: &AppState,
+    user_id: Uuid,
+    email: &str,
+    locale: &str,
+) -> AuthResult<bool> {
+    if !is_email_verification_required() {
+        return Ok(false);
+    }
+
+    issue_verification_email(state, user_id, email, locale).await?;
+
+    Ok(true)
+}
+
 async fn resend_email_verification_token(
     State(state): State<AppState>,
     Json(input): Json<ResendEmailVerificationTokenInput>,
@@ -858,37 +913,13 @@ async fn resend_email_verification_token(
         ));
     }
 
-    sqlx::query("DELETE FROM core.\"appToken\" WHERE \"userId\" = $1 AND type = $2")
-        .bind(user_id)
-        .bind(APP_TOKEN_TYPE_EMAIL_VERIFICATION)
-        .execute(&state.core_pool)
-        .await?;
-
-    let plain_token = generate_plain_token();
-    let expires_at = Utc::now() + Duration::seconds(EMAIL_VERIFICATION_TOKEN_EXPIRES_IN_SECS);
-
-    sqlx::query(
-        "INSERT INTO core.\"appToken\" (\"userId\", type, value, \"expiresAt\", context) \
-         VALUES ($1, $2, $3, $4, $5::jsonb)",
+    issue_verification_email(
+        &state,
+        user_id,
+        &email,
+        user_locale.as_deref().unwrap_or("en"),
     )
-    .bind(user_id)
-    .bind(APP_TOKEN_TYPE_EMAIL_VERIFICATION)
-    .bind(hash_token(&plain_token))
-    .bind(expires_at)
-    .bind(json!({ "email": email }).to_string())
-    .execute(&state.core_pool)
     .await?;
-
-    let link = verification_link(&state.config.frontend_url, &plain_token, &email);
-    let subject = "Welcome to Nudge: Please Confirm Your Email";
-    let rendered =
-        send_email_verification_link_email(&link, user_locale.as_deref().unwrap_or("en"), false);
-
-    if !queue_transactional_email(&email, subject, &rendered) {
-        tracing::error!(to = %email, subject, "the verification email could not be queued");
-    } else {
-        tracing::info!(to = %email, subject, "verification email queued");
-    }
 
     Ok(Json(json!({ "success": true })))
 }
