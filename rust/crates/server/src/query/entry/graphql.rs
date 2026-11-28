@@ -20,6 +20,8 @@ use uuid::Uuid;
 
 use crate::auth::error::AuthError;
 use crate::auth::middleware::AuthContext;
+use crate::file::sign_search_avatars;
+use crate::file::FileUrlSigner;
 use crate::metadata::api::errors::GraphQlError;
 use crate::metadata::api::graphql::parse_request;
 use crate::metadata::api::graphql::select_operation;
@@ -597,7 +599,7 @@ async fn execute_workspace(
             ));
         }
         let locale = search_locale(&state.core_pool, auth, headers).await?;
-        let result = search(
+        let mut result = search(
             &state.core_pool,
             runner_schema.clone(),
             schema.objects(),
@@ -607,6 +609,14 @@ async fn execute_workspace(
         )
         .await
         .map_err(runner_graphql_error)?;
+        let signer = FileUrlSigner::new(
+            state.jwt.clone(),
+            state.config.server_url.clone(),
+            state.config.file_token_expires_in_secs,
+        );
+        sign_search_avatars(&mut result, &signer, workspace_id)
+            .await
+            .map_err(|error| auth_error(&error))?;
         return Ok(project_search_connection(&result, &field.selection));
     }
     let resolver = schema.resolver(&field.name).ok_or_else(|| {

@@ -19,6 +19,7 @@ services:
       context: ../..
       dockerfile: rust/infra/Dockerfile
     ports: ["${NODE_PORT:-3000}:3000"]
+    volumes: [file-storage:/var/lib/nudge-storage]
     depends_on:
       db:
         condition: service_healthy
@@ -33,7 +34,10 @@ services:
       REDIS_URL: redis://redis:6379
       APP_SECRET: ${APP_SECRET:?set APP_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      FILE_TOKEN_EXPIRES_IN: ${FILE_TOKEN_EXPIRES_IN:-1d}
+      STORAGE_LOCAL_PATH: /var/lib/nudge-storage
       AUTH_COOKIE_ALLOWED_ORIGINS: ${AUTH_COOKIE_ALLOWED_ORIGINS:-}
 
 volumes:
   db-data:
+  file-storage:

@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         ))
         .fallback(not_found_fallback)
         .layer(CompressionLayer::new().br(true).gzip(true))
+        .merge(crate::file::router())
         .with_state(state)
 }
 

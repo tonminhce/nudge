@@ -60,7 +60,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | `createOne`/`createMany`, `updateOne`/`updateMany` | **done** | 4 | mutation round-trip capture matches live, including actor fields and upsert |
 | `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
 | `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
-| Full text search | **part** | 4→6 | cross-object ranking, filters, cursors, CJK fallback, favicons, metadata overrides and 39 standard labels across 35 locales are implemented; file signing, application-specific catalogs and replica routing remain |
+| Full text search | **part** | 4→6 | cross-object ranking, filters, cursors, CJK fallback, favicons, metadata overrides, 39 standard labels across 35 locales and signed core-picture avatars are implemented; Files ownership guards, application-specific catalogs and replica routing remain |
 | Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope, upstream relative-date ranges and relation-hop feature gating. Access-group synchronization and sharing remain. |
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
@@ -127,7 +127,7 @@ the live reference in the browser.
 | Event system and the transactional outbox | todo | 7 | 17 database listeners |
 | Email sending over SMTP, with the upstream templates | todo | 6 | 17 React Email templates |
 | Outbound webhooks with the HMAC signature | todo | 6 | signature must match byte for byte |
-| File storage: local disk and S3 | todo | 6 | |
+| File storage: local disk and S3 | **part** | 6 | signed local core-picture/files-field download supports workspace/folder binding, expiry policy, safe paths, MIME, cache and ranges; upload, S3, remote files and Files ownership guards remain |
 | Messaging sync: Gmail, Microsoft, IMAP | todo | 7 | |
 | Calendar sync: Google, Microsoft, CalDAV | todo | 7 | |
 | Contact auto creation and participant matching | todo | 7 | |

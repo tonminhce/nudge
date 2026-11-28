@@ -1,6 +1,7 @@
 mod auth;
 mod db;
 mod events;
+mod file;
 mod metadata;
 mod permissions;
 pub mod query;

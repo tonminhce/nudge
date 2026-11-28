@@ -1,4 +1,5 @@
 use std::env;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use crate::error::{Error, Result};
@@ -54,6 +55,8 @@ pub struct Config {
     pub workspace_schema_ddl_locked: bool,
     pub search_ilike_fallback_timeout_ms: u64,
     pub allow_requests_to_twenty_icons: bool,
+    pub file_token_expires_in_secs: u64,
+    pub storage_local_path: PathBuf,
 }
 
 impl Config {
@@ -109,6 +112,8 @@ impl Config {
                 2000,
             )?,
             allow_requests_to_twenty_icons: parse_bool_or("ALLOW_REQUESTS_TO_TWENTY_ICONS", true)?,
+            file_token_expires_in_secs: parse_duration_or("FILE_TOKEN_EXPIRES_IN", 24 * 60 * 60)?,
+            storage_local_path: PathBuf::from(var_or("STORAGE_LOCAL_PATH", ".local-storage")),
         })
     }
 }

@@ -726,6 +726,11 @@ fn search_record_from_row(
             .and_then(Value::as_str)
             .and_then(link_favicon_url)
             .unwrap_or_default(),
+        Some((column, FieldMetadataType::Text)) => row
+            .get(&column)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
         _ => String::new(),
     };
     Ok(SearchRecord {

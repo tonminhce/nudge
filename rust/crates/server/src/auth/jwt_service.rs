@@ -126,6 +126,14 @@ impl JwtService {
     }
 
     pub async fn verify(&self, token: &str) -> AuthResult<Value> {
+        self.verify_with_expiration(token, true).await
+    }
+
+    pub async fn verify_with_expiration(
+        &self,
+        token: &str,
+        enforce_expiration: bool,
+    ) -> AuthResult<Value> {
         let (encoded_header, encoded_payload, encoded_signature) = split_token(token)?;
         let header: Value = decode_json(encoded_header)?;
 
@@ -161,9 +169,11 @@ impl JwtService {
             public_key_pem.as_deref(),
         )?;
 
-        if let Some(exp) = payload.get("exp").and_then(Value::as_i64) {
-            if chrono::Utc::now().timestamp() >= exp {
-                return Err(AuthError::unauthenticated("Token has expired."));
+        if enforce_expiration {
+            if let Some(exp) = payload.get("exp").and_then(Value::as_i64) {
+                if chrono::Utc::now().timestamp() >= exp {
+                    return Err(AuthError::unauthenticated("Token has expired."));
+                }
             }
         }
 
@@ -171,7 +181,19 @@ impl JwtService {
     }
 
     pub async fn verify_typed(&self, token: &str, expected: TokenType) -> AuthResult<Value> {
-        let payload = self.verify(token).await?;
+        self.verify_typed_with_expiration(token, expected, true)
+            .await
+    }
+
+    pub async fn verify_typed_with_expiration(
+        &self,
+        token: &str,
+        expected: TokenType,
+        enforce_expiration: bool,
+    ) -> AuthResult<Value> {
+        let payload = self
+            .verify_with_expiration(token, enforce_expiration)
+            .await?;
 
         let token_type = payload
             .get("type")

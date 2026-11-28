@@ -1400,6 +1400,8 @@ mod tests {
             workspace_schema_ddl_locked: false,
             search_ilike_fallback_timeout_ms: 2000,
             allow_requests_to_twenty_icons: true,
+            file_token_expires_in_secs: 86400,
+            storage_local_path: ".local-storage".into(),
         }
     }
 
