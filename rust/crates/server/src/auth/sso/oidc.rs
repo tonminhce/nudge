@@ -411,7 +411,7 @@ async fn load_oidc_identity_provider(
     let id = Uuid::parse_str(identity_provider_id).map_err(|_| idp_not_found_error())?;
 
     let row: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
-        "SELECT issuer, \"clientID\", \"clientSecret\", type \
+        "SELECT issuer, \"clientID\", \"clientSecret\", type::text \
          FROM core.\"workspaceSSOIdentityProvider\" WHERE id = $1",
     )
     .bind(id)
