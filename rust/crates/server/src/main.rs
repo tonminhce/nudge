@@ -6,6 +6,7 @@ mod metadata;
 mod permissions;
 pub mod query;
 mod routes;
+mod secure_http;
 mod standard_objects;
 mod state;
 mod validation;

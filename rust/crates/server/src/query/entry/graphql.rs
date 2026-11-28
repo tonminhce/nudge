@@ -602,14 +602,16 @@ async fn execute_workspace(
             permissions,
             auth.workspace_member_id,
         )
-        .map_err(runner_graphql_error)?,
+        .map_err(runner_graphql_error)?
+        .with_user_workspace_id(auth.user_workspace_id),
         None => RunnerSchema::build(
             &workspace_id,
             schema.objects(),
             &maps.field_metadata_maps,
             &maps.index_metadata_maps,
         )
-        .map_err(runner_graphql_error)?,
+        .map_err(runner_graphql_error)?
+        .with_user_workspace_id(auth.user_workspace_id),
     });
     let actor = Some(ActorContext::from_auth(auth));
 
@@ -841,7 +843,15 @@ async fn execute_workspace(
             .await
         }
         ResolverMethod::MergeMany => {
-            merge_many_root(state, schema, &runner_schema, field, resolver).await
+            merge_many_root(
+                state,
+                schema,
+                &runner_schema,
+                field,
+                resolver,
+                actor.as_ref(),
+            )
+            .await
         }
         ResolverMethod::GroupBy => Err(GraphQlError::user_input(
             "GroupBy is executed by the group-by runner endpoint in a following slice",
@@ -1385,6 +1395,7 @@ async fn merge_many_root(
     runner_schema: &RunnerSchema,
     field: &FieldSelection,
     resolver: &super::schema::RootResolver,
+    actor: Option<&ActorContext>,
 ) -> Result<Value, GraphQlError> {
     let ids = field
         .argument("ids")
@@ -1412,6 +1423,7 @@ async fn merge_many_root(
             conflict_priority_index,
             dry_run: optional_bool_arg(field, "dryRun"),
         },
+        actor,
         root_record_fields_schemaless(field),
         nested_relations(schema, field, resolver),
     )

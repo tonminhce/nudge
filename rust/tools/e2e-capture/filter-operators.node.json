@@ -1,0 +1,48 @@
+{
+  "normalized": {
+    "compositeIlike": {
+      "data": {
+        "people": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "BAD_USER_INPUT",
+            "subCode": "INVALID_ARGS_FILTER",
+            "userFriendlyMessage": "An error occurred."
+          },
+          "message": "Sub field \"ilike\" not found for composite type: FULL_NAME. Available sub fields: firstName, lastName."
+        }
+      ]
+    },
+    "compositeIlikeCodes": [
+      "BAD_USER_INPUT",
+      "INVALID_ARGS_FILTER"
+    ],
+    "isNull": {
+      "data": {
+        "people": {
+          "edges": [],
+          "totalCount": 0
+        }
+      }
+    },
+    "or": {
+      "data": {
+        "people": {
+          "edges": [
+            {
+              "node": {
+                "name": {
+                  "firstName": "Bob"
+                }
+              }
+            }
+          ],
+          "totalCount": 1
+        }
+      }
+    }
+  },
+  "scenario": "filter-operators"
+}

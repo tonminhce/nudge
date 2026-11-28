@@ -8,7 +8,6 @@ pub mod service;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::time::Duration;
 
 use axum::extract::FromRequestParts;
 use axum::extract::Query;
@@ -319,6 +318,7 @@ async fn event_subscription_response(
             )]),
         );
     };
+    let heartbeat_registry = state.event_streams.clone();
     let cleanup = EventStreamCleanup {
         registry: state.event_streams.clone(),
         workspace_id,
@@ -337,9 +337,10 @@ async fn event_subscription_response(
             }
         });
         yield Ok::<Event, Infallible>(Event::default().event("next").data(initial.to_string()));
-        let mut interval = tokio::time::interval(Duration::from_secs(15));
+        let mut interval = tokio::time::interval(EventStreamRegistry::keepalive_interval());
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         interval.tick().await;
+        let mut last_ttl_refresh_at = 0_u64;
         loop {
             tokio::select! {
                 payload = receiver.recv() => {
@@ -350,7 +351,12 @@ async fn event_subscription_response(
                     yield Ok::<Event, Infallible>(Event::default().event("next").data(data.to_string()));
                 }
                 _ = interval.tick() => {
-                    yield Ok::<Event, Infallible>(Event::default().event("next").data("{}"));
+                    if heartbeat_registry
+                        .heartbeat(workspace_id, &event_stream_id, &mut last_ttl_refresh_at)
+                        .is_none()
+                    {
+                        yield Ok::<Event, Infallible>(Event::default().event("next").data("{}"));
+                    }
                 }
             }
         }

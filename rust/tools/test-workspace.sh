@@ -6,14 +6,24 @@ cd "$(dirname "$0")/.."
 container="${NUDGE_TEST_DATABASE_CONTAINER:-infra-db-1}"
 database_name="nudge_workspace_test_$$"
 database_url="$(
-  python3 - "$database_name" <<'PY'
+  python3 - "$database_name" "${NUDGE_TEST_BASE_DATABASE_URL:-}" <<'PY'
 import pathlib
 import re
 import sys
 from urllib.parse import urlsplit, urlunsplit
 
 source = pathlib.Path("tools/run-same-db-server.py").read_text()
-url = re.search(r'PG_DATABASE_URL": "([^"]+)"', source).group(1)
+patterns = (
+    r'NUDGE_PG_DATABASE_URL",\s*"([^"]+)"',
+    r'"PG_DATABASE_URL":\s*"([^"]+)"',
+    r'PG_DATABASE_URL[^\n]*?"(postgres(?:ql)?://[^"]+)"',
+)
+url = sys.argv[2] or next(
+    (match.group(1) for pattern in patterns if (match := re.search(pattern, source))),
+    None,
+)
+if url is None:
+    raise SystemExit("reference database url not found in tools/run-same-db-server.py")
 parts = urlsplit(url)
 print(urlunsplit((parts.scheme, parts.netloc, "/" + sys.argv[1], "", "")))
 PY

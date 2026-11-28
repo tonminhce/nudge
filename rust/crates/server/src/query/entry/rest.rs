@@ -254,7 +254,7 @@ async fn rest_endpoint(
             permissions,
             auth.workspace_member_id,
         ) {
-            Ok(schema) => schema,
+            Ok(built) => built.with_user_workspace_id(auth.user_workspace_id),
             Err(error) => return RestError::internal(error.message().to_string()).response(),
         },
         None => match RunnerSchema::build(
@@ -263,7 +263,7 @@ async fn rest_endpoint(
             &maps.field_metadata_maps,
             &maps.index_metadata_maps,
         ) {
-            Ok(schema) => schema,
+            Ok(built) => built.with_user_workspace_id(auth.user_workspace_id),
             Err(error) => return RestError::internal(error.message().to_string()).response(),
         },
     });
@@ -551,6 +551,7 @@ async fn dispatch_rest(
                         conflict_priority_index,
                         dry_run: body.get("dryRun").and_then(Value::as_bool).unwrap_or(false),
                     },
+                    Some(&actor),
                     picked_fields.clone().unwrap_or_default(),
                     nested.clone(),
                 )

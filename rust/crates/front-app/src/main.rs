@@ -9,6 +9,7 @@ mod command_menu;
 mod layout;
 mod pages;
 mod record_index;
+mod record_order;
 mod record_views;
 mod records;
 mod side_panel;
@@ -21,7 +22,24 @@ fn start() {
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    mount_to_body(App);
+    match root_element() {
+        Some(root) => mount_to(root, App).forget(),
+        None => mount_to_body(App),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn root_element() -> Option<web_sys::HtmlElement> {
+    use wasm_bindgen::JsCast;
+
+    document()
+        .get_element_by_id("root")
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn root_element() -> Option<web_sys::HtmlElement> {
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
