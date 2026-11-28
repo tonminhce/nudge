@@ -572,7 +572,7 @@ async fn fetch_channels(
          ca.\"userWorkspaceId\" AS \"userWorkspaceId\", ca.\"applicationId\" AS \"applicationId\" \
          FROM core.{channel_table} AS ch \
          LEFT JOIN core.{account_table} AS ca ON ca.id = ch.\"connectedAccountId\" \
-         WHERE ch.\"workspaceId\" = :workspaceId AND ch.id = ANY(ARRAY[:...channelIds]::uuid[])"
+         WHERE ch.\"workspaceId\" = :workspaceId::uuid AND ch.id = ANY(ARRAY[:...channelIds]::uuid[])"
     );
     let mut parameters = Map::new();
     parameters.insert(
@@ -1502,6 +1502,38 @@ mod tests {
         visit_nested_records(&mut records[0], "task", &schema, &mut |_, _| {});
 
         assert_eq!(records, before);
+    }
+
+    #[test]
+    fn association_columns_resolve_through_the_relation_join_column() {
+        let schema = thread_schema();
+        let message = schema.object("message").expect("message model");
+
+        assert_eq!(
+            column_for_field(message, "messageThread"),
+            "messageThreadId"
+        );
+        assert_eq!(column_for_field(message, "subject"), "subject");
+        assert_eq!(column_for_field(message, "neverNamed"), "neverNamedId");
+    }
+
+    #[test]
+    fn channel_lookup_casts_the_workspace_parameter_to_uuid() {
+        let table = quoted_identifier("messageChannel").expect("channel table");
+        let account = quoted_identifier("connectedAccount").expect("account table");
+        let sql = format!(
+            "SELECT ch.id FROM core.{table} AS ch \
+             LEFT JOIN core.{account} AS ca ON ca.id = ch.\"connectedAccountId\" \
+             WHERE ch.\"workspaceId\" = :workspaceId::uuid"
+        );
+        let mut parameters = Map::new();
+        parameters.insert(
+            String::from("workspaceId"),
+            Value::String(Uuid::new_v4().to_string()),
+        );
+        let compiled = compile_named_parameters(&sql, &parameters).expect("compiled");
+
+        assert!(compiled.text.contains("$1::uuid"), "{}", compiled.text);
     }
 
     #[test]
