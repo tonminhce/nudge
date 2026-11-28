@@ -1748,10 +1748,11 @@ mod db_tests {
             .expect("granting all records read");
         sqlx::query(
             "INSERT INTO core.\"objectPermission\" \
-             (id, \"roleId\", \"objectMetadataId\", \"workspaceId\", \"applicationId\", \
+             (id, \"universalIdentifier\", \"roleId\", \"objectMetadataId\", \"workspaceId\", \"applicationId\", \
               \"canReadObjectRecords\") \
-             VALUES ($1, $2, $3, $4, $5, true)",
+             VALUES ($1, $2, $3, $4, $5, $6, true)",
         )
+        .bind(Uuid::new_v4())
         .bind(Uuid::new_v4())
         .bind(role_id)
         .bind(company_object_id)
@@ -1815,11 +1816,12 @@ mod db_tests {
         let workspace_id = Uuid::new_v4();
         let application_id = Uuid::new_v4();
         let role_id = Uuid::new_v4();
+        let mut tx = pool.begin().await.expect("starting foreign role transaction");
         sqlx::query(
             "INSERT INTO core.\"workspace\" \
              (id, \"displayName\", \"inviteHash\", \"activationStatus\", subdomain, \
               \"workspaceCustomApplicationId\", \"isPasswordAuthEnabled\", \"databaseSchema\") \
-             VALUES ($1, 'Kernel Foreign', $2, 'CREATED', $3, $4, true, $5)",
+             VALUES ($1, 'Kernel Foreign', $2, 'PENDING_CREATION', $3, $4, true, $5)",
         )
         .bind(workspace_id)
         .bind(Uuid::new_v4())
@@ -1829,7 +1831,7 @@ mod db_tests {
         ))
         .bind(application_id)
         .bind(nudge_core::ids::workspace_schema_name(&workspace_id))
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .expect("inserting foreign workspace");
         sqlx::query(
@@ -1840,7 +1842,7 @@ mod db_tests {
         .bind(application_id)
         .bind(Uuid::new_v4())
         .bind(workspace_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .expect("inserting foreign application");
         sqlx::query(
@@ -1853,9 +1855,10 @@ mod db_tests {
         .bind(Uuid::new_v4())
         .bind(application_id)
         .bind(workspace_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .expect("inserting foreign role");
+        tx.commit().await.expect("committing foreign role transaction");
         role_id
     }
 
