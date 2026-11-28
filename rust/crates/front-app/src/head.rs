@@ -37,14 +37,11 @@ impl PageHead {
     }
 
     pub fn document_title(&self) -> String {
-        resolve_document_title(
-            &self.route_title.get_untracked(),
-            &self.page_titles.get_untracked(),
-        )
+        resolve_document_title(&self.route_title.get(), &self.page_titles.get())
     }
 
     pub fn favicon_href(&self, base_url: &str) -> String {
-        favicon_href(self.workspace_logo.get_untracked().as_deref(), base_url)
+        favicon_href(self.workspace_logo.get().as_deref(), base_url)
     }
 }
 
@@ -72,7 +69,6 @@ pub fn PageTitle(#[prop(into)] title: TextProp) -> impl IntoView {
         head.page_titles
             .update(|titles| titles.retain(|(slot, _)| *slot != id));
     });
-    ()
 }
 
 #[component]
@@ -84,7 +80,7 @@ pub fn RoutePageTitle() -> impl IntoView {
             .set(page_title_from_path(&location.pathname.get()));
     });
     view! {
-        <Title text=move || resolve_document_title(&head.route_title.get(), &head.page_titles.get()) />
+        <Title text=move || head.document_title() />
     }
 }
 
@@ -108,14 +104,13 @@ fn favicon_element() -> Option<web_sys::Element> {
 pub fn PageFavicon() -> impl IntoView {
     let head = expect_context::<PageHead>();
     Effect::new(move |_| {
-        let href = favicon_href(head.workspace_logo.get().as_deref(), &server_url());
+        let href = head.favicon_href(&server_url());
         if let Some(link) = favicon_element() {
             let _ = link.set_attribute("type", "image/x-icon");
             let _ = link.set_attribute("href", &href);
             let _ = link.set_attribute("data-rh", "true");
         }
     });
-    ()
 }
 
 fn current_origin() -> String {
@@ -153,7 +148,6 @@ pub fn WorkspaceLogoEffect() -> impl IntoView {
                 .set(fetch_workspace_logo(&base_url, &origin).await);
         });
     });
-    ()
 }
 
 #[cfg(test)]

@@ -9,9 +9,7 @@ fn url_origin(base_url: &str) -> Option<String> {
         return None;
     }
     let rest = &base_url[scheme_end + 3..];
-    let authority_end = rest
-        .find(|c| matches!(c, '/' | '?' | '#'))
-        .unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     if rest[..authority_end].is_empty() {
         return None;
     }
