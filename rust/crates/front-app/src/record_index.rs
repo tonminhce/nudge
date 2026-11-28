@@ -755,18 +755,21 @@ pub(crate) fn text_filter(object: &str, query: &str) -> Option<Value> {
 
 fn order_by(object: &str, sort: RecordSort) -> Option<Value> {
     let value = match (object, sort) {
-        ("person", RecordSort::NameAsc) => {
-            serde_json::json!([{"name": {"lastName": "AscNullsFirst"}}])
-        }
-        ("person", RecordSort::NameDesc) => {
-            serde_json::json!([{"name": {"lastName": "DescNullsLast"}}])
-        }
-        (_, RecordSort::NameAsc) => serde_json::json!([{"name": "AscNullsFirst"}]),
+        ("person", RecordSort::NameAsc) => person_name_order_by("AscNullsLast"),
+        ("person", RecordSort::NameDesc) => person_name_order_by("DescNullsLast"),
+        (_, RecordSort::NameAsc) => serde_json::json!([{"name": "AscNullsLast"}]),
         (_, RecordSort::NameDesc) => serde_json::json!([{"name": "DescNullsLast"}]),
         (_, RecordSort::Newest) => serde_json::json!([{"createdAt": "DescNullsLast"}]),
-        (_, RecordSort::Oldest) => serde_json::json!([{"createdAt": "AscNullsFirst"}]),
+        (_, RecordSort::Oldest) => serde_json::json!([{"createdAt": "AscNullsLast"}]),
     };
     Some(value)
+}
+
+fn person_name_order_by(direction: &str) -> Value {
+    serde_json::json!([
+        { "name": { "firstName": direction } },
+        { "name": { "lastName": direction } }
+    ])
 }
 
 pub(crate) fn display_name(record: &Value) -> String {
@@ -841,6 +844,63 @@ mod tests {
         let filter = text_filter("person", "Ada").unwrap();
         assert_eq!(filter["or"][0]["name"]["firstName"]["ilike"], "%Ada%");
         assert_eq!(filter["or"][2]["emails"]["primaryEmail"]["ilike"], "%Ada%");
+    }
+
+    #[test]
+    fn company_search_uses_a_case_insensitive_contains() {
+        let filter = text_filter("company", "Acme").unwrap();
+        assert_eq!(filter["name"]["ilike"], "%Acme%");
+        assert!(filter["name"].get("startsWith").is_none());
+    }
+
+    #[test]
+    fn an_empty_search_sends_no_filter_at_all() {
+        assert!(text_filter("person", "   ").is_none());
+        assert!(text_filter("company", "").is_none());
+    }
+
+    #[test]
+    fn person_name_sort_expands_to_the_composite_sub_fields() {
+        let ascending = order_by("person", RecordSort::NameAsc).unwrap();
+        assert_eq!(
+            ascending,
+            serde_json::json!([
+                { "name": { "firstName": "AscNullsLast" } },
+                { "name": { "lastName": "AscNullsLast" } }
+            ])
+        );
+        let descending = order_by("person", RecordSort::NameDesc).unwrap();
+        assert_eq!(
+            descending,
+            serde_json::json!([
+                { "name": { "firstName": "DescNullsLast" } },
+                { "name": { "lastName": "DescNullsLast" } }
+            ])
+        );
+    }
+
+    #[test]
+    fn scalar_name_sort_keeps_a_single_order_leaf() {
+        assert_eq!(
+            order_by("company", RecordSort::NameAsc).unwrap(),
+            serde_json::json!([{"name": "AscNullsLast"}])
+        );
+        assert_eq!(
+            order_by("company", RecordSort::NameDesc).unwrap(),
+            serde_json::json!([{"name": "DescNullsLast"}])
+        );
+    }
+
+    #[test]
+    fn recency_sorts_keep_nulls_last_in_both_directions() {
+        assert_eq!(
+            order_by("note", RecordSort::Newest).unwrap(),
+            serde_json::json!([{"createdAt": "DescNullsLast"}])
+        );
+        assert_eq!(
+            order_by("note", RecordSort::Oldest).unwrap(),
+            serde_json::json!([{"createdAt": "AscNullsLast"}])
+        );
     }
 
     #[test]
