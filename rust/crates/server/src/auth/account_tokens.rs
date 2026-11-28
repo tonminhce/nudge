@@ -1457,10 +1457,15 @@ async fn load_invitation_sender(
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "passes workspace and sender parameters to issue invitation"
+)]
 async fn create_workspace_invitation(
     state: &AppState,
     workspace_id: Uuid,
     workspace_display_name: Option<&str>,
+    workspace_logo: Option<&str>,
     sender: &InvitationSender,
     email: &str,
     role_id: Option<Uuid>,
@@ -1540,7 +1545,7 @@ async fn create_workspace_invitation(
     let rendered = send_invite_link_email(
         &link,
         workspace_display_name,
-        None,
+        workspace_logo,
         &sender.email,
         &sender.first_name,
         &state.config.frontend_url,
@@ -1581,13 +1586,29 @@ async fn send_invitations_inner(
         assert_role_assignable_to_users(state, command.workspace_id, role_id).await?;
     }
 
-    let workspace: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT \"displayName\" FROM core.\"workspace\" WHERE id = $1")
-            .bind(command.workspace_id)
-            .fetch_optional(&state.core_pool)
-            .await?;
+    let workspace: Option<(Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT \"displayName\", \"logoFileId\" FROM core.\"workspace\" WHERE id = $1",
+    )
+    .bind(command.workspace_id)
+    .fetch_optional(&state.core_pool)
+    .await?;
 
-    let workspace_display_name = workspace.and_then(|(name,)| name);
+    let (workspace_display_name, workspace_logo_file_id) = match workspace {
+        Some((name, logo_id)) => (name, logo_id),
+        None => (None, None),
+    };
+
+    let workspace_logo = match workspace_logo_file_id {
+        Some(file_id) => {
+            let signer = crate::file::FileUrlSigner::new(
+                state.jwt.clone(),
+                state.config.server_url.clone(),
+                state.config.file_token_expires_in_secs,
+            );
+            signer.signed_url(file_id, command.workspace_id).await.ok()
+        }
+        None => None,
+    };
     let sender = load_invitation_sender(
         state,
         command.sender_user_id,
@@ -1620,6 +1641,7 @@ async fn send_invitations_inner(
             state,
             command.workspace_id,
             workspace_display_name.as_deref(),
+            workspace_logo.as_deref(),
             &sender,
             &email,
             command.role_id,
@@ -2210,5 +2232,37 @@ mod tests {
         assert!(!is_email_verification_required());
 
         std::env::remove_var("IS_EMAIL_VERIFICATION_REQUIRED");
+    }
+
+    #[test]
+    fn invitation_email_includes_workspace_logo_when_provided() {
+        let rendered_with_logo = send_invite_link_email(
+            "https://app.test/invite?token=abc",
+            Some("Acme Inc"),
+            Some("https://app.test/files/logo.png"),
+            "sender@test.test",
+            "Ada",
+            "https://app.test",
+            "en",
+        );
+
+        assert!(rendered_with_logo
+            .html
+            .contains("https://app.test/files/logo.png"));
+        assert!(rendered_with_logo.html.contains("Acme Inc"));
+
+        let rendered_without_logo = send_invite_link_email(
+            "https://app.test/invite?token=abc",
+            Some("Acme Inc"),
+            None,
+            "sender@test.test",
+            "Ada",
+            "https://app.test",
+            "en",
+        );
+
+        assert!(!rendered_without_logo
+            .html
+            .contains("https://app.test/files/logo.png"));
     }
 }
