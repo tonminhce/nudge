@@ -89,7 +89,9 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Invitations | **done** | 2 | verbatim tokens, resend rotation, upstream throttle set |
 | Email verification and password reset | **done** | 2 | hashed tokens, upstream error matrix, 3/15 min reset throttle, `PASSWORD_CHANGED` revocations |
 | Browser email/password auth flow | **part** | 5 | Existing/new email branching, reference-matched second step, validation, password visibility and reset notice are implemented; SSO/2FA screens and full account-recovery UI remain |
-| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 plus transactional update RLS, upstream relative-date ranges, feature-gated relation-hop RLS and company access-group materialization landed; predicate values follow the upstream view-filter stringification, so a literal-value group only matches Select/Uuid/Relation fields as it does upstream. Sharing, propagation plans and non-company groups remain |
+| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 plus transactional update RLS, upstream relative-date ranges, feature-gated relation-hop RLS and company access-group materialization landed; predicate values follow the upstream view-filter stringification, so a literal-value group only matches Select/Uuid/Relation fields as it does upstream. `recordShare` writes, the `_isPrivate` state machine, the access-group propagation pipeline and non-company group materialization are `@license Enterprise` in 2.61.0 (`research/permissions.md` §0, §8 D0) and stay out of scope. |
+| Channel visibility (message/calendar field redaction) | todo | 4→6 | Apache code in 2.61.0, not an RLS rule: `common-record-visibility.service.ts:16` runs from `common-base-query-runner.service.ts:343` on every result and blanks `message.subject/text/attachments`, `attachment`, `calendarEvent` and `timelineActivity.properties` for members who do not own the connected account, writing the `FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED` sentinel. Nudge has no redaction layer, so object-level read on `message` currently exposes another member's mail body; `search.rs:39-50` has the object list but the default search branch skips it. See `research/permissions.md` §2.10. |
+| Permission-table DDL gate | todo | 3→4 | Nudge creates `accessGroup`/`recordShare` unconditionally (`standard_objects.rs:483`, `standard_objects/permissions.rs:97`); 2.61.0 gates that DDL on `IS_PERMISSION_TABLES_ENABLED` (`FeatureFlagKey.ts:18`). `IS_RELATED_RECORD_PATHS_ENABLED` (`FeatureFlagKey.ts:10`) has no Nudge reader. |
 
 ## D. Web interface (Leptos)
 
@@ -153,7 +155,8 @@ the live reference in the browser.
 
 ## What is left, in order
 
-1. Permissions P4–P5 and record-plane gaps: access-group synchronization, private/share overlays, destructive merge, file-backed Search images, full SSE events and hooks.
+1. Channel-visibility field redaction (Apache, leaks mail bodies today) and the record-plane gaps: destructive merge, file-backed Search images, full SSE events and hooks.
+2. Permissions P4–P5 follow-ups: read `IS_PERMISSION_TABLES_ENABLED` before the permission DDL, and give non-company objects the same access-group treatment when their rules exist.
 2. Frontend exact parity: production Dialog/Popover/Menu/Tabs contracts, record index/show surfaces, contextual command menu, routed side panel and settings leaves.
 3. Wave 6: webhooks, files, SMTP email, search/import/export, timeline, favorites, notes/tasks.
 4. Wave 7: queues, workflows, messaging/calendar sync, AI agents, MCP, billing and the remaining platform features.

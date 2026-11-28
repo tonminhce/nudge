@@ -14,16 +14,21 @@ secret = next((value for value in matches if len(value) == 43), None)
 if not secret:
     raise SystemExit("reference app secret candidate not found")
 
+port = os.environ.get("NUDGE_NODE_PORT", "3000")
+origin = f"http://localhost:{port}"
+
 env = os.environ.copy()
 env.update(
     {
         "NODE_ENV": "development",
-        "NODE_PORT": "3000",
-        "SERVER_URL": "http://localhost:3000",
-        "FRONTEND_URL": "http://localhost:3000",
-        "PG_DATABASE_URL": "postgres://postgres:postgres@127.0.0.1:5433/twenty_ref",
+        "NODE_PORT": port,
+        "SERVER_URL": os.environ.get("NUDGE_SERVER_URL", origin),
+        "FRONTEND_URL": os.environ.get("NUDGE_FRONTEND_URL", origin),
+        "PG_DATABASE_URL": os.environ.get(
+            "NUDGE_PG_DATABASE_URL", "postgres://postgres:postgres@127.0.0.1:5433/twenty_ref"
+        ),
         "PG_POOL_MAX_CONNECTIONS": "20",
-        "REDIS_URL": "redis://127.0.0.1:6380",
+        "REDIS_URL": os.environ.get("NUDGE_REDIS_URL", "redis://127.0.0.1:6380"),
         "APP_SECRET": secret,
         "ACCESS_TOKEN_EXPIRES_IN": "1800",
         "REFRESH_TOKEN_EXPIRES_IN": "3600",
