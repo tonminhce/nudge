@@ -21,6 +21,21 @@ struct EventStream {
     sender: mpsc::UnboundedSender<Value>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EventWriter {
+    pub user_id: Option<Uuid>,
+    pub workspace_member_id: Option<Uuid>,
+}
+
+impl EventWriter {
+    pub fn from_auth(auth: &AuthContext) -> Self {
+        Self {
+            user_id: auth.user_id,
+            workspace_member_id: auth.workspace_member_id,
+        }
+    }
+}
+
 impl EventStreamRegistry {
     pub fn open(
         &self,
@@ -101,6 +116,7 @@ impl EventStreamRegistry {
         object_name_singular: &str,
         record_id: &str,
         properties: Value,
+        writer: Option<&EventWriter>,
     ) {
         let operation = match object_name_singular {
             "person" => String::from("FindManyPeople"),
@@ -129,8 +145,8 @@ impl EventStreamRegistry {
                         "action": action,
                         "objectNameSingular": object_name_singular,
                         "recordId": record_id,
-                        "userId": Value::Null,
-                        "workspaceMemberId": Value::Null,
+                        "userId": writer.and_then(|writer| writer.user_id).map(|id| Value::String(id.to_string())).unwrap_or(Value::Null),
+                        "workspaceMemberId": writer.and_then(|writer| writer.workspace_member_id).map(|id| Value::String(id.to_string())).unwrap_or(Value::Null),
                         "properties": properties,
                     },
                     "queryIds": query_ids,
@@ -203,6 +219,10 @@ mod tests {
             "person",
             "person-1",
             json!({"updatedFields": ["name"]}),
+            Some(&EventWriter {
+                user_id: Some(user.user_id.expect("test user")),
+                workspace_member_id: None,
+            }),
         );
 
         let payload = receiver.try_recv().expect("matching event");
@@ -220,7 +240,14 @@ mod tests {
             String::from("FindManyPeople"),
         ));
         assert!(registry.remove_query(workspace_id, "stream-1", &user, "people-query"));
-        registry.publish_record(workspace_id, "updated", "person", "person-1", json!({}));
+        registry.publish_record(
+            workspace_id,
+            "updated",
+            "person",
+            "person-1",
+            json!({}),
+            None,
+        );
         assert!(receiver.try_recv().is_err());
     }
 }

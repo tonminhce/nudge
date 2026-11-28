@@ -152,7 +152,10 @@ fn validate_args(
     Ok(())
 }
 
-fn readable_field_names(schema: &RunnerSchema, model: &super::base::ObjectModel) -> Vec<String> {
+pub(crate) fn readable_field_names(
+    schema: &RunnerSchema,
+    model: &super::base::ObjectModel,
+) -> Vec<String> {
     let mut names = Vec::new();
     for column in &model.shape.columns {
         if schema.is_field_unreadable(model.object.id, column.field_metadata_id) {
