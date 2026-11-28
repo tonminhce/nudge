@@ -79,7 +79,7 @@ pub fn is_number(value: &Value) -> bool {
 }
 
 pub fn is_object(value: &Value) -> bool {
-    matches!(value, Value::Object(_) | Value::Array(_))
+    js_typeof(value) == "object" && !value.is_null()
 }
 
 pub fn is_plain_object(value: &Value) -> bool {

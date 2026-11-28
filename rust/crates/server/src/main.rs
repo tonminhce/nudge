@@ -8,6 +8,7 @@ pub mod query;
 mod routes;
 mod standard_objects;
 mod state;
+mod validation;
 mod workspace_migrations;
 
 use anyhow::Context;

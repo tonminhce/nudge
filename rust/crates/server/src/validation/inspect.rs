@@ -188,10 +188,6 @@ pub fn render_f64(value: f64) -> String {
     }
 }
 
-pub fn number_equals_f64(number: &Number, target: f64) -> bool {
-    number.as_f64().is_some_and(|value| value == target)
-}
-
 pub fn is_js_finite(number: &Number) -> bool {
     number
         .as_f64()

@@ -403,7 +403,6 @@ pub fn is_safe_url(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn uuid_guard_accepts_versions_one_to_five_only() {
@@ -578,27 +577,15 @@ mod tests {
 
     #[test]
     fn final_labels_allow_the_short_tld_alternative() {
-        assert!(matches_final_label_alternative("com"));
-        assert!(matches_final_label_alternative("c"));
-        assert!(matches_final_label_alternative("xn--abc"));
-        assert!(!matches_final_label_alternative("-a"));
-        assert!(!matches_final_label_alternative(&"a".repeat(62)));
-        assert!(matches_final_label_alternative(&"a".repeat(61)));
+        assert!(matches_final_label("com"));
+        assert!(matches_final_label("c"));
+        assert!(matches_final_label("xn--abc"));
+        assert!(!matches_final_label("-a"));
+        assert!(!matches_final_label(&"a".repeat(62)));
+        assert!(matches_final_label(&"a".repeat(61)));
         assert!(matches_final_tld_pair("a-..com"));
         assert!(matches_final_tld_pair("-b.com"));
         assert!(!matches_final_tld_pair("a.c"));
         assert!(!matches_final_tld_pair("a.b1c"));
     }
-
-    #[test]
-    fn text_value_guard_follows_the_non_empty_string_check() {
-        assert!(has_text_value(&json!("a")));
-        assert!(!has_text_value(&json("")));
-        assert!(!has_text_value(&json!(1)));
-        assert!(!has_text_value(&serde_json::Value::Null));
-    }
-}
-
-pub fn has_text_value(value: &serde_json::Value) -> bool {
-    crate::validation::values::is_non_empty_string(value)
 }

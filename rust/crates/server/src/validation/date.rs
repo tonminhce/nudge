@@ -191,7 +191,7 @@ fn take_exact_digits(value: &str, count: usize) -> Option<(u32, &str)> {
         .map(|number| (number, &value[count..]))
 }
 
-fn match_month_name(value: &str, names: &[&str; 12]) -> Option<(usize, &str)> {
+fn match_month_name<'a>(value: &'a str, names: &[&str; 12]) -> Option<(usize, &'a str)> {
     let lowered = value.to_lowercase();
 
     for (index, name) in names.iter().enumerate() {
@@ -215,62 +215,16 @@ fn match_zone(value: &str) -> Option<(i32, &str)> {
     };
 
     let (hours, rest) = take_exact_digits(&value[1..], 2)?;
-    let (minutes, rest) = match rest.len() >= 2
+    let has_minutes = rest.len() >= 2
         && rest
             .as_bytes()
             .iter()
             .take(2)
-            .all(|byte| byte.is_ascii_digit())
-    {
-        (take_exact_digits(rest, 2)?, &rest[2..])
+            .all(|byte| byte.is_ascii_digit());
+    let (minutes, rest) = if has_minutes {
+        take_exact_digits(rest, 2)?
     } else {
         (0, rest)
-    };
-
-    Some((sign * ((hours as i32) * 60 + minutes as i32), rest))
-}
-
-fn match_iso_offset(value: &str) -> Option<(i32, &str)> {
-    if value.starts_with('Z') || value.starts_with('z') {
-        return Some((0, &value[1..]));
-    }
-
-    let sign = match value.as_bytes().first() {
-        Some(b'+') => 1,
-        Some(b'-') => -1,
-        _ => return None,
-    };
-
-    let (hours, rest) = take_exact_digits(&value[1..], 2)?;
-    let (minutes, rest) = match rest.strip_prefix(':') {
-        Some(tail) => {
-            let (minutes, tail) = take_exact_digits(tail, 2)?;
-
-            (minutes, tail)
-        }
-        None if rest.len() >= 2
-            && rest
-                .as_bytes()
-                .iter()
-                .take(2)
-                .all(|byte| byte.is_ascii_digit()) =>
-        {
-            (take_exact_digits(rest, 2)?, &rest[2..])
-        }
-        None => (0, rest),
-    };
-
-    let rest = match rest.strip_prefix(':') {
-        Some(tail) => {
-            let (seconds, tail) = take_exact_digits(tail, 2)?;
-
-            if seconds != 0 {
-                return None;
-            }
-
-            tail
-        }
-        None => rest,
     };
 
     Some((sign * ((hours as i32) * 60 + minutes as i32), rest))
