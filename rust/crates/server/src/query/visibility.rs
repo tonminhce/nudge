@@ -509,7 +509,13 @@ fn column_for_field(model: &ObjectModel, field_name: &str) -> String {
         .iter()
         .find(|column| column.field_name == field_name || column.column_name == field_name)
         .map(|column| column.column_name.clone())
-        .unwrap_or_else(|| field_name.to_string())
+        .or_else(|| {
+            model
+                .shape
+                .relation(field_name)
+                .and_then(|relation| relation.join_column_name.clone())
+        })
+        .unwrap_or_else(|| format!("{field_name}Id"))
 }
 
 async fn fetch_associations(
