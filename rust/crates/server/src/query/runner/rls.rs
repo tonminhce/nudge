@@ -12,6 +12,7 @@ use crate::metadata::flat::FieldMetadataType;
 use crate::metadata::flat::FlatFieldMetadata;
 use crate::metadata::names::compute_composite_column_name;
 use crate::permissions::ObjectRecordsOperationType;
+use crate::permissions::RecordsAccessSource;
 use crate::permissions::RowLevelRecordsPermissions;
 use crate::query::filter::compile_filter;
 use crate::query::filter::CompiledFilter;
@@ -112,9 +113,19 @@ pub(super) async fn row_access_filter_with_alias(
         member_values: HashMap::new(),
         relation_stack: HashSet::new(),
     };
-    compiler
+    let filter = compiler
         .compile_access(object_name_singular, operation, alias, false)
-        .await
+        .await?;
+    if let Some(compiled) = filter.as_ref() {
+        tracing::debug!(
+            target: "rls",
+            object = object_name_singular,
+            alias,
+            sql = compiled.render(),
+            "row access predicate"
+        );
+    }
+    Ok(filter)
 }
 
 struct AccessCompiler<'a> {
@@ -605,14 +616,7 @@ pub fn requires_row_access(
     let Some(object) = permissions.object(model.object.id) else {
         return Ok(false);
     };
-    let operation = operation.enforced();
-    Ok(!object.operation_allowed(operation)
-        && object
-            .row_level_records_permissions
-            .as_ref()
-            .into_iter()
-            .flatten()
-            .any(|rule| rule_allows(rule, operation)))
+    Ok(object.access_source(operation.enforced()) == RecordsAccessSource::Criteria)
 }
 
 pub(crate) fn row_level_rule_supported(

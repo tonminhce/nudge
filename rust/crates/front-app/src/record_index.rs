@@ -33,6 +33,10 @@ use crate::app::read_storage;
 use crate::app::server_url;
 use crate::app::write_storage;
 use crate::app::AuthState;
+use crate::record_order::get_order_by_field_for_object;
+use crate::record_order::turn_sorts_into_order_by;
+use crate::record_order::RecordSortField;
+use crate::record_order::ViewSortDirection;
 use crate::record_views::alternate_view;
 use crate::record_views::view_type_icon;
 use crate::record_views::RecordViewType;
@@ -45,6 +49,9 @@ use crate::records::records_from_response;
 pub const ROW_HEIGHT: usize = 32;
 pub const ROW_SLOT_COUNT: usize = 240;
 pub const OVERSCAN_ROWS: usize = 160;
+
+pub const LABEL_IDENTIFIER_FIELD_NAME: &str = "name";
+pub const CREATED_AT_FIELD_NAME: &str = "createdAt";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RecordSort {
@@ -62,6 +69,16 @@ impl RecordSort {
             "oldest" => Self::Oldest,
             _ => Self::NameAsc,
         }
+    }
+
+    fn sort_fields(self) -> Vec<RecordSortField> {
+        let (field_name, direction) = match self {
+            Self::NameAsc => (LABEL_IDENTIFIER_FIELD_NAME, ViewSortDirection::Asc),
+            Self::NameDesc => (LABEL_IDENTIFIER_FIELD_NAME, ViewSortDirection::Desc),
+            Self::Newest => (CREATED_AT_FIELD_NAME, ViewSortDirection::Desc),
+            Self::Oldest => (CREATED_AT_FIELD_NAME, ViewSortDirection::Asc),
+        };
+        vec![RecordSortField::new(field_name, direction)]
     }
 }
 
@@ -87,13 +104,13 @@ fn registration_is_current(
 fn record_operation_signature(
     object_name_singular: &str,
     applied_search: &str,
-    sort: RecordSort,
+    order_by: Option<Value>,
 ) -> RecordOperationSignature {
     RecordOperationSignature {
         object_name_singular: object_name_singular.to_string(),
         variables: RecordOperationVariables {
             filter: text_filter(object_name_singular, applied_search),
-            order_by: order_by(object_name_singular, sort),
+            order_by,
             limit: Some(200),
             cursor_filter: None,
         },
@@ -132,6 +149,7 @@ pub fn RecordIndexPage() -> impl IntoView {
     let auth = expect_context::<AuthState>();
     let records = RwSignal::new(Vec::<Value>::new());
     let metadata = RwSignal::new(None::<ObjectMetadata>);
+    let loaded_order = RwSignal::new(None::<(String, Option<Value>)>);
     let cursor = RwSignal::new(None::<String>);
     let total_count = RwSignal::new(0_i64);
     let loading = RwSignal::new(false);
@@ -205,24 +223,29 @@ pub fn RecordIndexPage() -> impl IntoView {
                 } else {
                     0
                 };
+                let order_by = order_by(&object, sort);
                 let response = load_records(
                     &token,
                     &object,
                     None,
                     text_filter(&object.name_singular, &query),
-                    order_by(&object.name_singular, sort),
+                    order_by.clone(),
                     depth,
                     true,
                 )
                 .await?;
-                Ok::<_, String>((object, response))
+                Ok::<_, String>((object, response, order_by))
             }
             .await;
             if load_generation.get_untracked() != generation {
                 return;
             }
             match result {
-                Ok((object, response)) => {
+                Ok((object, response, order_by)) => {
+                    let next_order = (object.name_singular.clone(), order_by);
+                    if loaded_order.get_untracked().as_ref() != Some(&next_order) {
+                        loaded_order.set(Some(next_order));
+                    }
                     total_count.set(
                         response[object.name_plural.as_str()]["totalCount"]
                             .as_i64()
@@ -330,11 +353,14 @@ pub fn RecordIndexPage() -> impl IntoView {
             return;
         };
         let applied_search = applied_search.get();
-        let sort = sort.get();
+        let Some((object_name_singular, order_by)) = loaded_order.get() else {
+            return;
+        };
         registration_generation.update(|generation| *generation += 1);
         let generation = registration_generation.get_untracked();
         let query_id = format!("people-{}", session.event_stream_id);
-        let signature = record_operation_signature("person", &applied_search, sort);
+        let signature =
+            record_operation_signature(&object_name_singular, &applied_search, order_by);
         let expected_session = session.clone();
         leptos::task::spawn_local(async move {
             let result = register_event_query(
@@ -392,7 +418,7 @@ pub fn RecordIndexPage() -> impl IntoView {
                 &object,
                 Some(after),
                 text_filter(&object.name_singular, &applied_search.get()),
-                order_by(&object.name_singular, sort.get()),
+                order_by(&object, sort.get()),
                 depth,
                 false,
             )
@@ -753,7 +779,7 @@ pub(crate) fn text_filter(object: &str, query: &str) -> Option<Value> {
     }
 }
 
-fn order_by(object: &str, sort: RecordSort) -> Option<Value> {
+fn order_by_from_name(object: &str, sort: RecordSort) -> Option<Value> {
     let value = match (object, sort) {
         ("person", RecordSort::NameAsc) => person_name_order_by("AscNullsLast"),
         ("person", RecordSort::NameDesc) => person_name_order_by("DescNullsLast"),
@@ -763,6 +789,14 @@ fn order_by(object: &str, sort: RecordSort) -> Option<Value> {
         (_, RecordSort::Oldest) => serde_json::json!([{"createdAt": "AscNullsLast"}]),
     };
     Some(value)
+}
+
+fn order_by(object: &ObjectMetadata, sort: RecordSort) -> Option<Value> {
+    let mut entries = turn_sorts_into_order_by(object, &sort.sort_fields());
+    if entries.is_empty() {
+        entries = get_order_by_field_for_object(object, None);
+    }
+    Some(Value::Array(entries))
 }
 
 fn person_name_order_by(direction: &str) -> Value {
@@ -809,6 +843,69 @@ fn short_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use front_core::projection::FieldMetadata;
+    use front_core::projection::RelationMetadata;
+
+    fn metadata_field(name: &str, field_type: &str) -> FieldMetadata {
+        FieldMetadata {
+            name: name.to_string(),
+            field_type: field_type.to_string(),
+            settings: None,
+            relation: None,
+            morph_id: None,
+        }
+    }
+
+    fn company_metadata() -> ObjectMetadata {
+        ObjectMetadata {
+            name_singular: String::from("company"),
+            name_plural: String::from("companies"),
+            duplicate_criteria: None,
+            fields_list: vec![
+                metadata_field("name", "TEXT"),
+                metadata_field("domainName", "LINKS"),
+                metadata_field("address", "ADDRESS"),
+                metadata_field("createdAt", "DATE_TIME"),
+                metadata_field("position", "POSITION"),
+            ],
+        }
+    }
+
+    fn person_metadata() -> ObjectMetadata {
+        let company = company_metadata();
+        let relation = FieldMetadata {
+            relation: Some(RelationMetadata {
+                relation_type: String::from("MANY_TO_ONE"),
+                target_object_metadata: Box::new(company),
+            }),
+            ..metadata_field("company", "RELATION")
+        };
+        ObjectMetadata {
+            name_singular: String::from("person"),
+            name_plural: String::from("people"),
+            duplicate_criteria: None,
+            fields_list: vec![
+                metadata_field("name", "FULL_NAME"),
+                metadata_field("emails", "EMAILS"),
+                relation,
+                metadata_field("createdAt", "DATE_TIME"),
+                metadata_field("position", "POSITION"),
+            ],
+        }
+    }
+
+    #[test]
+    fn company_search_uses_a_case_insensitive_contains() {
+        let filter = text_filter("company", "Acme").unwrap();
+        assert_eq!(filter["name"]["ilike"], "%Acme%");
+        assert!(filter["name"].get("startsWith").is_none());
+    }
+
+    #[test]
+    fn an_empty_search_sends_no_filter_at_all() {
+        assert!(text_filter("person", "   ").is_none());
+        assert!(text_filter("company", "").is_none());
+    }
 
     #[test]
     fn virtual_table_reuses_at_most_two_hundred_forty_slots() {
@@ -861,7 +958,7 @@ mod tests {
 
     #[test]
     fn person_name_sort_expands_to_the_composite_sub_fields() {
-        let ascending = order_by("person", RecordSort::NameAsc).unwrap();
+        let ascending = order_by_from_name("person", RecordSort::NameAsc).unwrap();
         assert_eq!(
             ascending,
             serde_json::json!([
@@ -869,7 +966,7 @@ mod tests {
                 { "name": { "lastName": "AscNullsLast" } }
             ])
         );
-        let descending = order_by("person", RecordSort::NameDesc).unwrap();
+        let descending = order_by_from_name("person", RecordSort::NameDesc).unwrap();
         assert_eq!(
             descending,
             serde_json::json!([
@@ -882,11 +979,11 @@ mod tests {
     #[test]
     fn scalar_name_sort_keeps_a_single_order_leaf() {
         assert_eq!(
-            order_by("company", RecordSort::NameAsc).unwrap(),
+            order_by_from_name("company", RecordSort::NameAsc).unwrap(),
             serde_json::json!([{"name": "AscNullsLast"}])
         );
         assert_eq!(
-            order_by("company", RecordSort::NameDesc).unwrap(),
+            order_by_from_name("company", RecordSort::NameDesc).unwrap(),
             serde_json::json!([{"name": "DescNullsLast"}])
         );
     }
@@ -894,25 +991,109 @@ mod tests {
     #[test]
     fn recency_sorts_keep_nulls_last_in_both_directions() {
         assert_eq!(
-            order_by("note", RecordSort::Newest).unwrap(),
+            order_by_from_name("note", RecordSort::Newest).unwrap(),
             serde_json::json!([{"createdAt": "DescNullsLast"}])
         );
         assert_eq!(
-            order_by("note", RecordSort::Oldest).unwrap(),
+            order_by_from_name("note", RecordSort::Oldest).unwrap(),
             serde_json::json!([{"createdAt": "AscNullsLast"}])
         );
     }
 
     #[test]
     fn event_registration_reuses_the_loading_filter_and_order() {
-        let signature = record_operation_signature("person", "Ada", RecordSort::NameDesc);
+        let person = person_metadata();
+        let order_by = order_by(&person, RecordSort::NameDesc);
+        let signature = record_operation_signature("person", "Ada", order_by.clone());
         assert_eq!(signature.object_name_singular, "person");
         assert_eq!(signature.variables.filter, text_filter("person", "Ada"));
-        assert_eq!(
-            signature.variables.order_by,
-            order_by("person", RecordSort::NameDesc)
-        );
+        assert_eq!(signature.variables.order_by, order_by);
         assert_eq!(signature.variables.limit, Some(200));
+    }
+
+    #[test]
+    fn the_name_sort_expands_from_the_person_full_name_metadata_type() {
+        assert_eq!(
+            order_by(&person_metadata(), RecordSort::NameAsc).unwrap(),
+            serde_json::json!([
+                {"name": {"firstName": "AscNullsLast"}},
+                {"name": {"lastName": "AscNullsLast"}},
+                {"position": "AscNullsFirst"}
+            ])
+        );
+    }
+
+    #[test]
+    fn the_name_sort_stays_scalar_when_the_label_field_is_text() {
+        assert_eq!(
+            order_by(&company_metadata(), RecordSort::NameDesc).unwrap(),
+            serde_json::json!([
+                {"name": "DescNullsLast"},
+                {"position": "AscNullsFirst"}
+            ])
+        );
+    }
+
+    #[test]
+    fn recency_sorts_follow_the_created_at_metadata_type() {
+        let company = company_metadata();
+        assert_eq!(
+            order_by(&company, RecordSort::Newest).unwrap(),
+            serde_json::json!([
+                {"createdAt": "DescNullsLast"},
+                {"position": "AscNullsFirst"}
+            ])
+        );
+        assert_eq!(
+            order_by(&company, RecordSort::Oldest).unwrap(),
+            serde_json::json!([
+                {"createdAt": "AscNullsLast"},
+                {"position": "AscNullsFirst"}
+            ])
+        );
+    }
+
+    #[test]
+    fn a_relation_sort_follows_the_related_label_identifier() {
+        let sorts = vec![RecordSortField::new("company", ViewSortDirection::Desc)];
+        assert_eq!(
+            turn_sorts_into_order_by(&person_metadata(), &sorts),
+            vec![
+                serde_json::json!({"company": {"name": "DescNullsLast"}}),
+                serde_json::json!({"position": "AscNullsFirst"})
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_label_sort_falls_back_to_the_position_order() {
+        let note = ObjectMetadata {
+            name_singular: String::from("note"),
+            name_plural: String::from("notes"),
+            duplicate_criteria: None,
+            fields_list: vec![
+                metadata_field("title", "TEXT"),
+                metadata_field("position", "POSITION"),
+            ],
+        };
+        assert_eq!(
+            order_by(&note, RecordSort::NameAsc).unwrap(),
+            serde_json::json!([{"position": "AscNullsFirst"}])
+        );
+    }
+
+    #[test]
+    fn an_object_without_any_orderable_field_defaults_to_created_at_desc() {
+        let application = ObjectMetadata {
+            name_singular: String::from("application"),
+            name_plural: String::from("applications"),
+            duplicate_criteria: None,
+            fields_list: vec![metadata_field("id", "UUID")],
+        };
+        assert_eq!(
+            order_by(&application, RecordSort::NameAsc).unwrap(),
+            serde_json::json!([{"createdAt": "DescNullsLast"}])
+        );
     }
 
     #[test]

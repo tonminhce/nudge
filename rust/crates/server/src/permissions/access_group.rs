@@ -30,6 +30,8 @@ use crate::state::AppState;
 
 const ACCESS_GROUP_IDS_COLUMN_NAME: &str = "_accessGroupIds";
 const ACCESS_GROUP_GENERATION_COLUMN_NAME: &str = "_accessGroupGeneration";
+const ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME: &str = "materializedGeneration";
+const ACCESS_GROUP_DIRTY_INDEX_NAME: &str = "IDX_COMPANY_ACCESS_GROUP_DIRTY";
 const ACCESS_GROUP_STATE_TABLE_NAME: &str = "accessGroupState";
 const ACCESS_GROUP_REBUILD_SETTING: &str = "nudge.access_group_rebuild";
 const COMPANY_OBJECT_NAME: &str = "company";
@@ -548,8 +550,10 @@ async fn ensure_company_access_storage(
         .await?;
     if !state_exists {
         sqlx::query(&format!(
-            "CREATE TABLE {} (id smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1), generation bigint NOT NULL DEFAULT 0)",
-            state_table
+            "CREATE TABLE {} (id smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1), generation bigint \
+             NOT NULL DEFAULT 0, {} integer NOT NULL DEFAULT 0)",
+            state_table,
+            quote_identifier(ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME)?
         ))
         .execute(&mut *transaction)
         .await?;
@@ -559,6 +563,25 @@ async fn ensure_company_access_storage(
         ))
         .execute(&mut *transaction)
         .await?;
+    } else {
+        let materialized_column_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+             WHERE table_schema = $1 AND table_name = $2 AND column_name = $3)",
+        )
+        .bind(schema_name)
+        .bind(ACCESS_GROUP_STATE_TABLE_NAME)
+        .bind(ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !materialized_column_exists {
+            sqlx::query(&format!(
+                "ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} integer NOT NULL DEFAULT 0",
+                state_table,
+                quote_identifier(ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME)?
+            ))
+            .execute(&mut *transaction)
+            .await?;
+        }
     }
     let generation_column_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
@@ -574,6 +597,27 @@ async fn ensure_company_access_storage(
             "ALTER TABLE {}.{} ADD COLUMN {} bigint",
             quote_identifier(schema_name)?,
             quote_identifier(&company.shape.table_name)?,
+            quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME)?
+        ))
+        .execute(&mut *transaction)
+        .await?;
+    }
+    let dirty_index_exists: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+        .bind(format!(
+            "{}.{}",
+            quote_identifier(schema_name)?,
+            quote_identifier(ACCESS_GROUP_DIRTY_INDEX_NAME)?
+        ))
+        .fetch_one(&mut *transaction)
+        .await?;
+    if !dirty_index_exists {
+        sqlx::query(&format!(
+            "CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} IS NULL OR {} IS NULL",
+            quote_identifier(ACCESS_GROUP_DIRTY_INDEX_NAME)?,
+            quote_identifier(schema_name)?,
+            quote_identifier(&company.shape.table_name)?,
+            quote_identifier("id")?,
+            quote_identifier(ACCESS_GROUP_IDS_COLUMN_NAME)?,
             quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME)?
         ))
         .execute(&mut *transaction)
@@ -1583,6 +1627,13 @@ async fn recompute_company_arrays(
     if record_ids.is_some_and(|ids| ids.is_empty()) {
         return Ok(0);
     }
+    let generation: i64 = sqlx::query_scalar(&format!(
+        "SELECT generation FROM {}.{} WHERE id = 1",
+        quote_identifier(schema_name)?,
+        quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME)?
+    ))
+    .fetch_one(&mut *transaction)
+    .await?;
     let table_name = company_target_table(company);
     let table = format!(
         "{}.{}",
@@ -1645,20 +1696,16 @@ async fn recompute_company_arrays(
     };
     let sql = format!(
         "UPDATE {table} AS record SET {} = recomputed.\"accessGroupIds\", \
-         {} = (SELECT generation FROM {}.{} WHERE id = 1) \
+         {} = {generation} \
          FROM (SELECT record.id, {expression} AS \"accessGroupIds\" FROM {table} AS record {record_filter}) AS recomputed \
          WHERE record.id = recomputed.id AND \
            (record.{} IS DISTINCT FROM recomputed.\"accessGroupIds\" OR \
-            record.{} IS DISTINCT FROM (SELECT generation FROM {}.{} WHERE id = 1)) \
+            record.{} IS DISTINCT FROM {generation}) \
          RETURNING record.id",
         quote_identifier(ACCESS_GROUP_IDS_COLUMN_NAME)?,
         quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME)?,
-        quote_identifier(schema_name)?,
-        quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME)?,
         quote_identifier(ACCESS_GROUP_IDS_COLUMN_NAME)?,
-        quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME)?,
-        quote_identifier(schema_name)?,
-        quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME)?
+        quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME)?
     );
     let compiled = crate::query::compile::compile_named_parameters(&sql, &parameters)
         .map_err(|error| AccessGroupError::invalid(error.message()))?;
@@ -1672,6 +1719,17 @@ async fn recompute_company_arrays(
         .execute(&mut *transaction)
         .await?;
     let rows = query.fetch_all(&mut *transaction).await?;
+    if record_ids.is_none() {
+        sqlx::query(&format!(
+            "UPDATE {}.{} SET {} = $1::integer WHERE id = 1",
+            quote_identifier(schema_name)?,
+            quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME)?,
+            quote_identifier(ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME)?
+        ))
+        .bind(generation)
+        .execute(&mut *transaction)
+        .await?;
+    }
     sqlx::query("SELECT set_config($1, 'off', true)")
         .bind(ACCESS_GROUP_REBUILD_SETTING)
         .execute(&mut *transaction)
@@ -1693,6 +1751,16 @@ async fn find_materialized_compact_ids(
         .object(COMPANY_OBJECT_NAME)
         .map_err(|error| AccessGroupError::invalid(error.to_string()))?;
     let schema_name = company.shape.schema_name.clone();
+    let state_table = format!(
+        "{}.{}",
+        quote_identifier(&schema_name)?,
+        quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME)?
+    );
+    let generation_matches = format!(
+        "(SELECT generation = {} FROM {} WHERE id = 1)",
+        quote_identifier(ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME)?,
+        state_table
+    );
     let mut transaction = pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtext($1))")
         .bind(format!("nudge-access-groups:{workspace_id}"))
@@ -1701,19 +1769,26 @@ async fn find_materialized_compact_ids(
     let storage_ready: bool = sqlx::query_scalar(
         "SELECT to_regclass($1) IS NOT NULL AND EXISTS( \
          SELECT 1 FROM information_schema.columns WHERE table_schema = $2 \
-         AND table_name = $3 AND column_name = $4)",
+         AND table_name = $3 AND column_name = $4) AND EXISTS( \
+         SELECT 1 FROM information_schema.columns WHERE table_schema = $2 \
+         AND table_name = $5 AND column_name = $6)",
     )
-    .bind(format!(
-        "{}.{}",
-        quote_identifier(&schema_name)?,
-        quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME)?
-    ))
+    .bind(&state_table)
     .bind(&schema_name)
     .bind(&company.shape.table_name)
     .bind(ACCESS_GROUP_GENERATION_COLUMN_NAME)
+    .bind(ACCESS_GROUP_STATE_TABLE_NAME)
+    .bind(ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME)
     .fetch_one(&mut *transaction)
     .await?;
     if !storage_ready {
+        return Ok(None);
+    }
+    let generation_materialized: bool =
+        sqlx::query_scalar(&format!("SELECT COALESCE({generation_matches}, false)"))
+            .fetch_one(&mut *transaction)
+            .await?;
+    if !generation_materialized {
         return Ok(None);
     }
     let stored =
@@ -1737,17 +1812,11 @@ async fn find_materialized_compact_ids(
         }
         compact_ids.push(stored.compact_id);
     }
-    let arrays_complete: bool = sqlx::query_scalar(&format!(
-        "SELECT NOT EXISTS(SELECT 1 FROM {}.{} AS record \
-         WHERE record.{} IS NULL OR record.{} IS DISTINCT FROM \
-           (SELECT generation FROM {}.{} WHERE id = 1))",
-        quote_identifier(&schema_name)?,
-        quote_identifier(&company.shape.table_name)?,
-        quote_identifier(ACCESS_GROUP_IDS_COLUMN_NAME)?,
-        quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME)?,
-        quote_identifier(&schema_name)?,
-        quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME)?
-    ))
+    let arrays_complete: bool = sqlx::query_scalar(&company_dirty_probe_sql(
+        &schema_name,
+        &company.shape.table_name,
+        &generation_matches,
+    )?)
     .fetch_one(&mut *transaction)
     .await?;
     if !arrays_complete {
@@ -1756,6 +1825,21 @@ async fn find_materialized_compact_ids(
     compact_ids.sort();
     compact_ids.dedup();
     Ok(Some(compact_ids))
+}
+
+fn company_dirty_probe_sql(
+    schema_name: &str,
+    table_name: &str,
+    generation_matches: &str,
+) -> Result<String, AccessGroupError> {
+    Ok(format!(
+        "SELECT COALESCE({generation_matches} AND NOT EXISTS(SELECT 1 FROM {}.{} \
+         WHERE {} IS NULL OR {} IS NULL), false)",
+        quote_identifier(schema_name)?,
+        quote_identifier(table_name)?,
+        quote_identifier(ACCESS_GROUP_IDS_COLUMN_NAME)?,
+        quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME)?
+    ))
 }
 
 fn company_target_table(company: &FlatObjectMetadata) -> String {
@@ -2679,6 +2763,182 @@ mod db_tests {
         .await
         .expect("restoring company");
         assert_eq!(fixture.array(created).await, fixture.array(beta).await);
+
+        crate::query::runner::test_support::drop_workspace(&fixture.seeded).await;
+    }
+
+    #[tokio::test]
+    async fn read_check_fails_closed_on_generation_drift_and_dirty_row() {
+        let Some(url) = std::env::var("NUDGE_TEST_DATABASE_URL").ok() else {
+            return;
+        };
+        let _guard = DB_TEST_LOCK.lock().await;
+        let fixture = fixture(&url).await.expect("fail-closed company fixture");
+        fixture.set_feature("IS_ACCESS_GROUPS_ENABLED", true).await;
+        fixture
+            .set_rule(json!(["Acme"]), None, None, Some(fixture.category_field_id))
+            .await;
+        let acme = fixture.insert_company_category("Acme", "Acme").await;
+        let other = fixture.insert_company_category("Other", "Other").await;
+
+        let pool = &fixture.seeded.state.core_pool;
+        let runner = fixture.runner().await;
+        let state_table = format!(
+            "{}.{}",
+            quote_identifier(&fixture.seeded.schema_name).unwrap(),
+            quote_identifier(ACCESS_GROUP_STATE_TABLE_NAME).unwrap()
+        );
+        let ids_column = quote_identifier(ACCESS_GROUP_IDS_COLUMN_NAME).unwrap();
+        let generation_column = quote_identifier(ACCESS_GROUP_GENERATION_COLUMN_NAME).unwrap();
+        let materialized_column =
+            quote_identifier(ACCESS_GROUP_MATERIALIZED_GENERATION_COLUMN_NAME).unwrap();
+        let permissions = fixture.permissions().await;
+        let expected_groups = build_role_access_groups(
+            fixture.company_id,
+            permissions
+                .object(fixture.company_id)
+                .expect("company object permissions"),
+            ObjectRecordsOperationType::Read,
+            None,
+            false,
+        )
+        .expect("company access groups");
+
+        let state = || async {
+            sqlx::query_as::<_, (i64, i32)>(&format!(
+                "SELECT generation, {materialized_column} FROM {state_table} WHERE id = 1"
+            ))
+            .fetch_one(pool)
+            .await
+            .expect("reading access group state")
+        };
+        let dirty_rows = || async {
+            sqlx::query_scalar::<_, i64>(&format!(
+                "SELECT count(*) FROM {} WHERE {ids_column} IS NULL OR {generation_column} IS NULL",
+                fixture.company_table()
+            ))
+            .fetch_one(pool)
+            .await
+            .expect("counting dirty company rows")
+        };
+        let materializable = || async {
+            find_materialized_compact_ids(
+                pool,
+                &runner,
+                fixture.seeded.workspace_id,
+                fixture.company_id,
+                &expected_groups,
+            )
+            .await
+            .expect("materialization check")
+        };
+
+        assert!(materializable().await.is_some(), "fresh sweep is readable");
+        let (generation, materialized) = state().await;
+        assert_eq!(generation, i64::from(materialized));
+        assert_eq!(dirty_rows().await, 0);
+
+        let company_model = runner.object(COMPANY_OBJECT_NAME).expect("company model");
+        let company_schema_name = company_model.shape.schema_name.clone();
+        let company_table_name = company_model.shape.table_name.clone();
+        let probe_sql = company_dirty_probe_sql(
+            &company_schema_name,
+            &company_table_name,
+            &format!("(SELECT generation = {materialized_column} FROM {state_table} WHERE id = 1)"),
+        )
+        .expect("company dirty probe");
+        let index_def: Option<String> = sqlx::query_scalar(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = $2",
+        )
+        .bind(&fixture.seeded.schema_name)
+        .bind(ACCESS_GROUP_DIRTY_INDEX_NAME)
+        .fetch_optional(pool)
+        .await
+        .expect("reading dirty index");
+        let index_def = index_def.expect("dirty row partial index");
+        assert!(
+            index_def.contains("\"_accessGroupIds\" IS NULL")
+                && index_def.contains("\"_accessGroupGeneration\" IS NULL")
+                && index_def.contains("WHERE"),
+            "dirty index definition: {index_def}"
+        );
+        let mut connection = pool.acquire().await.expect("probe plan connection");
+        sqlx::query("SET enable_seqscan = off")
+            .execute(&mut *connection)
+            .await
+            .expect("disabling sequential scans");
+        let plan: Vec<String> = sqlx::query_scalar(&format!("EXPLAIN (COSTS OFF) {probe_sql}"))
+            .fetch_all(&mut *connection)
+            .await
+            .expect("planning dirty probe");
+        sqlx::query("RESET enable_seqscan")
+            .execute(&mut *connection)
+            .await
+            .expect("restoring sequential scans");
+        assert!(
+            plan.iter()
+                .any(|line| line.contains(ACCESS_GROUP_DIRTY_INDEX_NAME)),
+            "dirty probe plan: {}",
+            plan.join("\n")
+        );
+
+        sqlx::query(&format!(
+            "UPDATE {state_table} SET generation = generation + 1 WHERE id = 1"
+        ))
+        .execute(pool)
+        .await
+        .expect("advancing state generation");
+        assert_eq!(dirty_rows().await, 0);
+        assert!(
+            materializable().await.is_none(),
+            "generation past materializedGeneration must fail closed"
+        );
+        let healed = fixture.permissions().await;
+        assert!(
+            healed.company_access_group_ids.is_some(),
+            "generation drift must heal through a rebuild"
+        );
+        let (generation, materialized) = state().await;
+        assert_eq!(generation, i64::from(materialized));
+        assert!(materializable().await.is_some());
+
+        sqlx::query(&format!(
+            "UPDATE {} SET name = 'Renamed' WHERE id = $1",
+            fixture.company_table()
+        ))
+        .bind(other)
+        .execute(pool)
+        .await
+        .expect("writing a company row out of band");
+        let (generation, materialized) = state().await;
+        assert_eq!(
+            generation,
+            i64::from(materialized),
+            "an out of band company write leaves the state aligned"
+        );
+        assert_eq!(dirty_rows().await, 1);
+        assert!(
+            materializable().await.is_none(),
+            "a dirty company row must fail closed"
+        );
+        let healed = fixture.permissions().await;
+        assert!(
+            healed.company_access_group_ids.is_some(),
+            "a dirty row must heal through a rebuild"
+        );
+        assert!(fixture.array(other).await.is_empty());
+        assert_eq!(fixture.array(acme).await.len(), 1);
+        assert_eq!(dirty_rows().await, 0);
+        let stale_generation: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {} WHERE {generation_column} IS DISTINCT FROM \
+             (SELECT generation FROM {state_table} WHERE id = 1)",
+            fixture.company_table()
+        ))
+        .fetch_one(pool)
+        .await
+        .expect("counting stale generations");
+        assert_eq!(stale_generation, 0);
+        assert!(materializable().await.is_some());
 
         crate::query::runner::test_support::drop_workspace(&fixture.seeded).await;
     }

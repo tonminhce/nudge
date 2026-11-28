@@ -1,0 +1,65 @@
+{
+  "normalized": {
+    "restSingle": {
+      "body": {
+        "data": {
+          "person": {
+            "avatarFile": null,
+            "avatarUrl": "",
+            "companyId": null,
+            "createdAt": "<iso>",
+            "createdBy": {
+              "context": {},
+              "name": " ",
+              "source": "MANUAL",
+              "workspaceMemberId": "<uuid>"
+            },
+            "deletedAt": null,
+            "emails": {
+              "additionalEmails": [],
+              "primaryEmail": ""
+            },
+            "id": "<uuid>",
+            "jobTitle": "",
+            "linkedinLink": {
+              "primaryLinkLabel": "",
+              "primaryLinkUrl": "",
+              "secondaryLinks": []
+            },
+            "name": {
+              "firstName": "Bob",
+              "lastName": "Diaz"
+            },
+            "phones": {
+              "additionalPhones": [],
+              "primaryPhoneCallingCode": "",
+              "primaryPhoneCountryCode": "",
+              "primaryPhoneNumber": ""
+            },
+            "position": 0,
+            "searchVector": "'bob':1 'diaz':2",
+            "updatedAt": "<iso>",
+            "updatedBy": {
+              "context": {},
+              "name": " ",
+              "source": "MANUAL",
+              "workspaceMemberId": "<uuid>"
+            }
+          }
+        }
+      },
+      "statusCode": 200
+    },
+    "restUnknownObject": {
+      "body": {
+        "error": "BadRequestException",
+        "messages": [
+          "object 'nope' not found. eg: companies"
+        ],
+        "statusCode": 400
+      },
+      "statusCode": 400
+    }
+  },
+  "scenario": "rest-detail"
+}

@@ -112,10 +112,16 @@ forks*, not runtime gating. What gates the features at runtime on a self-hosted 
   **[ENT]** → strategy `degradedRead` → `renderRlsRecordFilterToSql`) — **but writing RLS rules
   requires an enterprise plan** (`row-level-permission-predicate.service.ts:515-525`). A
   self-host without an enterprise key therefore has: no way to *create* rules through the API,
-  and the rule engine inert. The one carve-out: the `workflowRun` "channel-visibility" RLS rule
-  is created by an [CC] service (`channel-visibility/services/channel-visibility-rule-sync.service.ts`,
-  CC) — a workflow-visibility mechanism that *is* self-hostable and reaches the same degradedRead
-  SQL path (§2.7).
+  and the rule engine inert. Channel visibility is *not* an RLS rule at this commit: there is no
+  `engine/permissions/internal/channel-visibility/` module in 2.61.0 (only
+  `engine/core-modules/messaging/utils/get-effective-message-channel-visibility.util.ts`, an
+  Apache label resolver used by `timeline-messaging.service.ts:238,839`). Enforcement is the
+  Apache post-query field-redaction layer
+  (`engine/api/common/common-record-visibility/common-record-visibility.service.ts:16`, called
+  unconditionally from `common-base-query-runner.service.ts:343`), which blanks
+  `message.subject/text/attachments`, `attachment`, `calendarEvent` and
+  `timelineActivity.properties` for members who do not own the connected account
+  (§2.10).
 - **`_isPrivate`, `_accessGroupIds`, recordShare reads, related-record paths** are each
   flag-gated AND [ENT]-implemented. On a stock self-host all four flags are false →
   `buildAccessSQLCondition` degenerates (§2.2) and the read path reduces to the object-level role
@@ -687,6 +693,104 @@ Note `assertCanRunOperationOrThrow` passes `columnsToReturn` as `selectedColumns
 the *cheap*, metadata-only read restriction (no SQL), cached per context (`workspace-orm.manager.ts:146-150`).
 Nudge stores it on `PermissionsContext` (P1).
 
+### 2.10 Channel visibility is field redaction, not row filtering (Apache — open gap)
+
+At 2.61.0 there is **no** `engine/permissions/internal/channel-visibility/` module and no RLS rule
+behind channel visibility. Enforcement is a post-query redaction layer that is plain Apache code and
+runs **unconditionally** — no feature flag, no license or billing check:
+
+- `engine/api/common/common-record-visibility/common-record-visibility.service.ts:16` holds a
+  `objectNameSingular -> handler` registry (`registerHandler`, `applyVisibilityRestrictions`), and
+  `engine/api/common/common-query-runners/common-base-query-runner.service.ts:343` calls it for every
+  result. `collectRecordsByObjectNameSingular` walks nested relations too, so a body cannot leak
+  through a related record.
+- Handlers self-register in `onModuleInit` and are wired from `modules/modules.module.ts:43-44`:
+  `modules/messaging/common/query-hooks/message/apply-messages-visibility-restrictions.service.ts:22`
+  restricts `subject`, `text`, `attachments`; `.../attachment/apply-attachments-visibility-restrictions.service.ts`;
+  `modules/calendar/common/query-hooks/calendar-event/services/apply-calendar-events-visibility-restrictions.service.ts:41-76`;
+  `modules/timeline/query-hooks/apply-timeline-activities-visibility-restrictions.service.ts:22-43`
+  (redacts `timelineActivity.properties`).
+- Redaction writes the `FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED` sentinel into the text
+  fields and an empty array into `attachments`
+  (`apply-messages-visibility-restrictions.service.ts:68-78`). A record whose channel is
+  `SUBJECT`-visible keeps `subject` and loses `text`/`attachments`; `SHARE_EVERYTHING` keeps all;
+  anything else loses all three.
+- Visibility comes from the channel row, not the record: `messageChannel.visibility`
+  (`:132`, `:159-167`) for messages/attachments/participants and the calendar channel equivalent.
+  Default for a created channel is `METADATA`
+  (`engine/core-modules/auth/services/create-message-channel.service.ts:54`).
+- Ownership (`:174-197`): a user principal owns a channel through `connectedAccount.userWorkspaceId`;
+  an API-key/application principal through `connectedAccount.applicationId`.
+
+Consequence: rows are always returned, fields are blanked. Nudge has no redaction layer at all — the
+only related code is the search-side `CHANNEL_VISIBILITY_OBJECTS` object list in
+`crates/server/src/query/runner/search.rs:39-50`, and even that is skipped by the default global
+search branch (`search.rs:188-192`). Two members with separate mailboxes therefore see each other's
+plaintext `message.text`/`subject` on Nudge where 2.61.0 returns the sentinel. This is the highest
+severity remaining permission gap in the default self-host configuration, and it is in scope for the
+port. Search must apply the same exclusion in its default branch, and the record-read path must run
+the handler registry after RLS.
+
+### 2.11 RLS criteria on the record API plane (measured against the live reference, 2026-11-28)
+
+Harness: `rust/tools/access-group-parity.py`. It provisions a role, per-object grants and a
+predicate-group rule with direct SQL against the shared `twenty_ref` database, then deletes every
+Redis key matching the workspace id so the reference container rebuilds its workspace cache — no
+server restart is needed on the reference side. Because Nudge's permission cache is in-process
+(`crates/server/src/permissions/mod.rs:29-80`) and is only version-bumped by
+`metadata::cache::invalidate_workspace_maps`, Nudge must be compared from a **freshly started**
+process; `tools/run-same-db-server.py` now takes `NUDGE_NODE_PORT` so a probe instance can run on
+:3002 beside the :3000 dev server. A warm :3000 returned a stale denial for a state the reference
+served normally, which is why the harness reports each server separately.
+
+Measured on the isolated fixture workspace (`--signup ag`, three companies):
+
+- **Rule on a non-default role → the reference denies the whole collection read.** A role whose
+  Company read comes from `core."objectPermission"` rows plus one read-criteria rule returns
+  `errors[0].extensions.subCode = PERMISSION_DENIED`, message "Entity performing the request does
+  not have permission", for `companies(first: N)`. A cold Nudge returns all three rows. That
+  difference is the open item, not a reporting artefact.
+- **Rule on the workspace default role → both servers return all rows unfiltered.** Attaching the
+  same rule to the role with `canReadAllObjectRecords = true` produced `visible n=3` on the reference
+  and on cold Nudge, so criteria rules do not narrow the collection read of an all-records role on
+  this plane. Nudge already agrees here.
+
+Upstream decision chain for the first case: `isObjectOperationDeniedToPrincipals`
+(`engine/permissions/internal/combine/utils/is-object-operation-denied-to-principals.util.ts:8-13`)
+is an `||` whose left term is `!areLimitingRolesAccessingAllRecords`
+(`internal/role/utils/are-limiting-roles-accessing-all-records.util.ts:12-43`), which requires every
+limiting role's `canReadAllRecords` (`twenty-shared/src/utils/canAccessThroughAllRecordsPermission.ts:22-28`)
+to hold. Which ids count as limiting is `getPermissionsPrincipalsLimitingRoleIds`
+(`internal/principal/utils/get-permissions-principals-limiting-role-ids.util.ts:7-25`). So on the
+record API plane a criteria-limited limiting role is denied rather than filtered; row filtering is
+reached through `filterGrantedRecordIds`/`buildReadRecordsAccessSQLCondition`
+(`record-permissions-read.service.ts:245-264`, `:340-349`) and the per-record/related-path callers,
+not through the collection query. The denial path, and the whole predicate-group read model, sits
+behind `/* @license Enterprise */` headers.
+
+Predicate creation is unreachable in the default configuration, which bounds how far this can be
+verified end to end: `row-level-permission-predicate.service.ts:515-525`
+(`/* @license Enterprise */` header at line 1) requires `enterprisePlanService.isValid()` **and**
+`billingService.hasEntitlement(workspaceId, BillingEntitlementKey.RLS)` before `hasRowLevelPermissionFeatureOrThrow`
+(`:527-537`) lets `upsertRowLevelPermissionRules` (`engine/metadata-modules/role/role.resolver.ts:311-324`)
+write anything, and the same check short-cuts predicate loading to `[]` (`:55-59`). Calling that
+mutation against the reference container returns `ROW_LEVEL_PERMISSION_FEATURE_DISABLED`
+(`subCode`, `code: FORBIDDEN`). Any RLS rule state therefore has to be provisioned at the database
+level, exactly as the harness does; there is no reference-API path to compare against on a
+self-hosted Apache install.
+
+Fixture shape that the reference actually reads (wrong shapes silently deny):
+`core."rowLevelPermissionPredicateGroup"` carries `logicalOperator`,
+`positionInRowLevelPermissionPredicateGroup`, `rowLevelPermissionRuleId` and the `canRead/canCreate/
+canUpdate/canSoftDelete/canDestroyRecords` decisions, and `core."rowLevelPermissionPredicate"` rows
+hang off `rowLevelPermissionPredicateGroupId`. A predicate written with only
+`rowLevelPermissionRuleId` and no group row leaves the rule with no criteria and denies the read —
+that cost a false "both servers deny" match before the group insert was added. `core.role` rows for
+non-default roles must also carry `objectPermission` rows: the default Admin role in a workspace
+created by `crates/server/src/auth/service.rs:169-196` has none and relies on the
+`can*AllObjectRecords` booleans, so cloning a role by copying only booleans revokes everything.
+
+
 ---
 
 ## 3. Field-level semantics
@@ -1202,22 +1306,27 @@ Upstream behavior is followed unless stated. Numbered like query-layer.md §11.
   member-successor share transfer (`record-share.repository.ts:148-216` ENT), permission-tables
   viewer (`permission-table/**` ENT), runtime-limiting AI scopes (seam only,
   `restrict-records-permissions-to-runtime-limiting-role.util.ts` CC — computation ported, wiring
-  awaits the AI wave), channel-visibility rule sync (`channel-visibility/**` CC files, AI-wave
-  consumer), and the metrics trio shipped with this very tag (`internal/metrics/*` ENT; D9).
+  awaits the AI wave), and the metrics trio shipped with this very tag (`internal/metrics/*` ENT; D9).
+  Not deferred: channel-visibility field redaction is Apache
+  (`engine/api/common/common-record-visibility/common-record-visibility.service.ts:16`) and is still
+  missing from Nudge — open gap, see §2.10.
 - **D1 — The wave-4 no-op row-access slot becomes live.** query-layer.md §5.3/D9 shipped
   `onBeforeExecute` with an empty condition list. P3 replaces the slot body with §2's algebra.
   Observable output is unchanged while all flags are off (the empty-condition render path is
   byte-identical, `build-select-statement.util.ts:555-557`), so the wave-4 parity suite is the
   regression net.
-- **D2 — Feature flags are read from `permissions::mod`, fail-closed.** `is_access_groups_enabled`,
-  `is_private_records_enabled`, `is_record_sharing_enabled`, `is_related_record_paths_enabled`,
-  `is_rls_relation_hop_enabled` port the [ENT] utils' semantics (`?? false` defaults); **Nudge
-  additionally hard-forces `is_access_groups_enabled = false`** (returns false even if the flag row
-  is set) while access-group materialization is unimplemented (D0). This is deliberate: a half-on
-  combination (array-overlap condition with NULL `_accessGroupIds`) would silently deny rows that
-  upstream's degradedRead would allow. The choke point is one function; implementing the sync
-  engine later flips one line + one condition source (§2.4 strategy split,
-  `resolve-records-access-sql-condition-strategy.util.ts:26-30`).
+- **D2 — Feature flags are read from the workspace flag map, fail-closed.** `IS_ACCESS_GROUPS_ENABLED`
+  (`kernel.rs:512-516`), `IS_PRIVATE_RECORDS_ENABLED` / `IS_RECORD_LEVEL_SHARING_ENABLED`
+  (`kernel.rs:518-527`) and the relation-hop conjunction (`model.rs:301-311`,
+  `IS_ACCESS_GROUPS_ENABLED && IS_ROW_LEVEL_PERMISSION_RELATION_HOP_ENABLED` as in
+  `internal/rls/utils/is-rls-relation-hop-enabled.util.ts:9-12`) all default to false when the flag
+  row is absent, matching `?? false` upstream. The earlier hard-force of
+  `is_access_groups_enabled = false` is gone now that company access-group materialization exists
+  (`access_group.rs`); the flag alone decides. Two genuine drifts remain: Nudge creates the
+  `accessGroup`/`recordShare` tables unconditionally (`standard_objects.rs:483`,
+  `standard_objects/permissions.rs:97`) where 2.61.0 gates that DDL on `IS_PERMISSION_TABLES_ENABLED`
+  (`FeatureFlagKey.ts:18`, read in `twenty-standard-application.service.ts:71`), and
+  `IS_RELATED_RECORD_PATHS_ENABLED` (`FeatureFlagKey.ts:10`) has no Nudge reader.
 - **D3 — RLS rules: enforce, don't allow creation (mirrors the self-host gate).**
   `upsertRowLevelPermissionRules` (and the predicate-group/predicate child writes) requires
   `billing.hasEntitlement(RLS) && enterprisePlan.isValid()` — Nudge implements the conjunction with
@@ -1228,8 +1337,9 @@ Upstream behavior is followed unless stated. Numbered like query-layer.md §11.
   Nudge maps to the same 4xx via the §5.4 table). The *enforcement* half is implemented regardless
   (P4 `rls.rs`) because rows may carry rules imported from a Twenty instance with a plan (the
   migration story), and because it is the only way to exercise the flag-on path with fixtures.
-  Internal system builds (channel visibility, the CC `channel-visibility-rule-sync.service.ts`)
-  use a system-build bypass once the AI wave lands; not exposed through the API.
+  Internal system builds that write rules directly (the workflow-run path) bypass the entitlement
+  check; at 2.61.0 channel visibility is *not* one of them — it is the Apache field-redaction layer
+  in §2.7, which has no rule rows behind it.
 - **D4 — Sharing and privacy: condition renderers implemented, write services deferred, DTOs
   complete.** `build_record_share_sql_condition` and the private/creator conditions port the
   upstream SQL shapes verbatim (§4.2a, §2.5) behind `IS_RECORD_LEVEL_SHARING_ENABLED` /

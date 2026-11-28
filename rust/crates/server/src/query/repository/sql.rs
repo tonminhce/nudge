@@ -2,6 +2,7 @@ use serde_json::Map;
 use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
+use std::collections::HashMap;
 
 use crate::metadata::flat::FieldMetadataType;
 use crate::query::compile::compile_named_parameters;
@@ -17,6 +18,10 @@ pub const QUERY_MAX_RECORDS: usize = 200;
 pub const INSERT_PARAMETER_PREFIX: &str = "ormInsert_";
 
 pub const SET_PARAMETER_PREFIX: &str = "ormSet_";
+
+pub const ACTOR_SOURCE_ENUM_COLUMNS: [&str; 2] = ["createdBySource", "updatedBySource"];
+
+pub const WORKSPACE_MEMBER_ID_COLUMN_SUFFIX: &str = "WorkspaceMemberId";
 
 const UPDATED_AT_COLUMN_NAME: &str = "updatedAt";
 
@@ -298,6 +303,211 @@ pub fn build_insert_statement(
     }
 
     Ok(parts.join(" "))
+}
+
+pub fn cast_named_parameters(
+    sql: &str,
+    suffix_for: &dyn Fn(&str) -> Result<Option<String>, RepositoryError>,
+) -> Result<(String, Vec<String>), RepositoryError> {
+    let characters: Vec<char> = sql.chars().collect();
+    let mut rendered = String::new();
+    let mut matched: Vec<String> = Vec::new();
+    let mut index = 0usize;
+
+    while index < characters.len() {
+        let character = characters[index];
+
+        if character == '\'' || character == '"' {
+            let mut closing_index = index + 1;
+
+            while closing_index < characters.len() {
+                if characters[closing_index] != character {
+                    closing_index += 1;
+                    continue;
+                }
+
+                if characters.get(closing_index + 1) == Some(&character) {
+                    closing_index += 2;
+                    continue;
+                }
+
+                break;
+            }
+
+            if closing_index >= characters.len() {
+                return Err(RepositoryError::invalid_query(format!(
+                    "Unterminated {character} quoted token in SQL"
+                )));
+            }
+
+            rendered.extend(characters[index..=closing_index].iter());
+            index = closing_index + 1;
+            continue;
+        }
+
+        if character != ':' {
+            rendered.push(character);
+            index += 1;
+            continue;
+        }
+
+        if characters.get(index + 1) == Some(&':') {
+            rendered.push_str("::");
+            index += 2;
+            continue;
+        }
+
+        let mut name_end_index = index + 1;
+        while name_end_index < characters.len()
+            && (characters[name_end_index].is_ascii_alphanumeric()
+                || characters[name_end_index] == '_')
+        {
+            name_end_index += 1;
+        }
+
+        let parameter_name: String = characters[index + 1..name_end_index].iter().collect();
+
+        if parameter_name.is_empty() {
+            rendered.push(':');
+            index += 1;
+            continue;
+        }
+
+        match suffix_for(parameter_name.as_str())? {
+            None => rendered.extend([':'].into_iter().chain(parameter_name.chars())),
+            Some(suffix) => {
+                rendered.extend(
+                    [':']
+                        .into_iter()
+                        .chain(parameter_name.chars())
+                        .chain(suffix.chars()),
+                );
+                matched.push(parameter_name);
+            }
+        }
+
+        index = name_end_index;
+    }
+
+    Ok((rendered, matched))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsertExecution {
+    pub sql: String,
+    pub columns: Vec<String>,
+}
+
+pub fn build_insert_execution(
+    shape: &TableShape,
+    rows: &InsertRows,
+    returning_columns: &[String],
+    on_conflict_do_nothing: bool,
+) -> Result<InsertExecution, RepositoryError> {
+    let statement = build_insert_statement(
+        shape,
+        &rows.column_names,
+        &rows.rows,
+        returning_columns,
+        on_conflict_do_nothing,
+    )?;
+    let mut column_by_parameter: HashMap<String, String> = HashMap::new();
+
+    for row in &rows.rows {
+        for (column_name, value) in rows.column_names.iter().zip(row.iter()) {
+            if let InsertRowValue::Parameter(parameter_name) = value {
+                column_by_parameter.insert(parameter_name.clone(), column_name.clone());
+            }
+        }
+    }
+
+    let (sql, matched) = cast_named_parameters(&statement, &|parameter_name| {
+        let Some(column_name) = column_by_parameter.get(parameter_name) else {
+            return Ok(None);
+        };
+
+        Ok(Some(insert_column_cast(shape, column_name)?))
+    })?;
+    let columns = matched
+        .iter()
+        .filter_map(|parameter_name| column_by_parameter.get(parameter_name).cloned())
+        .collect::<Vec<_>>();
+
+    Ok(InsertExecution { sql, columns })
+}
+
+pub fn insert_column_cast(
+    shape: &TableShape,
+    column_name: &str,
+) -> Result<String, RepositoryError> {
+    if ACTOR_SOURCE_ENUM_COLUMNS.contains(&column_name) {
+        let enum_name =
+            crate::metadata::names::compute_postgres_enum_name(&shape.table_name, column_name);
+
+        return Ok(format!(
+            "::text::{}.{}",
+            quote_identifier(&shape.schema_name)?,
+            quote_identifier(&enum_name)?
+        ));
+    }
+
+    if column_name.ends_with(WORKSPACE_MEMBER_ID_COLUMN_SUFFIX) {
+        return Ok(String::from("::uuid"));
+    }
+
+    if shape.column(column_name).is_none() {
+        return Ok(String::new());
+    }
+
+    set_column_cast(shape, column_name)
+}
+
+pub fn set_column_cast(shape: &TableShape, column_name: &str) -> Result<String, RepositoryError> {
+    let column = shape
+        .column(column_name)
+        .ok_or_else(|| RepositoryError::unknown_column(column_name, &shape.name_singular))?;
+
+    Ok(match column.field_metadata_type {
+        FieldMetadataType::Uuid
+        | FieldMetadataType::Relation
+        | FieldMetadataType::MorphRelation => String::from("::uuid"),
+        FieldMetadataType::RawJson => String::from("::jsonb"),
+        FieldMetadataType::DateTime => String::from("::timestamptz"),
+        FieldMetadataType::Date => String::from("::date"),
+        FieldMetadataType::Select if ACTOR_SOURCE_ENUM_COLUMNS.contains(&column_name) => {
+            let enum_name =
+                crate::metadata::names::compute_postgres_enum_name(&shape.table_name, column_name);
+
+            format!(
+                "::text::{}.{}",
+                quote_identifier(&shape.schema_name)?,
+                quote_identifier(&enum_name)?
+            )
+        }
+        _ => String::new(),
+    })
+}
+
+pub fn cast_set_parameters(
+    sql: &str,
+    shape: &TableShape,
+    set_columns: &[String],
+) -> Result<String, RepositoryError> {
+    let (sql, _) = cast_named_parameters(sql, &|parameter_name| {
+        let Some(suffix) = parameter_name.strip_prefix(SET_PARAMETER_PREFIX) else {
+            return Ok(None);
+        };
+        let Ok(index) = suffix.parse::<usize>() else {
+            return Ok(None);
+        };
+        let Some(column_name) = set_columns.get(index) else {
+            return Ok(None);
+        };
+
+        Ok(Some(set_column_cast(shape, column_name)?))
+    })?;
+
+    Ok(sql)
 }
 
 fn render_user_where_expression(
@@ -638,6 +848,7 @@ mod tests {
     use crate::metadata::flat::FlatFieldMetadata;
     use crate::metadata::flat::FlatObjectMetadata;
     use crate::query::repository::table_shape::build_workspace_table_shape;
+    use crate::query::runner::test_support::record;
     use uuid::Uuid;
 
     fn shape_from_fields(fields: Vec<(&str, FieldMetadataType, Option<Value>)>) -> TableShape {
@@ -1116,6 +1327,281 @@ mod tests {
         assert!(result
             .chars()
             .all(|character| character.is_ascii_hexdigit()));
+    }
+
+    fn actor_heavy_shape() -> TableShape {
+        shape_from_fields(vec![
+            ("id", FieldMetadataType::Uuid, None),
+            ("name", FieldMetadataType::Text, None),
+            ("position", FieldMetadataType::Number, None),
+            ("companyId", FieldMetadataType::Uuid, None),
+            ("createdBy", FieldMetadataType::Actor, None),
+            ("updatedBy", FieldMetadataType::Actor, None),
+        ])
+    }
+
+    fn actor_record(name: &str) -> Map<String, Value> {
+        record(&format!(
+            "{{\"name\": \"{name}\", \"createdBy\": {{\"source\": \"MANUAL\", \
+                 \"workspaceMemberId\": \"20202020-0000-4000-8000-000000000009\", \
+                 \"name\": \"Ada\", \"context\": {{}}}}, \
+                 \"updatedBy\": {{\"source\": \"MANUAL\", \
+                 \"workspaceMemberId\": \"20202020-0000-4000-8000-000000000009\", \
+                 \"name\": \"Ada\", \"context\": {{}}}}, \"position\": 1}}"
+        ))
+    }
+
+    #[test]
+    fn a_single_row_insert_casts_the_actor_columns_without_rewriting_other_placeholders() {
+        let shape = actor_heavy_shape();
+        let rows = build_insert_rows(&shape, &[actor_record("Bulk One")]).expect("one row");
+        let execution =
+            build_insert_execution(&shape, &rows, &["id".to_string()], false).expect("execution");
+
+        assert_eq!(
+            execution.columns,
+            vec![
+                "name".to_string(),
+                "createdBySource".to_string(),
+                "createdByWorkspaceMemberId".to_string(),
+                "createdByName".to_string(),
+                "createdByContext".to_string(),
+                "updatedBySource".to_string(),
+                "updatedByWorkspaceMemberId".to_string(),
+                "updatedByName".to_string(),
+                "updatedByContext".to_string(),
+                "position".to_string(),
+            ]
+        );
+
+        let compiled =
+            compile_named_parameters(&execution.sql, &rows.parameters).expect("compiled");
+
+        assert_eq!(
+            compiled.text,
+            "INSERT INTO \"workspace_0\".\"person\" (\"name\", \"createdBySource\", \
+             \"createdByWorkspaceMemberId\", \"createdByName\", \"createdByContext\", \
+             \"updatedBySource\", \"updatedByWorkspaceMemberId\", \"updatedByName\", \
+             \"updatedByContext\", \"position\") VALUES ($1, $2::text::\"workspace_0\".\"\
+             person_createdBySource_enum\", $3::uuid, $4, $5::jsonb, $6::text::\"workspace_0\".\"\
+             person_updatedBySource_enum\", $7::uuid, $8, $9::jsonb, $10) RETURNING \"id\""
+        );
+        assert_eq!(compiled.values.len(), 10);
+    }
+
+    #[test]
+    fn an_insert_casts_relation_json_and_timestamp_columns_by_metadata_type() {
+        let shape = shape_from_fields(vec![
+            ("id", FieldMetadataType::Uuid, None),
+            ("name", FieldMetadataType::Text, None),
+            ("companyId", FieldMetadataType::Uuid, None),
+            ("labels", FieldMetadataType::RawJson, None),
+            ("createdAt", FieldMetadataType::DateTime, None),
+            ("birthday", FieldMetadataType::Date, None),
+        ]);
+        let rows = build_insert_rows(
+            &shape,
+            &[record(
+                "{\"name\": \"Rel\", \"companyId\": null, \"labels\": {\"a\": 1}, \
+                 \"createdAt\": \"2026-01-02T03:04:05.000Z\", \"birthday\": \"2026-01-02\"}",
+            )],
+        )
+        .expect("one row");
+        let execution =
+            build_insert_execution(&shape, &rows, &["id".to_string()], false).expect("execution");
+        let compiled =
+            compile_named_parameters(&execution.sql, &rows.parameters).expect("compiled");
+
+        assert_eq!(
+            compiled.text,
+            "INSERT INTO \"workspace_0\".\"person\" (\"name\", \"companyId\", \"labels\", \
+             \"createdAt\", \"birthday\") VALUES ($1, $2::uuid, $3::jsonb, $4::timestamptz, \
+             $5::date) RETURNING \"id\""
+        );
+        assert_eq!(compiled.values.len(), 5);
+    }
+
+    #[test]
+    fn a_two_row_insert_casts_each_actor_column_and_never_eats_a_placeholder_digit() {
+        let shape = actor_heavy_shape();
+        let rows = build_insert_rows(
+            &shape,
+            &[actor_record("Bulk One"), actor_record("Bulk Two")],
+        )
+        .expect("two rows");
+        let execution =
+            build_insert_execution(&shape, &rows, &["id".to_string()], false).expect("execution");
+
+        assert_eq!(execution.columns.len(), 20);
+        assert_eq!(execution.columns[9], "position".to_string());
+        assert_eq!(execution.columns[10], "name".to_string());
+        assert_eq!(execution.columns[19], "position".to_string());
+
+        let compiled =
+            compile_named_parameters(&execution.sql, &rows.parameters).expect("compiled");
+        let tail = compiled
+            .text
+            .split("), (")
+            .last()
+            .expect("second value tuple")
+            .to_string();
+
+        assert_eq!(
+            tail,
+            "$11, $12::text::\"workspace_0\".\"person_createdBySource_enum\", $13::uuid, $14, \
+             $15::jsonb, $16::text::\"workspace_0\".\"person_updatedBySource_enum\", $17::uuid, \
+             $18, $19::jsonb, $20) RETURNING \"id\""
+        );
+        assert!(
+            !compiled.text.contains("_enum0"),
+            "a cast must not be spliced into a longer placeholder: {}",
+            compiled.text
+        );
+        assert_eq!(compiled.values.len(), 20);
+    }
+
+    #[test]
+    fn a_defaulted_cell_keeps_every_later_bind_on_its_own_column() {
+        let shape = actor_heavy_shape();
+        let rows = build_insert_rows(
+            &shape,
+            &[
+                record(
+                    "{\"name\": \"With Company\", \"companyId\": \
+                     \"30303030-0000-4000-8000-000000000004\", \
+                     \"createdBy\": {\"source\": \"MANUAL\", \
+                     \"workspaceMemberId\": \"20202020-0000-4000-8000-000000000009\", \
+                     \"name\": \"Ada\", \"context\": {}}, \
+                     \"updatedBy\": {\"source\": \"MANUAL\", \
+                     \"workspaceMemberId\": \"20202020-0000-4000-8000-000000000009\", \
+                     \"name\": \"Ada\", \"context\": {}}, \"position\": 1}",
+                ),
+                record(
+                    "{\"name\": \"No Company\", \"createdBy\": {\"source\": \"MANUAL\", \
+                     \"workspaceMemberId\": null, \"name\": null, \"context\": {}}, \
+                     \"updatedBy\": {\"source\": \"MANUAL\", \"workspaceMemberId\": null, \
+                     \"name\": null, \"context\": {}}, \"position\": 2}",
+                ),
+            ],
+        )
+        .expect("heterogeneous rows");
+        let execution =
+            build_insert_execution(&shape, &rows, &["id".to_string()], false).expect("execution");
+
+        assert_eq!(rows.column_names.len(), 11);
+        assert_eq!(
+            execution.columns,
+            vec![
+                "name".to_string(),
+                "companyId".to_string(),
+                "createdBySource".to_string(),
+                "createdByWorkspaceMemberId".to_string(),
+                "createdByName".to_string(),
+                "createdByContext".to_string(),
+                "updatedBySource".to_string(),
+                "updatedByWorkspaceMemberId".to_string(),
+                "updatedByName".to_string(),
+                "updatedByContext".to_string(),
+                "position".to_string(),
+                "name".to_string(),
+                "createdBySource".to_string(),
+                "createdByWorkspaceMemberId".to_string(),
+                "createdByName".to_string(),
+                "createdByContext".to_string(),
+                "updatedBySource".to_string(),
+                "updatedByWorkspaceMemberId".to_string(),
+                "updatedByName".to_string(),
+                "updatedByContext".to_string(),
+                "position".to_string(),
+            ]
+        );
+
+        let compiled =
+            compile_named_parameters(&execution.sql, &rows.parameters).expect("compiled");
+
+        assert_eq!(compiled.values.len(), execution.columns.len());
+        assert!(execution.sql.contains("DEFAULT"));
+        assert!(
+            compiled
+                .text
+                .contains("$3::text::\"workspace_0\".\"person_createdBySource_enum\", $4::uuid"),
+            "{}",
+            compiled.text
+        );
+        assert!(compiled.text.contains("$21"), "{}", compiled.text);
+        assert!(!compiled.text.contains("$21:"), "{}", compiled.text);
+    }
+
+    #[test]
+    fn set_casts_survive_more_than_ten_set_columns() {
+        let shape = actor_heavy_shape();
+        let mut sql = String::from("UPDATE \"person\" SET ");
+        let mut set_columns: Vec<String> = Vec::new();
+
+        for (index, column_name) in shape
+            .column_names
+            .iter()
+            .filter(|name| name.as_str() != "position")
+            .enumerate()
+        {
+            if index > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str(&format!("\"{column_name}\" = :ormSet_{index}"));
+            set_columns.push(column_name.clone());
+        }
+        assert!(
+            set_columns.len() > 10,
+            "the fixture must exercise the two-digit placeholder range"
+        );
+
+        let casted = cast_set_parameters(&sql, &shape, &set_columns).expect("cast set parameters");
+        let mut expected = String::from("UPDATE \"person\" SET ");
+
+        for (index, column_name) in set_columns.iter().enumerate() {
+            if index > 0 {
+                expected.push_str(", ");
+            }
+            expected.push_str(&format!(
+                "\"{column_name}\" = :ormSet_{index}{}",
+                set_column_cast(&shape, column_name).expect("cast")
+            ));
+        }
+
+        assert_eq!(casted, expected);
+        assert!(!casted.contains("_enum0"));
+        assert!(casted.contains(":ormSet_10"));
+    }
+
+    #[test]
+    fn cast_named_parameters_leaves_unknown_tokens_alone() {
+        let sql = "SELECT * FROM \"t\" WHERE \"id\" = :id AND \"a\" = :ormInsert_0";
+        let shape = actor_heavy_shape();
+        let (rewritten, matched) = cast_named_parameters(sql, &|name| {
+            if name == "ormInsert_0" {
+                return Ok(Some(String::from("::uuid")));
+            }
+
+            Ok(None)
+        })
+        .expect("cast");
+
+        assert_eq!(
+            rewritten,
+            "SELECT * FROM \"t\" WHERE \"id\" = :id AND \"a\" = :ormInsert_0::uuid"
+        );
+        assert_eq!(matched, vec!["ormInsert_0".to_string()]);
+        assert!(shape.column("companyId").is_some());
+    }
+
+    #[test]
+    fn an_unterminated_quoted_token_is_rejected_before_casting() {
+        let error = cast_named_parameters("\"person.id = :ormInsert_0", &|_| {
+            Ok(Some(String::from("::uuid")))
+        })
+        .expect_err("unterminated");
+
+        assert_eq!(error.code(), "INVALID_QUERY");
     }
 }
 

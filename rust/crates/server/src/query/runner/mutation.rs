@@ -65,9 +65,9 @@ pub struct MutationSnapshot {
 }
 
 #[derive(Debug)]
-struct MutationExecution {
-    records: Vec<Value>,
-    snapshots: Vec<MutationSnapshot>,
+pub struct MutationExecution {
+    pub records: Vec<Value>,
+    pub snapshots: Vec<MutationSnapshot>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -93,6 +93,7 @@ pub async fn run_mutation(
         with_deleted,
         returning_columns,
         false,
+        None,
     )
     .await?
     .records)
@@ -121,9 +122,40 @@ pub async fn run_mutation_with_snapshots(
         with_deleted,
         returning_columns,
         true,
+        None,
     )
     .await?
     .snapshots)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_mutation_in_transaction(
+    pool: &sqlx::PgPool,
+    transaction: &mut PgConnection,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    kind: FilteredMutationKind,
+    filter: Option<Value>,
+    data: Option<Value>,
+    actor: Option<&ActorContext>,
+    with_deleted: bool,
+    returning_columns: Vec<String>,
+    capture_snapshots: bool,
+) -> Result<MutationExecution, RunnerError> {
+    run_mutation_inner(
+        pool,
+        schema,
+        object_name_singular,
+        kind,
+        filter,
+        data,
+        actor,
+        with_deleted,
+        returning_columns,
+        capture_snapshots,
+        Some(transaction),
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -138,6 +170,7 @@ async fn run_mutation_inner(
     with_deleted: bool,
     returning_columns: Vec<String>,
     capture_snapshots: bool,
+    caller_transaction: Option<&mut PgConnection>,
 ) -> Result<MutationExecution, RunnerError> {
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
@@ -220,12 +253,15 @@ async fn run_mutation_inner(
         parameter_map.extend(access.params);
     }
     let validate_update = update_access.is_some();
-    let recompute_access_groups = schema.requires_access_group_recompute(object_name_singular);
+    let recompute_access_groups = caller_transaction.is_none()
+        && schema.requires_access_group_recompute(object_name_singular);
     let mut returning_columns = returning_columns;
     if (validate_update || recompute_access_groups) && !return_id {
         returning_columns.push(String::from("id"));
     }
-    let mut transaction = if validate_update || capture_snapshots || recompute_access_groups {
+    let mut owned_transaction = if caller_transaction.is_none()
+        && (validate_update || capture_snapshots || recompute_access_groups)
+    {
         let mut transaction = pool.begin().await.map_err(RunnerError::database)?;
         if recompute_access_groups {
             crate::permissions::access_group::lock_company_access_groups(&mut transaction, schema)
@@ -238,10 +274,16 @@ async fn run_mutation_inner(
     } else {
         None
     };
+    let mut connection: Option<&mut PgConnection> =
+        match (&mut owned_transaction, caller_transaction) {
+            (Some(transaction), _) => Some(&mut **transaction),
+            (None, Some(transaction)) => Some(transaction),
+            (None, None) => None,
+        };
     let mut where_clauses = where_clauses;
     let mut parameter_map = parameter_map;
     let mut snapshots = Vec::new();
-    if let Some(transaction) = transaction.as_mut() {
+    if let Some(transaction) = connection.as_mut() {
         let access_condition = row_access_conditions.first().cloned().unwrap_or_default();
         let ids = lock_update_candidates(
             transaction,
@@ -317,40 +359,16 @@ async fn run_mutation_inner(
         }
     }
 
-    for (index, (column_name, _)) in expanded_columns.iter().enumerate() {
-        let column = model
-            .shape
-            .column(column_name)
-            .ok_or_else(|| RunnerError::unknown_column(column_name, &model.object.name_singular))?;
-        let placeholder = format!(":ormSet_{index}");
-        let cast = match column.field_metadata_type {
-            crate::metadata::flat::FieldMetadataType::Uuid
-            | crate::metadata::flat::FieldMetadataType::Relation
-            | crate::metadata::flat::FieldMetadataType::MorphRelation => {
-                format!("{placeholder}::uuid")
-            }
-            crate::metadata::flat::FieldMetadataType::RawJson => format!("{placeholder}::jsonb"),
-            crate::metadata::flat::FieldMetadataType::DateTime => {
-                format!("{placeholder}::timestamptz")
-            }
-            crate::metadata::flat::FieldMetadataType::Date => format!("{placeholder}::date"),
-            crate::metadata::flat::FieldMetadataType::Select
-                if matches!(column_name.as_str(), "createdBySource" | "updatedBySource") =>
-            {
-                let enum_name = crate::metadata::names::compute_postgres_enum_name(
-                    &model.shape.table_name,
-                    column_name,
-                );
-                format!(
-                    "{placeholder}::text::{}.{}",
-                    crate::query::repository::quote_identifier(&model.shape.schema_name)?,
-                    crate::query::repository::quote_identifier(&enum_name)?
-                )
-            }
-            _ => continue,
-        };
-        statement_sql = statement_sql.replace(&placeholder, &cast);
-    }
+    let set_column_names = expanded_columns
+        .iter()
+        .map(|(column_name, _)| column_name.clone())
+        .collect::<Vec<_>>();
+    statement_sql = crate::query::repository::cast_set_parameters(
+        &statement_sql,
+        &model.shape,
+        &set_column_names,
+    )
+    .map_err(RunnerError::from_repository)?;
 
     let statement = crate::query::repository::MutationStatement {
         sql: statement_sql,
@@ -365,9 +383,9 @@ async fn run_mutation_inner(
         query = super::base::bind_json_value(query, value)?;
     }
 
-    let rows = if let Some(mut transaction) = transaction.take() {
+    let rows = if let Some(transaction) = connection.as_mut() {
         let rows = query
-            .fetch_all(&mut *transaction)
+            .fetch_all(&mut **transaction)
             .await
             .map_err(RunnerError::database)?;
         let id_alias = build_column_result_alias(alias, "id");
@@ -378,7 +396,7 @@ async fn run_mutation_inner(
             .map_err(RunnerError::database)?;
         if let Some(update_access) = update_access.as_ref() {
             validate_updated_rows(
-                &mut *transaction,
+                &mut **transaction,
                 schema,
                 object_name_singular,
                 &ids,
@@ -389,7 +407,7 @@ async fn run_mutation_inner(
         if recompute_access_groups {
             crate::permissions::access_group::recompute_after_write(
                 pool,
-                &mut transaction,
+                transaction,
                 schema,
                 object_name_singular,
                 &ids,
@@ -399,37 +417,39 @@ async fn run_mutation_inner(
                 RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
             })?;
         }
-        transaction.commit().await.map_err(RunnerError::database)?;
-        if capture_snapshots {
-            let columns = snapshot_columns.as_ref().expect("snapshot columns");
-            let after = rows
-                .iter()
-                .map(|row| snapshot_from_stored_row(row, model, columns))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .filter_map(|record| {
-                    let id = record
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .and_then(|id| Uuid::parse_str(id).ok())?;
-                    Some((id, record))
-                })
-                .collect::<std::collections::HashMap<_, _>>();
-            if kind != FilteredMutationKind::Destroy {
-                for snapshot in &mut snapshots {
-                    let id = snapshot
-                        .before
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .and_then(|id| Uuid::parse_str(id).ok());
-                    snapshot.after = id.and_then(|id| after.get(&id).cloned());
-                }
-            }
-        }
         rows
     } else {
         query.fetch_all(pool).await.map_err(RunnerError::database)?
     };
+    if let Some(transaction) = owned_transaction {
+        transaction.commit().await.map_err(RunnerError::database)?;
+    }
+    if capture_snapshots {
+        let columns = snapshot_columns.as_ref().expect("snapshot columns");
+        let after = rows
+            .iter()
+            .map(|row| snapshot_from_stored_row(row, model, columns))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter_map(|record| {
+                let id = record
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| Uuid::parse_str(id).ok())?;
+                Some((id, record))
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        if kind != FilteredMutationKind::Destroy {
+            for snapshot in &mut snapshots {
+                let id = snapshot
+                    .before
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| Uuid::parse_str(id).ok());
+                snapshot.after = id.and_then(|id| after.get(&id).cloned());
+            }
+        }
+    }
     let mut results = Vec::with_capacity(rows.len());
     let id_alias = build_column_result_alias(alias, "id");
 

@@ -349,7 +349,7 @@ async fn load_saml_identity_provider(
     let id = Uuid::parse_str(identity_provider_id).map_err(|_| idp_not_found_error())?;
 
     let row: Option<(Option<String>, String)> = sqlx::query_as(
-        "SELECT \"ssoURL\", type FROM core.\"workspaceSSOIdentityProvider\" WHERE id = $1",
+        "SELECT \"ssoURL\", type::text FROM core.\"workspaceSSOIdentityProvider\" WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.core_pool)

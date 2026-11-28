@@ -9,3 +9,5 @@ Thumbs.db
 analyze.json
 .idea/
 worktrees/
+
+__pycache__/

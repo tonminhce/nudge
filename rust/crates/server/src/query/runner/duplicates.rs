@@ -59,6 +59,7 @@ pub async fn find_duplicates(
             &FindManyArgs {
                 filter: Some(json!({"id": {"in": source_ids}})),
                 selected_field_names: source_fields,
+                skip_channel_visibility: true,
                 ..Default::default()
             },
             false,
