@@ -231,6 +231,61 @@ def scenario_rest_find_many(client):
     return {"rest": {"statusCode": status, "body": body}}
 
 
+def scenario_filter_operators(client):
+    captures = {}
+    _, or_body = client.gql(
+        'query { people(filter: { or: [{ name: { firstName: { eq: "Alice" } } }, '
+        '{ name: { firstName: { eq: "Bob" } } }] }, first: 3) '
+        "{ edges { node { name { firstName } } } totalCount } }"
+    )
+    captures["or"] = or_body
+    _, null_body = client.gql(
+        'query { people(filter: { position: { is: "NULL" } }, first: 3) '
+        "{ edges { node { name { firstName } position } } totalCount } }"
+    )
+    captures["isNull"] = null_body
+    _, ilike = client.gql(
+        'query { people(filter: { name: { ilike: "%ha%" } }, first: 3) '
+        "{ edges { node { id } } } }"
+    )
+    captures["compositeIlike"] = ilike
+    captures["compositeIlikeCodes"] = error_codes(ilike)
+    return captures
+
+
+def scenario_bad_cursor(client):
+    _, body = client.gql(
+        'query { people(first: 2, after: "garbage") { edges { node { id } } } }'
+    )
+    return {"badCursor": body, "codes": error_codes(body)}
+
+
+def scenario_reverse_relation(client):
+    _, body = client.gql(
+        'query { companies(filter: { name: { eq: "Acme Corp" } }) { edges { node { name '
+        "people { edges { node { name { firstName } } } totalCount } } } } }"
+    )
+    return {"reverse": body}
+
+
+def scenario_order_nulls_first(client):
+    _, body = client.gql(
+        "query { people(first: 3, orderBy: [{ name: { lastName: AscNullsFirst } }]) "
+        "{ edges { node { name { lastName } } cursor } pageInfo { hasNextPage endCursor } } }"
+    )
+    return {"nullsFirst": body}
+
+
+def scenario_rest_detail(client):
+    person_id = resolve_person_id(client)
+    list_status, list_body = client.rest("/rest/people/%s" % person_id)
+    bad_status, bad_body = client.rest("/rest/nope?limit=1")
+    return {
+        "restSingle": {"statusCode": list_status, "body": list_body},
+        "restUnknownObject": {"statusCode": bad_status, "body": bad_body},
+    }
+
+
 MERGE_FIELDS = """
     id
     name
@@ -374,6 +429,11 @@ SCENARIOS = [
     ("merge-many", scenario_merge_many),
     ("error-bad-filter", scenario_error_filter),
     ("rest-findMany", scenario_rest_find_many),
+    ("filter-operators", scenario_filter_operators),
+    ("bad-cursor", scenario_bad_cursor),
+    ("reverse-relation", scenario_reverse_relation),
+    ("order-nulls-first", scenario_order_nulls_first),
+    ("rest-detail", scenario_rest_detail),
 ]
 
 

@@ -1,0 +1,24 @@
+{
+  "normalized": {
+    "badCursor": {
+      "data": {
+        "people": null
+      },
+      "errors": [
+        {
+          "extensions": {
+            "code": "BAD_USER_INPUT",
+            "subCode": "INVALID_CURSOR",
+            "userFriendlyMessage": "An error occurred."
+          },
+          "message": "Invalid cursor: garbage"
+        }
+      ]
+    },
+    "codes": [
+      "BAD_USER_INPUT",
+      "INVALID_CURSOR"
+    ]
+  },
+  "scenario": "bad-cursor"
+}

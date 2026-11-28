@@ -1,0 +1,25 @@
+{
+  "normalized": {
+    "nullsFirst": {
+      "data": {
+        "people": {
+          "edges": [
+            {
+              "cursor": "<cursor>",
+              "node": {
+                "name": {
+                  "lastName": "Diaz"
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "<cursor>",
+            "hasNextPage": false
+          }
+        }
+      }
+    }
+  },
+  "scenario": "order-nulls-first"
+}
