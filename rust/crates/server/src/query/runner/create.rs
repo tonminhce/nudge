@@ -16,6 +16,7 @@ use crate::query::repository::QUERY_MAX_RECORDS;
 use super::actors::inject_actor_fields_on_create;
 use super::actors::ActorContext;
 use super::base::compile_runner_filter;
+use super::base::replace_placeholder;
 use super::base::resolve_where_clauses;
 use super::base::ObjectModel;
 use super::base::RunnerSchema;
@@ -298,10 +299,14 @@ where
                 crate::query::repository::quote_identifier(&shape.schema_name)?,
                 crate::query::repository::quote_identifier(&enum_name)?
             );
-            compiled_text = compiled_text.replace(&parameter, &cast);
+            compiled_text = replace_placeholder(&compiled_text, &parameter, &cast);
         } else if column_name.ends_with("WorkspaceMemberId") {
             let parameter = format!("${}", parameter_index + 1);
-            compiled_text = compiled_text.replace(&parameter, &format!("{parameter}::uuid"));
+            compiled_text = replace_placeholder(
+                &compiled_text,
+                &parameter,
+                &format!("{parameter}::uuid"),
+            );
         }
     }
 

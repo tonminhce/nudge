@@ -16,6 +16,7 @@ use crate::query::repository::MutationWhereClause;
 use super::actors::inject_updated_by_on_update;
 use super::actors::ActorContext;
 use super::base::compile_runner_filter;
+use super::base::replace_placeholder;
 use super::base::resolve_where_clauses;
 use super::base::ObjectModel;
 use super::base::RunnerSchema;
@@ -391,7 +392,7 @@ async fn run_mutation_inner(
             }
             _ => continue,
         };
-        statement_sql = statement_sql.replace(&placeholder, &cast);
+        statement_sql = replace_placeholder(&statement_sql, &placeholder, &cast);
     }
 
     let statement = crate::query::repository::MutationStatement {
