@@ -26,8 +26,8 @@ use super::find_many::FindManyArgs;
 use super::find_many::NestedRelationSelection;
 use super::mutation::run_mutation_in_transaction;
 use super::mutation::FilteredMutationKind;
-use super::QUERY_MAX_RECORDS;
 use super::RunnerError;
+use super::QUERY_MAX_RECORDS;
 
 pub const MUTATION_MAX_MERGE_RECORDS: usize = 9;
 
@@ -66,7 +66,10 @@ pub async fn merge_many(
         .iter()
         .any(|record| record_id(record).is_some_and(|id| id == priority_id))
     {
-        return Err(RunnerError::new("RECORD_NOT_FOUND", "Priority record not found"));
+        return Err(RunnerError::new(
+            "RECORD_NOT_FOUND",
+            "Priority record not found",
+        ));
     }
     if args.dry_run {
         return Ok(dry_run_preview(model, &records, priority_id));
@@ -141,6 +144,7 @@ async fn fetch_records_to_merge(
     Ok(records)
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn execute_merge(
     pool: &sqlx::PgPool,
     schema: &RunnerSchema,
@@ -208,7 +212,7 @@ async fn execute_merge(
         .into_iter()
         .filter_map(|snapshot| snapshot.after)
         .collect::<Vec<_>>();
-    if records.first().is_none() {
+    if records.is_empty() {
         return Err(RunnerError::new(
             "RECORD_NOT_FOUND",
             "Failed to update record",
@@ -225,19 +229,11 @@ async fn execute_merge(
             &affected,
         )
         .await
-        .map_err(|error| {
-            RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
-        })?;
+        .map_err(|error| RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string()))?;
     }
     transaction.commit().await.map_err(RunnerError::database)?;
-    super::nested::load_nested_relations(
-        pool,
-        schema,
-        object_name_singular,
-        &mut records,
-        nested,
-    )
-    .await?;
+    super::nested::load_nested_relations(pool, schema, object_name_singular, &mut records, nested)
+        .await?;
     Ok(records.remove(0))
 }
 
@@ -295,6 +291,7 @@ async fn repoint_related_records(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn repoint_child_records(
     pool: &sqlx::PgPool,
     transaction: &mut Transaction<'_, sqlx::Postgres>,
@@ -314,22 +311,15 @@ async fn repoint_child_records(
             }
         }
     }
-    let related = select_child_records(
-        &mut **transaction,
-        child,
-        join_column,
-        ids_to_delete,
-        &columns,
-    )
-    .await?;
+    let related =
+        select_child_records(transaction, child, join_column, ids_to_delete, &columns).await?;
     if related.is_empty() {
         return Ok(());
     }
     let owned_by_priority = if groups.is_empty() {
         Vec::new()
     } else {
-        select_child_records(&mut **transaction, child, join_column, &[priority_id], &columns)
-            .await?
+        select_child_records(transaction, child, join_column, &[priority_id], &columns).await?
     };
     let mut taken = owned_by_priority
         .iter()
@@ -368,7 +358,10 @@ async fn repoint_child_records(
     }
     for chunk in ids_to_migrate.chunks(QUERY_MAX_RECORDS) {
         let mut data = Map::new();
-        data.insert(join_column.to_string(), Value::String(priority_id.to_string()));
+        data.insert(
+            join_column.to_string(),
+            Value::String(priority_id.to_string()),
+        );
         run_mutation_in_transaction(
             pool,
             transaction,
@@ -404,10 +397,7 @@ async fn select_child_records(
         quote_identifier(&child.shape.schema_name)?,
         quote_identifier(&child.shape.table_name)?
     );
-    let mut selected = vec![format!(
-        "{alias_sql}.{}",
-        quote_identifier("id")?
-    )];
+    let mut selected = vec![format!("{alias_sql}.{}", quote_identifier("id")?)];
     for column in columns {
         if column == "id" {
             continue;
@@ -466,9 +456,7 @@ fn unique_column_group(child: &ObjectModel, group: &[UniqueField]) -> Option<Vec
         } else {
             field.name.clone()
         };
-        if child.shape.column(&column).is_none() {
-            return None;
-        }
+        child.shape.column(&column)?;
         columns.push(column);
     }
     Some(columns)
@@ -478,21 +466,14 @@ fn duplicate_keys(record: &Map<String, Value>, groups: &[Vec<String>]) -> Vec<St
     groups
         .iter()
         .filter(|group| {
-            group.iter().all(|column| {
-                record
-                    .get(column)
-                    .is_some_and(|value| !value.is_null())
-            })
+            group
+                .iter()
+                .all(|column| record.get(column).is_some_and(|value| !value.is_null()))
         })
         .map(|group| {
             let values = group
                 .iter()
-                .map(|column| {
-                    record
-                        .get(column)
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                })
+                .map(|column| record.get(column).cloned().unwrap_or(Value::Null))
                 .collect::<Vec<_>>();
             json!([group, values]).to_string()
         })
@@ -571,7 +552,7 @@ fn deep_merge(
             .shape
             .relation_shape_by_field_name
             .get(&field.name)
-            .map(|relation| relation.relation_type.clone());
+            .map(|relation| relation.relation_type);
         if let Some(value) = merge_field_value(field, &present, priority_id, dry_run, relation_type)
         {
             merged.push((field.name.clone(), value));
@@ -604,9 +585,11 @@ fn merge_field_value(
         FieldMetadataType::Emails => Some(merge_emails(present, priority_id)),
         FieldMetadataType::Phones => Some(merge_phones(present, priority_id)),
         FieldMetadataType::Links => Some(merge_links(present, priority_id)),
-        FieldMetadataType::Relation if dry_run => {
-            Some(merge_relation_for_dry_run(present, priority_id, relation_type))
-        }
+        FieldMetadataType::Relation if dry_run => Some(merge_relation_for_dry_run(
+            present,
+            priority_id,
+            relation_type,
+        )),
         _ => Some(default_merge_value(present, priority_id)),
     }
 }
@@ -651,7 +634,11 @@ fn default_merge_value(present: &[(Value, Uuid)], priority_id: Uuid) -> Value {
         .iter()
         .find(|(_, id)| *id == priority_id)
         .filter(|(value, _)| has_record_field_value(value))
-        .or_else(|| present.iter().find(|(value, _)| has_record_field_value(value)))
+        .or_else(|| {
+            present
+                .iter()
+                .find(|(value, _)| has_record_field_value(value))
+        })
         .map(|(value, _)| value.clone())
         .unwrap_or(Value::Null)
 }
@@ -774,9 +761,9 @@ fn merge_phones(present: &[(Value, Uuid)], priority_id: Uuid) -> Value {
             *id == priority_id && meaningful_string(value.get("primaryPhoneNumber")).is_some()
         })
         .or_else(|| {
-            present.iter().find(|(value, _)| {
-                meaningful_string(value.get("primaryPhoneNumber")).is_some()
-            })
+            present
+                .iter()
+                .find(|(value, _)| meaningful_string(value.get("primaryPhoneNumber")).is_some())
         })
         .map(|(value, _)| value.clone());
     let mut phones = Vec::new();
@@ -1128,8 +1115,14 @@ mod tests {
         assert_eq!(
             merge_links(
                 &[
-                    pair(json!({"primaryLinkUrl": "https://a.example.com", "primaryLinkLabel": "A"}), priority),
-                    pair(json!({"primaryLinkUrl": "https://a.example.com", "primaryLinkLabel": "A"}), other),
+                    pair(
+                        json!({"primaryLinkUrl": "https://a.example.com", "primaryLinkLabel": "A"}),
+                        priority
+                    ),
+                    pair(
+                        json!({"primaryLinkUrl": "https://a.example.com", "primaryLinkLabel": "A"}),
+                        other
+                    ),
                 ],
                 priority
             ),
@@ -1148,14 +1141,14 @@ mod tests {
         let other = Uuid::new_v4();
 
         assert_eq!(
-            default_merge_value(
-                &[pair(json!(0), other), pair(json!(2), priority)],
-                priority
-            ),
+            default_merge_value(&[pair(json!(0), other), pair(json!(2), priority)], priority),
             json!(2)
         );
         assert_eq!(
-            default_merge_value(&[pair(json!(false), priority), pair(json!(true), other)], priority),
+            default_merge_value(
+                &[pair(json!(false), priority), pair(json!(true), other)],
+                priority
+            ),
             json!(false)
         );
         assert_eq!(
@@ -1189,7 +1182,10 @@ mod tests {
         );
         assert_eq!(
             merge_relation_for_dry_run(
-                &[pair(json!({"id": "lost"}), other), pair(Value::Null, priority)],
+                &[
+                    pair(json!({"id": "lost"}), other),
+                    pair(Value::Null, priority)
+                ],
                 priority,
                 Some(RelationType::ManyToOne)
             ),
@@ -1215,7 +1211,10 @@ mod tests {
                     dry_run: false
                 }
             )),
-            ("INVALID_QUERY_INPUT".to_string(), "At least 2 record IDs are required for merge".to_string())
+            (
+                "INVALID_QUERY_INPUT".to_string(),
+                "At least 2 record IDs are required for merge".to_string()
+            )
         );
         assert_eq!(
             error_of(validate_args(
@@ -1364,7 +1363,10 @@ mod tests {
             .cloned()
             .expect("record object");
 
-        assert_eq!(duplicate_keys(&record, &groups), vec!["[[\"domain\"],[\"acme.com\"]]"]);
+        assert_eq!(
+            duplicate_keys(&record, &groups),
+            vec!["[[\"domain\"],[\"acme.com\"]]"]
+        );
         assert!(duplicate_keys(&Map::new(), &groups).is_empty());
     }
 }

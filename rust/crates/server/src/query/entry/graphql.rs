@@ -824,7 +824,15 @@ async fn execute_workspace(
             .await
         }
         ResolverMethod::MergeMany => {
-            merge_many_root(state, schema, &runner_schema, field, resolver, actor.as_ref()).await
+            merge_many_root(
+                state,
+                schema,
+                &runner_schema,
+                field,
+                resolver,
+                actor.as_ref(),
+            )
+            .await
         }
         ResolverMethod::GroupBy => Err(GraphQlError::user_input(
             "GroupBy is executed by the group-by runner endpoint in a following slice",

@@ -274,12 +274,12 @@ async fn run_mutation_inner(
     } else {
         None
     };
-    let mut connection: Option<&mut PgConnection> = match (&mut owned_transaction, caller_transaction)
-    {
-        (Some(transaction), _) => Some(&mut **transaction),
-        (None, Some(transaction)) => Some(transaction),
-        (None, None) => None,
-    };
+    let mut connection: Option<&mut PgConnection> =
+        match (&mut owned_transaction, caller_transaction) {
+            (Some(transaction), _) => Some(&mut **transaction),
+            (None, Some(transaction)) => Some(transaction),
+            (None, None) => None,
+        };
     let mut where_clauses = where_clauses;
     let mut parameter_map = parameter_map;
     let mut snapshots = Vec::new();
@@ -431,7 +431,7 @@ async fn run_mutation_inner(
         if recompute_access_groups {
             crate::permissions::access_group::recompute_after_write(
                 pool,
-                &mut **transaction,
+                transaction,
                 schema,
                 object_name_singular,
                 &ids,
@@ -445,7 +445,6 @@ async fn run_mutation_inner(
     } else {
         query.fetch_all(pool).await.map_err(RunnerError::database)?
     };
-    drop(connection);
     if let Some(transaction) = owned_transaction {
         transaction.commit().await.map_err(RunnerError::database)?;
     }
