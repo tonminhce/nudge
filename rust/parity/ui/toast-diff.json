@@ -1,8 +1,216 @@
 {
   "matched": false,
-  "stale": true,
-  "legacyTolerance": 0,
-  "differenceCount": null,
-  "differences": [],
-  "reason": "Legacy ledger did not record selectors or ignores and predates the strict all-attribute harness; recapture required."
+  "tolerance": 0,
+  "visualOnly": false,
+  "ignored": [
+    "attributes.class",
+    "attributes.for",
+    "attributes.id",
+    "attributes.style",
+    "document.bodyBackground",
+    "document.bodyFont",
+    "document.title",
+    "document.url",
+    "selectors.actions.animationDuration",
+    "selectors.actions.animationName",
+    "selectors.actions.innerHTML",
+    "selectors.close.animationDuration",
+    "selectors.close.animationName",
+    "selectors.close.innerHTML",
+    "selectors.content.animationDuration",
+    "selectors.content.animationName",
+    "selectors.content.innerHTML",
+    "selectors.countdown.animationDuration",
+    "selectors.countdown.animationName",
+    "selectors.countdown.innerHTML",
+    "selectors.header.animationDuration",
+    "selectors.header.animationName",
+    "selectors.header.innerHTML",
+    "selectors.icon.animationDuration",
+    "selectors.icon.animationName",
+    "selectors.icon.innerHTML",
+    "selectors.item.animationDuration",
+    "selectors.item.animationName",
+    "selectors.item.innerHTML",
+    "selectors.message.animationDuration",
+    "selectors.message.animationName",
+    "selectors.message.innerHTML",
+    "selectors.progress.animationDuration",
+    "selectors.progress.animationName",
+    "selectors.progress.innerHTML",
+    "selectors.toast.animationDuration",
+    "selectors.toast.animationName",
+    "selectors.toast.innerHTML",
+    "selectors.viewport.animationDuration",
+    "selectors.viewport.animationName",
+    "selectors.viewport.innerHTML"
+  ],
+  "capture": {
+    "reference": {
+      "selectors": {
+        "viewport": "body > div[class*=\"1q2cc_\"]",
+        "item": "[class^=\"_item_1q2cc\"]",
+        "content": "[class^=\"_itemContent_1q2cc\"]",
+        "toast": "#toast-1",
+        "progress": "[class^=\"_progress_181ka\"]",
+        "countdown": "[class^=\"_countdown_\"]",
+        "header": "[class^=\"_header_181ka\"]",
+        "icon": "[class^=\"_icon_181ka\"]",
+        "message": "[class^=\"_message_181ka\"]",
+        "actions": "[class^=\"_actions_181ka\"]",
+        "close": "[class*=\"closeButton\"]"
+      },
+      "settleMs": 900,
+      "screenshot": true,
+      "format": "png",
+      "fullPage": false
+    },
+    "nudge": {
+      "selectors": {
+        "viewport": ".t-toast-viewport",
+        "item": ".t-toast-item",
+        "content": ".t-toast-item-content",
+        "toast": ".t-toast",
+        "progress": ".t-toast-progress",
+        "countdown": ".t-toast-countdown",
+        "header": ".t-toast-header",
+        "icon": ".t-toast-icon",
+        "message": ".t-toast-message",
+        "actions": ".t-toast-actions",
+        "close": ".t-toast-dismiss"
+      },
+      "settleMs": 900,
+      "screenshot": true,
+      "format": "png",
+      "fullPage": false
+    }
+  },
+  "differenceCount": 26,
+  "differences": [
+    {
+      "path": "selectors.actions.attributes.class",
+      "reference": "_actions_181ka_50",
+      "nudge": "t-toast-actions"
+    },
+    {
+      "path": "selectors.close.attributes.class",
+      "reference": "_button_1tycy_1 _closeButton_181ka_76",
+      "nudge": "t-toast-dismiss"
+    },
+    {
+      "path": "selectors.close.attributes.data-color",
+      "reference": "neutral"
+    },
+    {
+      "path": "selectors.close.attributes.data-size",
+      "reference": "sm"
+    },
+    {
+      "path": "selectors.close.attributes.data-variant",
+      "reference": "ghost"
+    },
+    {
+      "path": "selectors.content.attributes.class",
+      "reference": "_itemContent_1q2cc_47",
+      "nudge": "t-toast-item-content"
+    },
+    {
+      "path": "selectors.content.style.display",
+      "reference": "flex",
+      "nudge": "block"
+    },
+    {
+      "path": "selectors.content.style.flexDirection",
+      "reference": "column",
+      "nudge": "row"
+    },
+    {
+      "path": "selectors.content.style.minHeight",
+      "reference": "0px",
+      "nudge": "54px"
+    },
+    {
+      "path": "selectors.countdown.attributes.class",
+      "reference": "_countdown_1vuo8_1",
+      "nudge": "t-toast-countdown"
+    },
+    {
+      "path": "selectors.countdown.attributes.style",
+      "reference": "--toast-countdown-color: #11ff992d; --toast-countdown-width: 100%; --toast-countdown-duration: 6000ms;",
+      "nudge": "--toast-countdown-color: #00a43319; --toast-countdown-width: 100%; --toast-countdown-duration: 6000ms;"
+    },
+    {
+      "path": "selectors.countdown.style.animationName",
+      "reference": "_toastCountdown_1vuo8_1",
+      "nudge": "t-toast-countdown"
+    },
+    {
+      "path": "selectors.countdown.style.background",
+      "reference": "rgba(17, 255, 153, 0.176) none repeat scroll 0% 0% / auto padding-box border-box",
+      "nudge": "rgba(0, 164, 51, 0.098) none repeat scroll 0% 0% / auto padding-box border-box"
+    },
+    {
+      "path": "selectors.countdown.style.backgroundColor",
+      "reference": "rgba(17, 255, 153, 0.176)",
+      "nudge": "rgba(0, 164, 51, 0.098)"
+    },
+    {
+      "path": "selectors.header.attributes.class",
+      "reference": "_header_181ka_30",
+      "nudge": "t-toast-header"
+    },
+    {
+      "path": "selectors.icon.attributes.class",
+      "reference": "_icon_181ka_45",
+      "nudge": "t-toast-icon"
+    },
+    {
+      "path": "selectors.icon.style.justifyContent",
+      "reference": "normal",
+      "nudge": "center"
+    },
+    {
+      "path": "selectors.item.attributes.class",
+      "reference": "_item_1q2cc_20",
+      "nudge": "t-toast-item"
+    },
+    {
+      "path": "selectors.message.attributes.class",
+      "reference": "_message_181ka_40",
+      "nudge": "t-toast-message"
+    },
+    {
+      "path": "selectors.progress.attributes.class",
+      "reference": "_progress_181ka_19",
+      "nudge": "t-toast-progress"
+    },
+    {
+      "path": "selectors.toast.attributes.class",
+      "reference": "_root_181ka_1",
+      "nudge": "t-toast"
+    },
+    {
+      "path": "selectors.toast.attributes.data-duration",
+      "nudge": "6000"
+    },
+    {
+      "path": "selectors.toast.attributes.data-tone",
+      "nudge": "success"
+    },
+    {
+      "path": "selectors.toast.style.minHeight",
+      "reference": "auto",
+      "nudge": "0px"
+    },
+    {
+      "path": "selectors.toast.style.minWidth",
+      "reference": "auto",
+      "nudge": "0px"
+    },
+    {
+      "path": "selectors.viewport.attributes.class",
+      "reference": "_root_1q2cc_1",
+      "nudge": "t-toast-viewport"
+    }
+  ]
 }

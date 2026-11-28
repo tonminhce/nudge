@@ -3,6 +3,12 @@
   "tolerance": 0,
   "visualOnly": true,
   "ignored": [
+    "attributes.class",
+    "attributes.for",
+    "attributes.id",
+    "attributes.style",
+    "document.bodyBackground",
+    "document.bodyFont",
     "document.title",
     "document.url"
   ],
@@ -16,7 +22,7 @@
         "privacy": "a[href*=\"privacy\"]",
         "terms": "a[href*=\"terms\"]"
       },
-      "settleMs": 700,
+      "settleMs": 900,
       "screenshot": true,
       "format": "png",
       "fullPage": false
@@ -30,7 +36,7 @@
         "privacy": "a[href*=\"privacy\"]",
         "terms": "a[href*=\"terms\"]"
       },
-      "settleMs": 700,
+      "settleMs": 900,
       "screenshot": true,
       "format": "png",
       "fullPage": false

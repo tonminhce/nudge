@@ -1,8 +1,321 @@
 {
   "matched": false,
-  "stale": true,
-  "legacyTolerance": 0.02,
-  "differenceCount": null,
-  "differences": [],
-  "reason": "Legacy ledger did not record selectors or ignores and predates the strict all-attribute harness; recapture required."
+  "tolerance": 0,
+  "visualOnly": false,
+  "ignored": [
+    "attributes.class",
+    "attributes.for",
+    "attributes.id",
+    "attributes.style",
+    "document.bodyBackground",
+    "document.bodyFont",
+    "document.title",
+    "document.url",
+    "selectors.badgeFallback.text",
+    "selectors.field.innerHTML",
+    "selectors.headingText.innerHTML",
+    "selectors.headingText.text",
+    "selectors.input.innerHTML",
+    "selectors.layout.innerHTML",
+    "selectors.submit.innerHTML"
+  ],
+  "capture": {
+    "reference": {
+      "selectors": {
+        "layout": ".swdi819",
+        "headingText": ".sfyinng > div > div",
+        "field": ".svbhmn0",
+        "input": "input[autocomplete=\"email\"]",
+        "submit": "button[type=\"submit\"]"
+      },
+      "settleMs": 900,
+      "screenshot": true,
+      "format": "png",
+      "fullPage": false
+    },
+    "nudge": {
+      "selectors": {
+        "layout": ".auth-card",
+        "headingText": ".auth-heading-text",
+        "field": ".auth-field",
+        "input": ".auth-input",
+        "submit": ".auth-submit"
+      },
+      "settleMs": 900,
+      "screenshot": true,
+      "format": "png",
+      "fullPage": false
+    }
+  },
+  "differenceCount": 50,
+  "differences": [
+    {
+      "path": "selectors.field.attributes.class",
+      "reference": "svbhmn0",
+      "nudge": "auth-field"
+    },
+    {
+      "path": "selectors.field.attributes.style",
+      "reference": "opacity: 1; height: auto;"
+    },
+    {
+      "path": "selectors.field.children[0].tag",
+      "reference": "DIV",
+      "nudge": "INPUT"
+    },
+    {
+      "path": "selectors.headingText.attributes.class",
+      "reference": "f5jqen4",
+      "nudge": "auth-heading-text"
+    },
+    {
+      "path": "selectors.headingText.rect.right",
+      "reference": 593.5,
+      "nudge": 634.046875,
+      "delta": 40.546875
+    },
+    {
+      "path": "selectors.headingText.rect.width",
+      "reference": 253.015625,
+      "nudge": 171.921875,
+      "delta": -81.09375
+    },
+    {
+      "path": "selectors.headingText.rect.x",
+      "reference": 593.484375,
+      "nudge": 634.03125,
+      "delta": 40.546875
+    },
+    {
+      "path": "selectors.headingText.style.animationName",
+      "reference": "animated-ease-in-animatedEaseInFadeIn-f5jqen4",
+      "nudge": "auth-fade-in"
+    },
+    {
+      "path": "selectors.headingText.style.width",
+      "reference": "253.016px",
+      "nudge": "171.922px"
+    },
+    {
+      "path": "selectors.input.attributes.autofocus",
+      "nudge": ""
+    },
+    {
+      "path": "selectors.input.attributes.class",
+      "reference": "s1hpd1gt",
+      "nudge": "t-input auth-input"
+    },
+    {
+      "path": "selectors.input.attributes.id",
+      "reference": "_r_3_"
+    },
+    {
+      "path": "selectors.input.attributes.style",
+      "reference": "--s1hpd1gt-0: var(--t-border-color-medium); --s1hpd1gt-1: var(--t-border-radius-md); --s1hpd1gt-2: var(--t-font-family); --s1hpd1gt-3: var(--t-font-size-md); --s1hpd1gt-4: var(--t-font-weight-regular); --s1hpd1gt-5: 32px; --s1hpd1gt-6: none; --s1hpd1gt-7: var(--t-spacing-2); --s1hpd1gt-8: var(--t-spacing-2); --s1hpd1gt-9: var(--t-spacing-2); --s1hpd1gt-10: 100%; --s1hpd1gt-11: var(--t-color-blue);"
+    },
+    {
+      "path": "selectors.input.style.minHeight",
+      "reference": "auto",
+      "nudge": "0px"
+    },
+    {
+      "path": "selectors.input.style.minWidth",
+      "reference": "auto",
+      "nudge": "0px"
+    },
+    {
+      "path": "selectors.layout.attributes.aria-label",
+      "nudge": "Welcome to Nudge"
+    },
+    {
+      "path": "selectors.layout.attributes.class",
+      "reference": "swdi819",
+      "nudge": "auth-card"
+    },
+    {
+      "path": "selectors.layout.children[0].rect.bottom",
+      "reference": 551.515625,
+      "nudge": 567.5,
+      "delta": 15.984375
+    },
+    {
+      "path": "selectors.layout.children[0].rect.height",
+      "reference": 80,
+      "nudge": 48,
+      "delta": -32
+    },
+    {
+      "path": "selectors.layout.children[0].rect.y",
+      "reference": 268.484375,
+      "nudge": 284.5,
+      "delta": 16.015625
+    },
+    {
+      "path": "selectors.layout.children[0].text",
+      "reference": "M",
+      "nudge": "N"
+    },
+    {
+      "path": "selectors.layout.children[1].rect.height",
+      "reference": 56.015625,
+      "nudge": 56,
+      "delta": -0.015625
+    },
+    {
+      "path": "selectors.layout.children[1].rect.right",
+      "reference": 593.5,
+      "nudge": 634.046875,
+      "delta": 40.546875
+    },
+    {
+      "path": "selectors.layout.children[1].rect.width",
+      "reference": 253.015625,
+      "nudge": 171.921875,
+      "delta": -81.09375
+    },
+    {
+      "path": "selectors.layout.children[1].rect.x",
+      "reference": 593.484375,
+      "nudge": 634.03125,
+      "delta": 40.546875
+    },
+    {
+      "path": "selectors.layout.children[1].rect.y",
+      "reference": 388.484375,
+      "nudge": 388.5,
+      "delta": 0.015625
+    },
+    {
+      "path": "selectors.layout.children[1].text",
+      "reference": "Welcome, My Workspace.",
+      "nudge": "Welcome, Nudge."
+    },
+    {
+      "path": "selectors.layout.children[2].rect.bottom",
+      "reference": 307.5,
+      "nudge": 339.5,
+      "delta": 32
+    },
+    {
+      "path": "selectors.layout.children[2].rect.height",
+      "reference": 124,
+      "nudge": 76,
+      "delta": -48
+    },
+    {
+      "path": "selectors.layout.children[2].rect.right",
+      "reference": 40,
+      "nudge": 500,
+      "delta": 460
+    },
+    {
+      "path": "selectors.layout.children[2].rect.width",
+      "reference": 1360,
+      "nudge": 440,
+      "delta": -920
+    },
+    {
+      "path": "selectors.layout.children[2].rect.x",
+      "reference": 40,
+      "nudge": 500,
+      "delta": 460
+    },
+    {
+      "path": "selectors.layout.children[2].rect.y",
+      "reference": 468.5,
+      "nudge": 484.5,
+      "delta": 16
+    },
+    {
+      "path": "selectors.layout.children[2].tag",
+      "reference": "DIV",
+      "nudge": "FORM"
+    },
+    {
+      "path": "selectors.layout.rect.bottom",
+      "reference": 0,
+      "nudge": 268.5,
+      "delta": 268.5
+    },
+    {
+      "path": "selectors.layout.rect.height",
+      "reference": 900,
+      "nudge": 362,
+      "delta": -538
+    },
+    {
+      "path": "selectors.layout.rect.right",
+      "reference": 0,
+      "nudge": 500,
+      "delta": 500
+    },
+    {
+      "path": "selectors.layout.rect.width",
+      "reference": 1440,
+      "nudge": 440,
+      "delta": -1000
+    },
+    {
+      "path": "selectors.layout.rect.x",
+      "reference": 0,
+      "nudge": 500,
+      "delta": 500
+    },
+    {
+      "path": "selectors.layout.rect.y",
+      "reference": 0,
+      "nudge": 269.5,
+      "delta": 269.5
+    },
+    {
+      "path": "selectors.layout.style.height",
+      "reference": "900px",
+      "nudge": "362px"
+    },
+    {
+      "path": "selectors.layout.style.justifyContent",
+      "reference": "center",
+      "nudge": "normal"
+    },
+    {
+      "path": "selectors.layout.style.margin",
+      "reference": "0px",
+      "nudge": "269px 500px"
+    },
+    {
+      "path": "selectors.layout.style.padding",
+      "reference": "40px",
+      "nudge": "15px 0px 0px"
+    },
+    {
+      "path": "selectors.layout.style.textAlign",
+      "reference": "start",
+      "nudge": "center"
+    },
+    {
+      "path": "selectors.layout.style.transform",
+      "reference": "none",
+      "nudge": "matrix(1, 0, 0, 1, 0, 0.5)"
+    },
+    {
+      "path": "selectors.layout.style.width",
+      "reference": "1440px",
+      "nudge": "440px"
+    },
+    {
+      "path": "selectors.layout.tag",
+      "reference": "DIV",
+      "nudge": "SECTION"
+    },
+    {
+      "path": "selectors.layout.text",
+      "reference": "MWelcome, My Workspace.ContinuePrivacy Policy•Terms of Service",
+      "nudge": "NWelcome, Nudge.ContinuePrivacy Policy•Terms of Service"
+    },
+    {
+      "path": "selectors.submit.attributes.class",
+      "reference": "_button_1tycy_1 _button_1mfb6_1",
+      "nudge": "t-button auth-submit"
+    }
+  ]
 }

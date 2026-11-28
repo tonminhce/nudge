@@ -107,20 +107,38 @@ pub fn server_url() -> String {
     resolve_server_url(read_storage("nudge.serverUrl"), &current_origin())
 }
 
+pub fn system_prefers_dark() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| {
+                window
+                    .match_media("(prefers-color-scheme: dark)")
+                    .ok()
+                    .flatten()
+            })
+            .map(|query| query.matches())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+pub fn resolve_theme(stored: Option<&str>) -> Scheme {
+    match stored {
+        Some("dark") => Scheme::Dark,
+        Some("light") => Scheme::Light,
+        _ if system_prefers_dark() => Scheme::Dark,
+        _ => Scheme::Light,
+    }
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let auth = AuthState::new();
-    let theme = RwSignal::new(
-        read_storage("nudge.theme")
-            .map(|theme| {
-                if theme == "dark" {
-                    Scheme::Dark
-                } else {
-                    Scheme::Light
-                }
-            })
-            .unwrap_or(Scheme::Light),
-    );
+    let theme = RwSignal::new(resolve_theme(read_storage("nudge.theme").as_deref()));
     provide_meta_context();
     provide_context(auth.clone());
     provide_context(theme);
@@ -139,6 +157,36 @@ pub fn App() -> impl IntoView {
             }
         }
     });
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        let theme_for_change = theme;
+        let callback =
+            wasm_bindgen::closure::Closure::wrap(Box::new(move |event: web_sys::Event| {
+                if read_storage("nudge.theme").is_some() {
+                    return;
+                }
+                if let Some(target) = event.target() {
+                    let query: web_sys::MediaQueryList = target.unchecked_into();
+                    theme_for_change.set(if query.matches() {
+                        Scheme::Dark
+                    } else {
+                        Scheme::Light
+                    });
+                }
+            }) as Box<dyn FnMut(web_sys::Event)>);
+        if let Some(query) = web_sys::window().and_then(|window| {
+            window
+                .match_media("(prefers-color-scheme: dark)")
+                .ok()
+                .flatten()
+        }) {
+            let _ =
+                query.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref());
+            callback.forget();
+        }
+    }
 
     view! {
         <Router>
@@ -234,5 +282,20 @@ mod tests {
         assert!(html.contains("class=\"light gallery\""));
         assert!(html.contains("class=\"dark gallery\""));
         assert!(html.contains(">Accent solid<"));
+    }
+
+    #[test]
+    fn a_stored_choice_overrides_the_system_scheme() {
+        assert_eq!(resolve_theme(Some("dark")), Scheme::Dark);
+        assert_eq!(resolve_theme(Some("light")), Scheme::Light);
+        assert_eq!(resolve_theme(Some("System")), Scheme::Light);
+        assert_eq!(
+            resolve_theme(None),
+            if system_prefers_dark() {
+                Scheme::Dark
+            } else {
+                Scheme::Light
+            }
+        );
     }
 }

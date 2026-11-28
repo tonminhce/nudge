@@ -156,7 +156,7 @@ pub fn AuthPage() -> impl IntoView {
                 }>
                     <div class="auth-field">
                         <input class="t-input auth-input" autocomplete="email" tabindex="0" value=""
-                            placeholder="Email" bind:value=email
+                            placeholder="Email" autofocus=true bind:value=email
                             on:input=move |_| {
                                 if step.get() == AuthStep::Password {
                                     step.set(AuthStep::Email);
