@@ -13,6 +13,11 @@ use serde_json::Value;
 
 use crate::auth::AuthPage;
 use crate::command_menu::CommandMenu;
+use crate::head::PageFavicon;
+use crate::head::PageHead;
+use crate::head::PageTitle;
+use crate::head::RoutePageTitle;
+use crate::head::WorkspaceLogoEffect;
 use crate::layout::WorkspaceLayout;
 use crate::pages::NotFoundPage;
 use crate::pages::RecordShowPage;
@@ -99,6 +104,7 @@ pub fn App() -> impl IntoView {
     provide_context(auth.clone());
     provide_context(theme);
     provide_context(RwSignal::new(false));
+    PageHead::new().provide();
 
     Effect::new(move |_| {
         let class = match theme.get() {
@@ -115,6 +121,9 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Router>
+            <RoutePageTitle />
+            <PageFavicon />
+            <WorkspaceLogoEffect />
             <Routes fallback=NotFoundPage>
                 <Route path=path!("/welcome") view=AuthPage />
                 <Route path=path!("/verify-email") view=|| view! { <StubPage title="Verify email" /> } />
@@ -133,7 +142,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/objects/:plural") view=RecordIndexPage />
                     <Route path=path!("/object/:singular/:id") view=RecordShowPage />
                     <Route path=path!("/settings/*rest") view=SettingsPage />
-                    <Route path=path!("/getting-started") view=|| view! { <StubPage title="Getting started" /> } />
+                    <Route path=path!("/getting-started") view=|| view! { <PageTitle title="Getting started" /> <StubPage title="Getting started" /> } />
                     <Route path=path!("/workflows") view=|| view! { <StubPage title="Workflows" /> } />
                     <Route path=path!("/workflow/:id") view=|| view! { <StubPage title="Workflow" /> } />
                     <Route path=path!("/agents") view=|| view! { <StubPage title="Agents" /> } />
