@@ -1,3 +1,10 @@
+pub mod drivers;
+pub mod folder;
+pub mod mime;
+pub mod storage;
+pub mod upload;
+pub mod validation;
+
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
@@ -30,42 +37,8 @@ use crate::auth::error::AuthError;
 use crate::auth::error::AuthResult;
 use crate::auth::jwt_service::JwtService;
 use crate::auth::jwt_service::TokenType;
+use crate::file::folder::FileFolder;
 use crate::state::AppState;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FileFolder {
-    CorePicture,
-    FilesField,
-}
-
-impl FileFolder {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "core-picture" => Some(Self::CorePicture),
-            "files-field" => Some(Self::FilesField),
-            _ => None,
-        }
-    }
-
-    fn pattern(self) -> &'static str {
-        match self {
-            Self::CorePicture => "core-picture/%",
-            Self::FilesField => "files-field/%",
-        }
-    }
-
-    fn enforces_expiration(self) -> bool {
-        self == Self::FilesField
-    }
-
-    fn allows_mime_type(self, mime_type: &str) -> bool {
-        self == Self::FilesField
-            || matches!(
-                mime_type,
-                "image/gif" | "image/jpeg" | "image/png" | "image/svg+xml" | "image/webp"
-            )
-    }
-}
 
 #[derive(Clone)]
 pub struct FileUrlSigner {
@@ -84,6 +57,16 @@ impl FileUrlSigner {
     }
 
     async fn signed_url(&self, file_id: Uuid, workspace_id: Uuid) -> AuthResult<String> {
+        self.signed_url_in_folder(file_id, workspace_id, FileFolder::CorePicture)
+            .await
+    }
+
+    pub async fn signed_url_in_folder(
+        &self,
+        file_id: Uuid,
+        workspace_id: Uuid,
+        folder: FileFolder,
+    ) -> AuthResult<String> {
         let token = self
             .jwt
             .sign(
@@ -98,7 +81,7 @@ impl FileUrlSigner {
             )
             .await?;
         Ok(format!(
-            "{}/file/core-picture/{file_id}?token={token}",
+            "{}/file/{folder}/{file_id}?token={token}",
             self.server_url.trim_end_matches('/')
         ))
     }
@@ -160,7 +143,9 @@ pub async fn sign_search_avatars(
 }
 
 pub fn router() -> axum::Router<AppState> {
-    axum::Router::new().route("/file/{folder}/{id}", get(file_download))
+    axum::Router::new()
+        .route("/file/{folder}/{id}", get(file_download))
+        .merge(upload::router())
 }
 
 async fn file_download(
@@ -291,10 +276,12 @@ async fn file_download(
         HeaderValue::from_static("nosniff"),
     );
     response_headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-    response_headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=86400, immutable"),
-    );
+    if let Some(value) = folder
+        .cache_control()
+        .and_then(|value| HeaderValue::from_str(value).ok())
+    {
+        response_headers.insert(header::CACHE_CONTROL, value);
+    }
     response_headers.insert(header::CONTENT_DISPOSITION, content_disposition(&record.2));
     if status == StatusCode::PARTIAL_CONTENT {
         if let Ok(value) =
