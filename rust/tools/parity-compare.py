@@ -47,6 +47,16 @@ def request(base, method, path, body=None, headers=None):
         return error.code, normalize(raw)
 
 
+def status_code(base, path):
+    try:
+        with urllib.request.urlopen(base + path, timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+    except (urllib.error.URLError, TimeoutError):
+        return 0
+
+
 CURSOR_KEYS = {
     "cursor",
     "endCursor",
@@ -171,9 +181,120 @@ CASES = [
     ("POST", "/graphql", '{ "query": "{ currentUser { id } }" }'),
     ("GET", "/metadata", None),
     ("POST", "/metadata", '{ "query": "query nope { nonexistentField }" }'),
-    ("GET", "/nonexistent-page", None),
     ("POST", "/nonexistent-page", '{ "query": "x" }'),
 ]
+
+BUNDLE_REL_RE = re.compile(r"modulepreload|preload|prefetch|module|preconnect|dns-prefetch", re.I)
+ASSET_RE = re.compile(r"\.(?:css|ico|jpeg|jpg|png|svg|webp)$", re.I)
+BRAND_RE = re.compile(r"(?i)\bnudge\b|\btwenty\b")
+
+
+def tag_attrs(fragment):
+    return dict(re.findall(r'([a-zA-Z-]+)\s*=\s*"([^"]*)"', fragment))
+
+
+def brand_value(value):
+    value = BRAND_RE.sub("<brand>", value)
+    return "<asset>" if ASSET_RE.search(value.split("?")[0]) else value
+
+
+def shell_contract(html):
+    nodes = []
+    root = re.search(r'<html\b((?:[^>"]|"[^"]*")*)>', html, re.I)
+    if root:
+        attrs = " ".join(
+            f"{name}={brand_value(value)}"
+            for name, value in sorted(tag_attrs(root.group(1)).items())
+        )
+        nodes.append(f"html:{attrs}")
+    stylesheets = 0
+    for tag in re.finditer(r'<(meta|link|noscript|div)\b((?:[^>"]|"[^"]*")*)>', html, re.I):
+        name = tag.group(1).lower()
+        attrs = tag_attrs(tag.group(2))
+        rel = attrs.get("rel", "")
+        if name == "link" and BUNDLE_REL_RE.fullmatch(rel):
+            continue
+        if name == "link" and rel == "stylesheet":
+            stylesheets += 1
+            continue
+        if name == "div":
+            if attrs.get("id") == "root":
+                nodes.append("div:id=root")
+            continue
+        key = (
+            attrs.get("name")
+            or attrs.get("property")
+            or rel
+            or attrs.get("charset")
+            or ""
+        )
+        value = attrs.get("content") or attrs.get("href") or ""
+        node = f"{name}:{key}" if key else name
+        if value:
+            node += "=" + brand_value(value)
+        nodes.append(node)
+    if stylesheets:
+        nodes.append("link:stylesheet=<bundle>")
+    title = re.search(r"<title>([^<]*)</title>", html, re.I)
+    if title:
+        nodes.append("title:" + brand_value(title.group(1).strip()))
+    noscript = re.search(r"<noscript>([^<]*)</noscript>", html, re.I)
+    if noscript:
+        nodes.append("noscript:" + noscript.group(1).strip())
+    return nodes
+
+
+def shell_report():
+    node_status, node_body = request(NODE_BASE, "GET", "/nonexistent-page")
+    rust_status, rust_body = request(RUST_BASE, "GET", "/nonexistent-page")
+    node_nodes = shell_contract(node_body)
+    rust_nodes = shell_contract(rust_body)
+    same = node_status == rust_status == 200 and node_nodes == rust_nodes
+    print(f"{'MATCH' if same else 'DIFF '} GET shell head contract")
+    if same:
+        return 0
+    for index in range(max(len(node_nodes), len(rust_nodes))):
+        left = node_nodes[index] if index < len(node_nodes) else "<missing>"
+        right = rust_nodes[index] if index < len(rust_nodes) else "<missing>"
+        if left != right:
+            print(f"  node[{index}]: {left}")
+            print(f"  rust[{index}]: {right}")
+    return 1
+
+
+def manifest_report():
+    node_status, node_body = request(NODE_BASE, "GET", "/manifest.json")
+    rust_status, rust_body = request(RUST_BASE, "GET", "/manifest.json")
+    if node_status != 200 or rust_status != 200:
+        print(f"DIFF  GET /manifest.json node={node_status} rust={rust_status}")
+        return 1
+    node = json.loads(node_body)
+    rust = json.loads(rust_body)
+    problems = []
+    if sorted(node) != sorted(rust):
+        problems.append(f"keys node={sorted(node)} rust={sorted(rust)}")
+    for key in ("display", "start_url", "theme_color", "background_color"):
+        if node.get(key) != rust.get(key):
+            problems.append(f"{key} node={node.get(key)} rust={rust.get(key)}")
+    for key in ("short_name", "name"):
+        if BRAND_RE.sub("<brand>", str(node.get(key, ""))) != BRAND_RE.sub(
+            "<brand>", str(rust.get(key, ""))
+        ):
+            problems.append(f"{key} node={node.get(key)} rust={rust.get(key)}")
+    node_fields = {tuple(sorted(icon)) for icon in node.get("icons", [])}
+    rust_fields = {tuple(sorted(icon)) for icon in rust.get("icons", [])}
+    if node_fields != rust_fields:
+        problems.append(f"icon fields node={node_fields} rust={rust_fields}")
+    for base, document in ((RUST_BASE, rust), (NODE_BASE, node)):
+        for icon in document.get("icons", []):
+            status = status_code(base, "/" + icon["src"].lstrip("/"))
+            if status != 200:
+                problems.append(f"{base} {icon['src']} -> {status}")
+    same = not problems
+    print(f"{'MATCH' if same else 'DIFF '} GET /manifest.json asset contract")
+    for problem in problems:
+        print(f"  {problem}")
+    return 0 if same else 1
 
 
 def run_record_cases():
@@ -211,6 +332,8 @@ def main():
             failures += 1
             print(f"  node: {node_body[:220]}")
             print(f"  rust: {rust_body[:220]}")
+    failures += shell_report()
+    failures += manifest_report()
 
     if os.environ.get("NUDGE_PARITY_SIGNUP") == "1":
         stamp = str(int(time.time()))
