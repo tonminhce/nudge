@@ -474,20 +474,34 @@ pub async fn seed_standard_objects(
 
     let schema_name = nudge_core::ids::workspace_schema_name(&workspace_id);
 
-    let mut transaction = state
-        .core_pool
-        .begin()
-        .await
-        .map_err(|error| SeedError::new("STANDARD_OBJECT_SEED_FAILED", error.to_string()))?;
+    let is_permission_tables_enabled: bool = sqlx::query_scalar(
+        "SELECT value FROM core.\"featureFlag\" WHERE \"workspaceId\" = $1 AND key = 'IS_PERMISSION_TABLES_ENABLED'",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&state.core_pool)
+    .await
+    .map_err(|error| SeedError::new("STANDARD_OBJECT_SEED_FAILED", error.to_string()))?
+    .unwrap_or_else(|| {
+        std::env::var("IS_PERMISSION_TABLES_ENABLED")
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true)
+    });
 
-    permissions::create_permission_tables(&mut transaction, &schema_name)
-        .await
-        .map_err(|error| SeedError::new("STANDARD_OBJECT_SEED_FAILED", error.message))?;
+    if is_permission_tables_enabled {
+        let mut transaction =
+            state.core_pool.begin().await.map_err(|error| {
+                SeedError::new("STANDARD_OBJECT_SEED_FAILED", error.to_string())
+            })?;
 
-    transaction
-        .commit()
-        .await
-        .map_err(|error| SeedError::new("STANDARD_OBJECT_SEED_FAILED", error.to_string()))?;
+        permissions::create_permission_tables(&mut transaction, &schema_name)
+            .await
+            .map_err(|error| SeedError::new("STANDARD_OBJECT_SEED_FAILED", error.message))?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|error| SeedError::new("STANDARD_OBJECT_SEED_FAILED", error.to_string()))?;
+    }
 
     let migration = build_standard_seed_migration()?;
 

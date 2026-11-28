@@ -41,10 +41,18 @@ pub const ALL_PERMISSION_FLAGS: &[&str] = &[
 ];
 
 pub const TOOL_PERMISSION_FLAGS: &[&str] = &[
+    "AI",
     "CODE_INTERPRETER_TOOL",
+    "CONNECTED_ACCOUNTS",
     "CREATE_CALENDAR_EVENT_TOOL",
+    "DOWNLOAD_FILE",
+    "EXPORT_CSV",
     "HTTP_REQUEST_TOOL",
+    "IMPORT_CSV",
+    "PROFILE_INFORMATION",
     "SEND_EMAIL_TOOL",
+    "UPLOAD_FILE",
+    "VIEWS",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +292,8 @@ pub struct RoleRecordsPermissions {
     pub(crate) company_access: Option<super::access_group::CompanyAccessStrategy>,
     #[serde(skip)]
     pub(crate) company_access_group_ids: Option<Vec<i32>>,
+    #[serde(skip)]
+    pub(crate) access_group_ids_by_object: HashMap<Uuid, Vec<i32>>,
 }
 
 impl RoleRecordsPermissions {
@@ -293,6 +303,18 @@ impl RoleRecordsPermissions {
 
     pub fn object(&self, object_metadata_id: Uuid) -> Option<&ObjectRecordsPermissions> {
         self.objects.get(&object_metadata_id.to_string())
+    }
+
+    pub fn access_group_ids(&self, object_metadata_id: Uuid) -> Option<&[i32]> {
+        self.access_group_ids_by_object
+            .get(&object_metadata_id)
+            .map(|ids| ids.as_slice())
+            .or_else(|| {
+                self.company_access
+                    .as_ref()
+                    .filter(|strat| strat.company_object_id == object_metadata_id)
+                    .and(self.company_access_group_ids.as_deref())
+            })
     }
 }
 

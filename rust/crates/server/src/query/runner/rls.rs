@@ -77,8 +77,10 @@ pub(super) async fn row_access_filter_with_alias(
     allow_company_access_groups: bool,
 ) -> Result<Option<CompiledFilter>, RunnerError> {
     let model = schema.object(object_name_singular)?;
-    if operation == ObjectRecordsOperationType::Read && model.object.name_singular == "company" {
-        if schema.denies_company_overlays(object_name_singular) {
+    if operation == ObjectRecordsOperationType::Read {
+        if model.object.name_singular == "company"
+            && schema.denies_company_overlays(object_name_singular)
+        {
             return Ok(Some(unsatisfiable_filter()));
         }
         let all_records = schema
@@ -86,7 +88,17 @@ pub(super) async fn row_access_filter_with_alias(
             .and_then(|permissions| permissions.object(model.object.id))
             .is_some_and(|object| object.can_read_all_records);
         if !all_records && allow_company_access_groups {
-            if let Some(compact_ids) = schema.company_access_group_ids() {
+            if let Some(compact_ids) =
+                schema
+                    .access_group_ids_for_object(model.object.id)
+                    .or_else(|| {
+                        if model.object.name_singular == "company" {
+                            schema.company_access_group_ids()
+                        } else {
+                            None
+                        }
+                    })
+            {
                 let ids = compact_ids
                     .iter()
                     .map(|id| id.to_string())

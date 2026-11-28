@@ -251,6 +251,12 @@ impl RunnerSchema {
             .and_then(|permissions| permissions.company_access_group_ids.as_deref())
     }
 
+    pub fn access_group_ids_for_object(&self, object_metadata_id: Uuid) -> Option<&[i32]> {
+        self.records_permissions
+            .as_ref()
+            .and_then(|permissions| permissions.access_group_ids(object_metadata_id))
+    }
+
     pub fn requires_access_group_recompute(&self, object_name: &str) -> bool {
         self.company_access()
             .is_some_and(|_| matches!(object_name, "company" | "workspaceMember" | "featureFlag"))

@@ -278,7 +278,65 @@ pub(crate) async fn prepare_company_read(
         )
         .await?;
     }
-    permissions.company_access_group_ids = compact_ids;
+    permissions.company_access_group_ids = compact_ids.clone();
+    if let Some(ids) = compact_ids {
+        permissions
+            .access_group_ids_by_object
+            .insert(strategy.company_object_id, ids);
+    }
+    for (object_id_str, obj) in &permissions.objects {
+        let Ok(object_id) = Uuid::parse_str(object_id_str) else {
+            continue;
+        };
+        if object_id == strategy.company_object_id || obj.can_read_all_records {
+            continue;
+        }
+        let Some(object_meta) = maps.object_metadata_maps.find_by_id(object_id_str) else {
+            continue;
+        };
+        if !read_rules_supported(&runner, &object_meta.name_singular, obj) {
+            continue;
+        }
+        let predicates = member_predicates(obj);
+        let member_values = if let Some(member_id) = strategy.workspace_member_id {
+            if predicates.is_empty() {
+                None
+            } else {
+                let mut connection = match state.core_pool.acquire().await {
+                    Ok(conn) => conn,
+                    Err(_) => continue,
+                };
+                load_member_field_values(&mut connection, &runner, member_id, &predicates)
+                    .await
+                    .ok()
+            }
+        } else {
+            None
+        };
+        let groups = match build_role_access_groups(
+            object_id,
+            obj,
+            ObjectRecordsOperationType::Read,
+            member_values.as_ref(),
+            strategy.relation_hop_enabled,
+        ) {
+            Ok(g) => g,
+            Err(_) => continue,
+        };
+        if let Ok(Some(ids)) = find_materialized_compact_ids(
+            &state.core_pool,
+            &runner,
+            strategy.workspace_id,
+            object_id,
+            &groups,
+        )
+        .await
+        {
+            permissions
+                .access_group_ids_by_object
+                .insert(object_id, ids);
+        }
+    }
     Ok(())
 }
 
