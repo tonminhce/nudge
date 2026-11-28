@@ -21,6 +21,7 @@ use super::base::ObjectModel;
 use super::base::RunnerSchema;
 use super::permissions::validate_write;
 use super::position::override_position_on_records;
+use super::relation_nested::resolve_relation_nested_queries;
 use super::rls::requires_row_access;
 use super::rls::validate_created_rows;
 use super::snapshots::read_stored_records;
@@ -48,6 +49,15 @@ pub async fn create_many(
     let model = schema.object(object_name_singular)?;
     let alias = object_name_singular;
     let mut records = args.records.clone();
+
+    resolve_relation_nested_queries(
+        pool,
+        schema,
+        object_name_singular,
+        &mut records,
+        args.actor.as_ref(),
+    )
+    .await?;
 
     for record in &records {
         validate_write(

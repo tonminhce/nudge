@@ -67,6 +67,8 @@ pub const DEFAULT_PAGE_SIZE: usize = 60;
 
 pub const MAX_PAGE_SIZE: usize = 200;
 
+const EXCLUDED_RELATION_TARGET_UNIVERSAL_IDENTIFIER: &str = "20202020-6736-4337-b5c4-8b39fae325a5";
+
 pub fn router() -> Router<AppState> {
     Router::new().route("/{*path}", any(rest_endpoint))
 }
@@ -1547,6 +1549,19 @@ fn code_static(code: &str) -> &'static str {
     }
 }
 
+fn relation_target_is_excluded(
+    runner_schema: &RunnerSchema,
+    object: &str,
+    field_name: &str,
+) -> bool {
+    runner_schema
+        .relation(object, field_name)
+        .map(|(_, _, target)| {
+            target.object.universal_identifier == EXCLUDED_RELATION_TARGET_UNIVERSAL_IDENTIFIER
+        })
+        .unwrap_or(false)
+}
+
 fn resolve_rest_fields(
     schema: &WorkspaceSchema,
     runner_schema: &RunnerSchema,
@@ -1568,6 +1583,7 @@ fn resolve_rest_fields(
                     FieldMetadataType::Relation | FieldMetadataType::MorphRelation
                 )
             })
+            .filter(|field| !relation_target_is_excluded(runner_schema, object, &field.name))
             .map(|field| field.name.clone())
             .collect::<Vec<_>>();
 
@@ -1610,7 +1626,7 @@ fn resolve_rest_fields(
                 keys.push(join_column);
             }
 
-            if depth >= 1 {
+            if depth >= 1 && !relation_target_is_excluded(runner_schema, object, name) {
                 keys.push(name.clone());
                 relations.push(name.clone());
             }

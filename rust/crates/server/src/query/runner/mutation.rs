@@ -21,6 +21,7 @@ use super::base::ObjectModel;
 use super::base::RunnerSchema;
 use super::permissions::validate_filter_read;
 use super::permissions::validate_write;
+use super::relation_nested::resolve_relation_nested_queries;
 use super::rls::row_write_access_filter;
 use super::rls::validate_updated_rows;
 use super::snapshots::read_stored_records;
@@ -205,6 +206,19 @@ async fn run_mutation_inner(
     }
 
     if kind == FilteredMutationKind::Update {
+        if !set_columns.is_empty() {
+            let mut relation_records = vec![set_columns];
+            resolve_relation_nested_queries(
+                pool,
+                schema,
+                object_name_singular,
+                &mut relation_records,
+                actor,
+            )
+            .await?;
+            set_columns = relation_records.swap_remove(0);
+        }
+
         inject_updated_by_on_update(model, &mut set_columns, actor)?;
     }
 

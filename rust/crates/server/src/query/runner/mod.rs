@@ -19,6 +19,7 @@ pub mod mutation;
 pub mod nested;
 pub mod permissions;
 pub mod position;
+pub mod relation_nested;
 pub mod rls;
 pub mod search;
 pub(crate) mod snapshots;
