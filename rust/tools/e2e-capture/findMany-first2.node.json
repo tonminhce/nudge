@@ -8,39 +8,23 @@
             {
               "cursor": "<cursor>",
               "node": {
-                "company": {
-                  "name": "Notion"
-                },
+                "company": null,
                 "id": "<uuid>",
                 "name": {
-                  "firstName": "Ivan",
-                  "lastName": "Zhao"
+                  "firstName": "Bob",
+                  "lastName": "Diaz"
                 },
-                "position": 5
-              }
-            },
-            {
-              "cursor": "<cursor>",
-              "node": {
-                "company": {
-                  "name": "Anthropic"
-                },
-                "id": "<uuid>",
-                "name": {
-                  "firstName": "Dario",
-                  "lastName": "Amodei"
-                },
-                "position": 2
+                "position": 0
               }
             }
           ],
           "pageInfo": {
             "endCursor": "<cursor>",
-            "hasNextPage": true,
+            "hasNextPage": false,
             "hasPreviousPage": false,
             "startCursor": "<cursor>"
           },
-          "totalCount": 5
+          "totalCount": 1
         }
       }
     }

@@ -2,6 +2,7 @@ import argparse
 import importlib.util
 import json
 import os
+import secrets
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +19,9 @@ def _load_parity_compare():
 
 
 pc = _load_parity_compare()
+
+DIFF_DEPTH = int(os.environ.get("PARITY_DIFF_DEPTH", "4"))
+DETAIL_WIDTH = int(os.environ.get("PARITY_DETAIL_WIDTH", "60"))
 
 
 def as_json(raw):
@@ -54,6 +58,46 @@ def error_codes(body):
             if value:
                 codes.add(value)
     return sorted(codes)
+
+
+SEED_COMPANIES = ["Acme Corp", "Initech"]
+SEED_PEOPLE = [
+    ("Ivan", "Zhao", "Acme Corp", "CEO"),
+    ("Alice", "Chen", "Initech", "Engineer"),
+    ("Bob", "Diaz", None, None),
+]
+
+
+def seed_if_empty(client):
+    _, body = client.gql("query { people(first: 1) { edges { node { id } } } }")
+    edges = ((body.get("data") or {}).get("people") or {}).get("edges") or []
+    if edges:
+        return 0
+    company_ids = {}
+    for name in SEED_COMPANIES:
+        _, created = client.gql(
+            "mutation($n: String!) { createCompany(data: { name: $n }) { id name } }",
+            {"n": name},
+        )
+        node = (created.get("data") or {}).get("createCompany") or {}
+        if node.get("id"):
+            company_ids[name] = node["id"]
+    seeded = 0
+    for first, last, company, position in SEED_PEOPLE:
+        data = {"name": {"firstName": first, "lastName": last}}
+        if company and company_ids.get(company):
+            data["company"] = {"connect": {"id": company_ids[company]}}
+            if position:
+                data["position"] = position
+        elif position:
+            data["position"] = position
+        _, created = client.gql(
+            "mutation($d: CreatePersonInput!) { createPerson(data: $d) { id } }",
+            {"d": data},
+        )
+        if ((created.get("data") or {}).get("createPerson") or {}).get("id"):
+            seeded += 1
+    return seeded
 
 
 def resolve_person_id(client):
@@ -187,12 +231,147 @@ def scenario_rest_find_many(client):
     return {"rest": {"statusCode": status, "body": body}}
 
 
+MERGE_FIELDS = """
+    id
+    name
+    domainName { primaryLinkLabel primaryLinkUrl secondaryLinks { label url } }
+    linkedinLink { primaryLinkLabel primaryLinkUrl secondaryLinks { label url } }
+    accountOwner { id }
+    deletedAt
+"""
+
+
+def _detag(value, tag):
+    if isinstance(value, dict):
+        return {key: _detag(item, tag) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_detag(item, tag) for item in value]
+    if isinstance(value, str):
+        return value.replace(tag, "<tag>")
+    return value
+
+
+def scenario_merge_many(client):
+    tag = "p" + secrets.token_hex(5)
+    captures = {}
+    _, created = client.gql(
+        "mutation CreateCompanies($data: [CreateCompanyInput!]!) "
+        "{ createCompanies(data: $data) { %s } }" % MERGE_FIELDS,
+        {
+            "data": [
+                {
+                    "name": "MergePrimary" + tag,
+                    "domainName": {
+                        "primaryLinkUrl": "https://%s.test" % tag,
+                        "secondaryLinks": [
+                            {"url": "https://%s-a.test" % tag, "label": "A"}
+                        ],
+                    },
+                    "linkedinLink": {
+                        "primaryLinkUrl": "https://linkedin.com/%s-primary" % tag,
+                        "primaryLinkLabel": "Primary",
+                        "secondaryLinks": [
+                            {"url": "https://linkedin.com/%s-p1" % tag, "label": "P1"}
+                        ],
+                    },
+                },
+                {
+                    "name": "MergeSecondary" + tag,
+                    "domainName": {
+                        "primaryLinkUrl": "https://%s-b.test" % tag,
+                        "secondaryLinks": [
+                            {"url": "https://%s-b1.test" % tag, "label": "B1"}
+                        ],
+                    },
+                    "linkedinLink": {
+                        "primaryLinkUrl": "https://linkedin.com/%s-secondary" % tag,
+                        "secondaryLinks": [
+                            {"url": "https://linkedin.com/%s-p1" % tag, "label": "P1"},
+                            {"url": "https://linkedin.com/%s-s1" % tag, "label": "S1"},
+                        ],
+                    },
+                },
+            ]
+        },
+    )
+    companies = (created.get("data") or {}).get("createCompanies") or []
+    captures["create"] = {"count": len(companies)}
+    if len(companies) != 2:
+        captures["abort"] = {"error": "create failed", "codes": error_codes(created)}
+        return _detag(captures, tag)
+    primary_id = companies[0]["id"]
+    secondary_id = companies[1]["id"]
+    if not primary_id or not secondary_id:
+        captures["abort"] = {"error": "ids missing"}
+        return _detag(captures, tag)
+    _, person = client.gql(
+        "mutation CreatePerson($data: CreatePersonInput!) { createPerson(data: $data) "
+        "{ id name { firstName } company { name } } }",
+        {
+            "data": {
+                "name": {"firstName": "MergeChild", "lastName": tag},
+                "company": {"connect": {"id": secondary_id}},
+            }
+        },
+    )
+    captures["childBefore"] = person
+    merge_document = (
+        "mutation MergeCompanies($ids: [UUID!]!, $index: Int!, $dryRun: Boolean!) "
+        "{ mergeCompanies(ids: $ids, conflictPriorityIndex: $index, dryRun: $dryRun) "
+        "{ %s } }" % MERGE_FIELDS
+    )
+    _, dry = client.gql(
+        merge_document,
+        {"ids": [primary_id, secondary_id], "index": 0, "dryRun": True},
+    )
+    captures["dryRun"] = dry
+    _, merged = client.gql(
+        merge_document,
+        {"ids": [primary_id, secondary_id], "index": 0, "dryRun": False},
+    )
+    captures["merge"] = merged
+    child_id = ((person.get("data") or {}).get("createPerson") or {}).get("id") or ""
+    captures["childAfter"] = client.gql(
+        "query($id: UUID!) { person(filter: { id: { eq: $id } }) "
+        "{ id name { firstName } company { name } } }",
+        {"id": child_id},
+    )[1]
+    captures["secondaryAfter"] = client.gql(
+        "query($id: UUID!) { company(filter: { id: { eq: $id } }) { id deletedAt } }",
+        {"id": secondary_id},
+    )[1]
+    captures["singleId"] = client.gql(
+        merge_document, {"ids": [primary_id], "index": 0, "dryRun": False}
+    )[1]
+    captures["badIndex"] = client.gql(
+        merge_document,
+        {"ids": [primary_id, secondary_id], "index": 7, "dryRun": False},
+    )[1]
+    captures["unknownId"] = client.gql(
+        merge_document,
+        {
+            "ids": [primary_id, "00000000-0000-4000-8000-000000000000"],
+            "index": 0,
+            "dryRun": False,
+        },
+    )[1]
+    client.gql(
+        "mutation($id: UUID!) { destroyCompany(id: $id) { id } }", {"id": primary_id}
+    )
+    client.gql(
+        "mutation($id: UUID!) { destroyPerson(id: $id) { id } }",
+        {"id": child_id},
+    )
+    return _detag(captures, tag)
+
+
 SCENARIOS = [
     ("findMany-first2", scenario_find_many),
     ("findOne", scenario_find_one),
     ("company-filter", scenario_company_filter),
     ("orderBy-pagination", scenario_order_pagination),
     ("mutation-roundtrip", scenario_mutation_round_trip),
+    ("merge-many", scenario_merge_many),
     ("error-bad-filter", scenario_error_filter),
     ("rest-findMany", scenario_rest_find_many),
 ]
@@ -217,10 +396,10 @@ def compare_capture(node_val, rust_val, rust_reachable):
     diffs = pc.diff_paths(node_norm, rust_norm)
     preview = "; ".join(
         "%s: node=%s rust=%s" % (p, json.dumps(l)[:48], json.dumps(r)[:48])
-        for p, l, r in diffs[:4]
+        for p, l, r in diffs[:DIFF_DEPTH]
     )
-    if len(diffs) > 4:
-        preview += "; +%d more" % (len(diffs) - 4)
+    if len(diffs) > DIFF_DEPTH:
+        preview += "; +%d more" % (len(diffs) - DIFF_DEPTH)
     return "DIFF", preview
 
 
@@ -336,18 +515,34 @@ def run(args):
             print("unknown scenario: %s" % args.scenario)
             return 2
     node = Client(pc.NODE_BASE, None, "node")
-    try:
-        node.token = os.environ.get("NODE_TOKEN") or pc.fetch_reference_token()
-    except Exception as error:
-        print("node auth failed: %s" % error)
-        return 2
+    rust_token = os.environ.get("RUST_TOKEN")
+    node_token = os.environ.get("NODE_TOKEN")
+    if node_token and rust_token:
+        node.token = node_token
+    else:
+        try:
+            pair_node, pair_rust, workspace_id = pc.fetch_parity_pair()
+            node.token = node_token or pair_node
+            rust_token = rust_token or pair_rust
+            print("parity workspace shared by both servers: %s" % workspace_id)
+        except Exception as error:
+            print("node auth failed: %s" % error)
+            return 2
     rust_reachable = False
-    rust = Client(pc.RUST_BASE, os.environ.get("RUST_TOKEN"), "rust")
+    rust = Client(pc.RUST_BASE, rust_token, "rust")
     try:
         probe_status, probe_body = rust.gql("query { __typename }")
         rust_reachable = not is_gap(probe_status, probe_body)
     except Exception:
         pass
+
+    if not args.offline:
+        try:
+            seeded = seed_if_empty(node)
+            if seeded:
+                print("seeded %d rows into the shared parity workspace" % seeded)
+        except Exception as error:
+            print("seeding failed: %s" % error)
 
     if args.node_only:
         print("capturing reference-side fixtures only (--node-only)")
@@ -389,11 +584,11 @@ def run(args):
                 )
             if status in ("DIFF", "ERROR"):
                 failures += 1
-            print(row % (name, key, status, detail[:60]))
+            print(row % (name, key, status, detail[:DETAIL_WIDTH]))
 
     label = "Rust record plane reachable" if rust_reachable else "Rust record plane NOT reachable"
     print("\n%s | %d gaps | %d diffs" % (label, gaps, failures))
-    print("GAP rows are the wave-4 delta (findMany/findOne/mutation not yet served by nudge-server).")
+    print("GAP means the record plane never answered; DIFF means it answered differently from 2.61.0.")
     return 1 if failures else 0
 
 
