@@ -58,6 +58,9 @@ use crate::query::runner::NestedRelationSelection;
 use crate::query::runner::RunnerSchema;
 use crate::query::runner::SearchArgs;
 use crate::state::AppState;
+use crate::validation::validate_data_for_runner;
+use crate::validation::validate_for_runner;
+use crate::validation::validate_record_for_runner;
 
 use super::schema::classify_root;
 use super::schema::ResolverMethod;
@@ -664,6 +667,13 @@ async fn execute_workspace(
         ResolverMethod::CreateOne => {
             let data = required_object(field, "data")?;
             let upsert = optional_bool_arg(field, "upsert");
+            validate_record_for_runner(
+                runner_schema
+                    .object(&resolver.object_name_singular)
+                    .map_err(runner_graphql_error)?,
+                &data,
+            )
+            .map_err(runner_graphql_error)?;
             let after = create_one_with_snapshot(
                 &state.core_pool,
                 &runner_schema,
@@ -706,6 +716,13 @@ async fn execute_workspace(
                 .into_iter()
                 .filter_map(|value| value.as_object().cloned())
                 .collect::<Vec<_>>();
+            validate_for_runner(
+                runner_schema
+                    .object(&resolver.object_name_singular)
+                    .map_err(runner_graphql_error)?,
+                &records,
+            )
+            .map_err(runner_graphql_error)?;
             let ids = create_many(
                 &state.core_pool,
                 &runner_schema,
@@ -1463,6 +1480,17 @@ async fn mutate_existing_record(
     with_deleted: bool,
 ) -> Result<Value, GraphQlError> {
     let id = required_id(field)?;
+    if kind == FilteredMutationKind::Update {
+        if let Some(data) = data.as_ref() {
+            validate_data_for_runner(
+                runner_schema
+                    .object(&resolver.object_name_singular)
+                    .map_err(runner_graphql_error)?,
+                data,
+            )
+            .map_err(runner_graphql_error)?;
+        }
+    }
     let snapshot = run_mutation_one_with_snapshot(
         &state.core_pool,
         runner_schema,

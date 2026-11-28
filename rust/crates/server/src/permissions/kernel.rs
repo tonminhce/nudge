@@ -1816,7 +1816,10 @@ mod db_tests {
         let workspace_id = Uuid::new_v4();
         let application_id = Uuid::new_v4();
         let role_id = Uuid::new_v4();
-        let mut tx = pool.begin().await.expect("starting foreign role transaction");
+        let mut tx = pool
+            .begin()
+            .await
+            .expect("starting foreign role transaction");
         sqlx::query(
             "INSERT INTO core.\"workspace\" \
              (id, \"displayName\", \"inviteHash\", \"activationStatus\", subdomain, \
@@ -1858,7 +1861,9 @@ mod db_tests {
         .execute(&mut *tx)
         .await
         .expect("inserting foreign role");
-        tx.commit().await.expect("committing foreign role transaction");
+        tx.commit()
+            .await
+            .expect("committing foreign role transaction");
         role_id
     }
 

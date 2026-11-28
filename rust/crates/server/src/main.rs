@@ -10,6 +10,7 @@ mod routes;
 mod secure_http;
 mod standard_objects;
 mod state;
+mod validation;
 mod webhook;
 mod workspace_migrations;
 
