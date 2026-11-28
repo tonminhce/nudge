@@ -379,7 +379,11 @@ async fn dispatch_rest(
         )
         .await
         .map_err(rest_runner_error)?;
-        let records = records_by_ids(state, runner_schema, object, &ids, false, &[]).await?;
+        let mut records = records_by_ids(state, runner_schema, object, &ids, false, &[]).await?;
+        let object = rest_object(schema, object)
+            .map(|model| model.name_singular.as_str())
+            .unwrap_or(object);
+        shape_rest_records(runner_schema, object, &mut records, None);
         let plural = schema
             .object(object)
             .map(|object| object.name_plural.clone())
@@ -497,7 +501,7 @@ async fn dispatch_rest(
                     object,
                     ids.as_deref().unwrap_or(&[]),
                     data.as_deref(),
-                    picked_fields.unwrap_or_default(),
+                    picked_fields.clone().unwrap_or_default(),
                     nested.clone(),
                 )
                 .await
@@ -507,13 +511,19 @@ async fn dispatch_rest(
                     .into_iter()
                     .flatten()
                     .map(|connection| {
-                        let records = connection["edges"]
+                        let mut records = connection["edges"]
                             .as_array()
                             .into_iter()
                             .flatten()
                             .filter_map(|edge| edge.get("node"))
                             .cloned()
                             .collect::<Vec<_>>();
+                        shape_rest_records(
+                            runner_schema,
+                            object,
+                            &mut records,
+                            picked_fields.as_deref(),
+                        );
                         json!({
                             (format!("{object}Duplicates")): records,
                             "totalCount": connection["totalCount"],
@@ -557,9 +567,7 @@ async fn dispatch_rest(
                 )
                 .await
                 .map_err(rest_runner_error)?;
-                if let Some(record) = record.as_object_mut() {
-                    pick_fields(record, picked_fields.as_deref());
-                }
+                shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
                 let key = format!("merge{}", pascal_case(object));
                 return Ok(Json(json!({"data": {key: record}})).into_response());
             }
@@ -658,11 +666,12 @@ async fn dispatch_rest(
             .map_err(rest_runner_error)?;
             let mut records = result.records;
 
-            for record in &mut records {
-                if let Some(record) = record.as_object_mut() {
-                    pick_fields(record, picked_fields.as_deref());
-                }
-            }
+            shape_rest_records(
+                runner_schema,
+                object,
+                &mut records,
+                picked_fields.as_deref(),
+            );
 
             Ok(Json(json!({
                 "data": { camel_case(object_model.name_plural.as_str()): records },
@@ -703,9 +712,7 @@ async fn dispatch_rest(
             .await?;
             let mut record = records.remove(0);
 
-            if let Some(record) = record.as_object_mut() {
-                pick_fields(record, picked_fields.as_deref());
-            }
+            shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
 
             let key = format!("create{}", pascal_case(object));
             Ok((
@@ -752,11 +759,12 @@ async fn dispatch_rest(
             .map_err(rest_runner_error)?
             .records;
 
-            for record in &mut records {
-                if let Some(record) = record.as_object_mut() {
-                    pick_fields(record, picked_fields.as_deref());
-                }
-            }
+            shape_rest_records(
+                runner_schema,
+                object,
+                &mut records,
+                picked_fields.as_deref(),
+            );
 
             let plural = object_model.name_plural.as_str();
             let key = format!("update{}", pascal_case(plural));
@@ -844,9 +852,7 @@ async fn id_operation(
             .ok_or_else(RestError::record_not_found)?;
             let mut record = record;
 
-            if let Some(record) = record.as_object_mut() {
-                pick_fields(record, picked_fields.as_deref());
-            }
+            shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
 
             let key = camel_case(object);
             Ok(Json(json!({ "data": { key: record } })).into_response())
@@ -873,9 +879,7 @@ async fn id_operation(
                 records_by_ids(state, runner_schema, object, &[id], false, nested).await?;
             let mut record = records.remove(0);
 
-            if let Some(record) = record.as_object_mut() {
-                pick_fields(record, picked_fields.as_deref());
-            }
+            shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
 
             let key = format!("update{}", pascal_case(object));
             Ok(Json(json!({ "data": { key: record } })).into_response())
@@ -946,9 +950,7 @@ async fn restore_records(
             records_by_ids(state, runner_schema, object, &[id], false, nested).await?;
         let mut record = records.remove(0);
 
-        if let Some(record) = record.as_object_mut() {
-            pick_fields(record, picked_fields);
-        }
+        shape_rest_record(runner_schema, object, &mut record, picked_fields);
 
         let key = format!("restore{}", pascal_case(object));
 
@@ -999,11 +1001,7 @@ async fn restore_records(
         .await
         .unwrap_or_default();
 
-    for record in &mut records {
-        if let Some(record) = record.as_object_mut() {
-            pick_fields(record, picked_fields);
-        }
-    }
+    shape_rest_records(runner_schema, object, &mut records, picked_fields);
 
     let plural = plural_of(runner_schema, object);
     let key = format!("restore{}", pascal_case(&plural));
@@ -1285,6 +1283,98 @@ fn nested_from_names(
         .collect()
 }
 
+fn normalize_relation_keys(runner_schema: &RunnerSchema, object: &str, record: &mut Value) {
+    let Ok(model) = runner_schema.object(object) else {
+        return;
+    };
+    let Some(record) = record.as_object_mut() else {
+        return;
+    };
+    let mut relations = model
+        .shape
+        .relation_shape_by_field_name
+        .iter()
+        .map(|(name, relation)| {
+            let target_object = relation
+                .target_object_metadata_id
+                .as_ref()
+                .and_then(|id| runner_schema.object_by_id(id).ok())
+                .map(|target| target.object.name_singular.clone());
+
+            (
+                name.clone(),
+                relation.join_column_name.clone(),
+                target_object,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    relations.sort();
+
+    for (field_name, join_column, target_object) in relations {
+        if let (Some(target_object), Some(value)) =
+            (target_object.as_deref(), record.get_mut(&field_name))
+        {
+            match value {
+                Value::Object(_) => {
+                    normalize_relation_keys(runner_schema, target_object, value);
+                }
+                Value::Array(items) => {
+                    for item in items {
+                        normalize_relation_keys(runner_schema, target_object, item);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let Some(join_column) = join_column else {
+            continue;
+        };
+        let Some(value) = record.remove(&field_name) else {
+            continue;
+        };
+
+        match &value {
+            Value::Object(_) => {
+                let target_id = value.get("id").cloned().unwrap_or(Value::Null);
+                record.insert(join_column, target_id);
+                record.insert(field_name, value);
+            }
+            Value::Array(_) => {
+                record.insert(field_name, value);
+            }
+            scalar => {
+                record.insert(join_column, scalar.clone());
+            }
+        }
+    }
+}
+
+fn shape_rest_record(
+    runner_schema: &RunnerSchema,
+    object: &str,
+    record: &mut Value,
+    picked_fields: Option<&[String]>,
+) {
+    normalize_relation_keys(runner_schema, object, record);
+
+    if let Some(record) = record.as_object_mut() {
+        pick_fields(record, picked_fields);
+    }
+}
+
+fn shape_rest_records(
+    runner_schema: &RunnerSchema,
+    object: &str,
+    records: &mut [Value],
+    picked_fields: Option<&[String]>,
+) {
+    for record in records {
+        shape_rest_record(runner_schema, object, record, picked_fields);
+    }
+}
+
 async fn records_by_ids(
     state: &AppState,
     runner_schema: &RunnerSchema,
@@ -1512,6 +1602,216 @@ fn resolve_rest_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::flat::FlatEntityMaps;
+    use crate::metadata::flat::FlatFieldMetadata;
+    use crate::metadata::flat::FlatIndexMetadata;
+    use crate::metadata::flat::FlatObjectMetadata;
+    use crate::metadata::names::TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER;
+
+    fn fixture_uuid(value: u128) -> Uuid {
+        Uuid::from_u128(value)
+    }
+
+    fn fixture_object(
+        value: u128,
+        singular: &str,
+        plural: &str,
+        field_values: &[u128],
+    ) -> FlatObjectMetadata {
+        FlatObjectMetadata {
+            id: fixture_uuid(value),
+            universal_identifier: format!("{singular}-object"),
+            name_singular: singular.to_string(),
+            name_plural: plural.to_string(),
+            label_singular: pascal_case(singular),
+            label_plural: pascal_case(plural),
+            application_universal_identifier: TWENTY_STANDARD_APPLICATION_UNIVERSAL_IDENTIFIER
+                .to_string(),
+            field_ids: field_values
+                .iter()
+                .map(|value| fixture_uuid(*value).to_string())
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn fixture_field(
+        owner: u128,
+        value: u128,
+        field_type: FieldMetadataType,
+        name: &str,
+        relation_type: Option<&str>,
+        target: Option<u128>,
+    ) -> FlatFieldMetadata {
+        FlatFieldMetadata {
+            id: fixture_uuid(value),
+            universal_identifier: format!("{name}-field"),
+            object_metadata_id: fixture_uuid(owner),
+            object_metadata_universal_identifier: format!("{name}-object"),
+            field_type,
+            name: name.to_string(),
+            label: name.to_string(),
+            settings: relation_type.map(|kind| json!({ "relationType": kind })),
+            relation_target_object_metadata_id: target.map(fixture_uuid),
+            ..Default::default()
+        }
+    }
+
+    fn many_to_one(owner: u128, value: u128, name: &str, target: u128) -> FlatFieldMetadata {
+        fixture_field(
+            owner,
+            value,
+            FieldMetadataType::Relation,
+            name,
+            Some("MANY_TO_ONE"),
+            Some(target),
+        )
+    }
+
+    fn one_to_many(owner: u128, value: u128, name: &str, target: u128) -> FlatFieldMetadata {
+        fixture_field(
+            owner,
+            value,
+            FieldMetadataType::Relation,
+            name,
+            Some("ONE_TO_MANY"),
+            Some(target),
+        )
+    }
+
+    fn scalar(
+        owner: u128,
+        value: u128,
+        field_type: FieldMetadataType,
+        name: &str,
+    ) -> FlatFieldMetadata {
+        fixture_field(owner, value, field_type, name, None, None)
+    }
+
+    fn relation_fixture_schema() -> RunnerSchema {
+        let objects = [
+            fixture_object(0, "person", "people", &[10, 11, 12, 13]),
+            fixture_object(1, "company", "companies", &[20, 21, 22]),
+            fixture_object(2, "pet", "pets", &[30, 31]),
+            fixture_object(3, "workspaceMember", "workspaceMembers", &[40, 41]),
+        ];
+        let fields = [
+            scalar(0, 10, FieldMetadataType::Uuid, "id"),
+            scalar(0, 11, FieldMetadataType::FullName, "name"),
+            many_to_one(0, 12, "company", 1),
+            one_to_many(0, 13, "tasks", 2),
+            scalar(1, 20, FieldMetadataType::Uuid, "id"),
+            scalar(1, 21, FieldMetadataType::Text, "name"),
+            many_to_one(1, 22, "accountOwner", 3),
+            scalar(2, 30, FieldMetadataType::Uuid, "id"),
+            many_to_one(2, 31, "company", 1),
+            scalar(3, 40, FieldMetadataType::Uuid, "id"),
+            scalar(3, 41, FieldMetadataType::FullName, "name"),
+        ];
+        let mut field_maps: FlatEntityMaps<FlatFieldMetadata> = FlatEntityMaps::default();
+
+        for field in fields {
+            let (id, universal_identifier) =
+                (field.id.to_string(), field.universal_identifier.clone());
+            field_maps.add(id, field, universal_identifier, "application-id");
+        }
+
+        let index_maps: FlatEntityMaps<FlatIndexMetadata> = FlatEntityMaps::default();
+
+        RunnerSchema::build(&Uuid::nil(), &objects, &field_maps, &index_maps)
+            .expect("build relation fixture schema")
+    }
+
+    fn shaped(record: &str) -> Value {
+        let schema = relation_fixture_schema();
+        let mut record = serde_json::from_str::<Value>(record).expect("record json");
+        normalize_relation_keys(&schema, "person", &mut record);
+
+        record
+    }
+
+    #[test]
+    fn an_unset_many_to_one_relation_is_returned_under_its_join_key() {
+        let record = shaped(r#"{"id": "p1", "company": null}"#);
+        let object = record.as_object().expect("record object");
+
+        assert_eq!(object.get("companyId"), Some(&Value::Null));
+        assert!(!object.contains_key("company"));
+    }
+
+    #[test]
+    fn a_populated_many_to_one_relation_is_returned_under_its_join_key() {
+        let record = shaped(r#"{"id": "p1", "company": "c1"}"#);
+        let object = record.as_object().expect("record object");
+
+        assert_eq!(object.get("companyId"), Some(&json!("c1")));
+        assert!(!object.contains_key("company"));
+    }
+
+    #[test]
+    fn an_expanded_relation_carries_the_object_and_its_join_key() {
+        let record = shaped(
+            r#"{"id": "p1", "company": {"id": "c1", "name": "Acme", "accountOwner": null}}"#,
+        );
+        let object = record.as_object().expect("record object");
+        let company = object.get("company").and_then(Value::as_object);
+
+        assert_eq!(object.get("companyId"), Some(&json!("c1")));
+        assert_eq!(
+            company.map(|company| company.keys().cloned().collect::<Vec<_>>()),
+            Some(vec![
+                String::from("id"),
+                String::from("name"),
+                String::from("accountOwnerId"),
+            ])
+        );
+        assert_eq!(
+            company.and_then(|company| company.get("accountOwnerId").cloned()),
+            Some(Value::Null)
+        );
+    }
+
+    #[test]
+    fn a_to_many_relation_stays_under_its_field_name_and_normalizes_its_members() {
+        let record = shaped(r#"{"id": "p1", "tasks": [{"id": "t1", "company": "c1"}]}"#);
+        let object = record.as_object().expect("record object");
+
+        assert!(!object.contains_key("tasksId"));
+        assert_eq!(
+            object.get("tasks"),
+            Some(&json!([{ "id": "t1", "companyId": "c1" }]))
+        );
+    }
+
+    #[test]
+    fn an_unknown_object_leaves_the_record_untouched() {
+        let schema = relation_fixture_schema();
+        let mut record = json!({ "id": "p1", "company": null });
+        normalize_relation_keys(&schema, "nope", &mut record);
+
+        assert_eq!(record, json!({ "id": "p1", "company": null }));
+    }
+
+    #[test]
+    fn shaping_picks_the_join_key_after_renaming() {
+        let schema = relation_fixture_schema();
+        let mut record = json!({ "id": "p1", "name": null, "company": "c1" });
+        shape_rest_record(
+            &schema,
+            "person",
+            &mut record,
+            Some(&[
+                "id".to_string(),
+                "name".to_string(),
+                "companyId".to_string(),
+            ]),
+        );
+
+        assert_eq!(
+            record,
+            json!({ "id": "p1", "name": null, "companyId": "c1" })
+        );
+    }
 
     async fn response_json(error: RestError) -> Value {
         let response = error.response();
@@ -1521,6 +1821,18 @@ mod tests {
             .expect("error response body");
         assert_eq!(status, error.status);
         serde_json::from_slice(&bytes).expect("error response json")
+    }
+
+    #[tokio::test]
+    async fn an_unknown_object_path_is_a_bad_request() {
+        let body = response_json(RestError::unknown_object("nope")).await;
+
+        assert_eq!(body["statusCode"], 400);
+        assert_eq!(body["error"], "BadRequestException");
+        assert_eq!(
+            body["messages"][0],
+            "object 'nope' not found. eg: companies"
+        );
     }
 
     #[tokio::test]
