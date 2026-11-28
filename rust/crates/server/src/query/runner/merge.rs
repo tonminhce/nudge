@@ -115,7 +115,7 @@ async fn fetch_records_to_merge(
         &FindManyArgs {
             filter: Some(json!({"id": {"in": ids}})),
             selected_field_names: readable_field_names(schema, model),
-            skip_channel_visibility: true,
+            skip_channel_visibility: false,
             ..Default::default()
         },
         false,
@@ -235,7 +235,15 @@ async fn execute_merge(
     transaction.commit().await.map_err(RunnerError::database)?;
     super::nested::load_nested_relations(pool, schema, object_name_singular, &mut records, nested)
         .await?;
-    Ok(records.remove(0))
+    let mut record = records.remove(0);
+    crate::query::visibility::apply_record_channel_visibility(
+        pool,
+        schema,
+        object_name_singular,
+        std::slice::from_mut(&mut record),
+    )
+    .await?;
+    Ok(record)
 }
 
 async fn repoint_related_records(

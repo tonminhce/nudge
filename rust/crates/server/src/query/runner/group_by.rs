@@ -96,7 +96,10 @@ pub struct GroupByRow {
     pub values: Vec<(String, Value)>,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "passes query execution parameters to group_by"
+)]
 pub async fn group_by(
     pool: &sqlx::PgPool,
     schema: &RunnerSchema,

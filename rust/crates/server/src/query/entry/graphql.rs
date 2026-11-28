@@ -1305,6 +1305,24 @@ fn project_record(record: &Value, selections: &[FieldSelection], type_name: &str
                         .is_some_and(|items| items.iter().any(|item| !item.is_object()))
                 {
                     child
+                } else if !selection.selection.iter().any(|s| {
+                    s.name == "edges"
+                        || s.name == "totalCount"
+                        || s.name == "pageInfo"
+                        || s.name == "node"
+                }) {
+                    let mut null_map = Map::new();
+                    for sel in &selection.selection {
+                        null_map.insert(
+                            sel.response_key().to_string(),
+                            if sel.name == "__typename" {
+                                Value::String(format!("{}Connection", pascal_case(&selection.name)))
+                            } else {
+                                Value::Null
+                            },
+                        );
+                    }
+                    Value::Object(null_map)
                 } else {
                     Value::Array(
                         child
@@ -2687,6 +2705,51 @@ mod tests {
         assert_eq!(
             root_record_fields(&schema, &field, &resolver),
             ["id", "domainNamePrimaryLinkUrl"]
+        );
+    }
+
+    #[test]
+    fn direct_field_projection_on_relation_array_evaluates_to_nulls() {
+        let record = json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "messages": [
+                {
+                    "id": "22222222-2222-2222-2222-222222222222",
+                    "subject": "Hello",
+                    "text": "World"
+                }
+            ]
+        });
+        let selection = |name: &str| FieldSelection {
+            alias: None,
+            name: name.to_string(),
+            line: 1,
+            column: 1,
+            arguments: Vec::new(),
+            selection: Vec::new(),
+            spreads: Vec::new(),
+        };
+        let messages_selection = FieldSelection {
+            alias: None,
+            name: "messages".to_string(),
+            line: 1,
+            column: 1,
+            arguments: Vec::new(),
+            selection: vec![selection("id"), selection("subject"), selection("text")],
+            spreads: Vec::new(),
+        };
+        let projected = project_record(
+            &record,
+            &[selection("id"), messages_selection],
+            "MessageThread",
+        );
+        assert_eq!(
+            projected["messages"],
+            json!({
+                "id": null,
+                "subject": null,
+                "text": null
+            })
         );
     }
 }

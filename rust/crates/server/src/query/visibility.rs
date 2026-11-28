@@ -16,6 +16,28 @@ use crate::metadata::flat::FieldMetadataType;
 pub const FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED: &str =
     "FIELD_RESTRICTED_ADDITIONAL_PERMISSIONS_REQUIRED";
 
+pub const OBJECTS_WITH_CHANNEL_VISIBILITY_CONSTRAINTS: [&str; 10] = [
+    "blocklist",
+    "message",
+    "messageThread",
+    "messageParticipant",
+    "messageChannelMessageAssociation",
+    "messageChannelMessageAssociationMessageFolder",
+    "messageThreadSubscriber",
+    "calendarEvent",
+    "calendarChannelEventAssociation",
+    "calendarEventParticipant",
+];
+
+pub fn is_channel_restricted_field(object_name: &str, field_name: &str) -> bool {
+    match object_name {
+        MESSAGE_OBJECT => RESTRICTED_MESSAGE_FIELDS.contains(&field_name),
+        ATTACHMENT_OBJECT => RESTRICTED_ATTACHMENT_FIELDS.contains(&field_name),
+        CALENDAR_EVENT_OBJECT => RESTRICTED_CALENDAR_EVENT_FIELDS.contains(&field_name),
+        _ => false,
+    }
+}
+
 const MESSAGE_OBJECT: &str = "message";
 const ATTACHMENT_OBJECT: &str = "attachment";
 const CALENDAR_EVENT_OBJECT: &str = "calendarEvent";

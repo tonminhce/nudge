@@ -36,18 +36,8 @@ use super::RunnerError;
 const OBJECT_METADATA_ITEMS_CHUNK_SIZE: usize = 5;
 const SEARCH_VECTOR_FIELD_NAME: &str = "searchVector";
 const SEARCH_OBJECT_LABEL_CATALOG: &str = include_str!("search_object_labels.json");
-const CHANNEL_VISIBILITY_OBJECTS: [&str; 10] = [
-    "blocklist",
-    "message",
-    "messageThread",
-    "messageParticipant",
-    "messageChannelMessageAssociation",
-    "messageChannelMessageAssociationMessageFolder",
-    "messageThreadSubscriber",
-    "calendarEvent",
-    "calendarChannelEventAssociation",
-    "calendarEventParticipant",
-];
+const CHANNEL_VISIBILITY_OBJECTS: [&str; 10] =
+    crate::query::visibility::OBJECTS_WITH_CHANNEL_VISIBILITY_CONSTRAINTS;
 
 #[derive(Debug, Clone)]
 pub struct SearchArgs {

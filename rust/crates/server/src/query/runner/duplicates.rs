@@ -59,7 +59,7 @@ pub async fn find_duplicates(
             &FindManyArgs {
                 filter: Some(json!({"id": {"in": source_ids}})),
                 selected_field_names: source_fields,
-                skip_channel_visibility: true,
+                skip_channel_visibility: false,
                 ..Default::default()
             },
             false,
@@ -147,7 +147,6 @@ fn duplicate_criteria(
     Ok(groups)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn duplicate_connection(
     pool: &sqlx::PgPool,
     schema: Arc<RunnerSchema>,
