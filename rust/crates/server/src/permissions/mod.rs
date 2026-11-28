@@ -18,6 +18,7 @@ use model::WorkspacePermissionSet;
 
 pub use error::PermissionError;
 pub use model::ObjectRecordsOperationType;
+pub use model::RecordsAccessSource;
 pub use model::RoleRecordsPermissions;
 pub use model::RowLevelRecordsPermissions;
 pub use settings::current_user_workspace_permissions_for_auth;
