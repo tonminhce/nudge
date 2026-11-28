@@ -15,6 +15,7 @@ nudge-core = { workspace = true }
 
 anyhow = { workspace = true }
 aes-gcm = { workspace = true }
+async-stream = "0.3"
 axum = { workspace = true }
 base32 = { workspace = true }
 base64 = { workspace = true }

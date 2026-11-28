@@ -2,6 +2,37 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::client::BrowserGraphQLClient;
+use crate::client::ClientError;
+use crate::client::Endpoint;
+use crate::client::GraphQLClient;
+use crate::client::RequestOptions;
+
+pub const ON_EVENT_SUBSCRIPTION_QUERY: &str = r#"subscription OnEventSubscription($eventStreamId: String!) {
+  onEventSubscription(eventStreamId: $eventStreamId) {
+    eventStreamId
+    objectRecordEventsWithQueryIds {
+      objectRecordEvent {
+        action
+        objectNameSingular
+        recordId
+        userId
+        workspaceMemberId
+        properties { updatedFields before after diff }
+      }
+      queryIds
+    }
+    metadataEvents {
+      type
+      metadataName
+      recordId
+      updatedCollectionHash
+      properties { updatedFields before after diff }
+    }
+    queueJobEvents { jobId state attemptsMade failedReason progress enqueuedAt startedAt finishedAt }
+  }
+}"#;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SseEvent {
     ObjectRecord {
@@ -50,6 +81,18 @@ pub struct QueueJobEvent {
     #[serde(default)]
     pub state: Option<String>,
     #[serde(default)]
+    pub attempts_made: Option<i64>,
+    #[serde(default)]
+    pub failed_reason: Option<String>,
+    #[serde(default)]
+    pub progress: Option<Value>,
+    #[serde(default)]
+    pub enqueued_at: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub finished_at: Option<String>,
+    #[serde(default)]
     pub properties: Option<Value>,
 }
 
@@ -65,7 +108,7 @@ struct ObjectRecordEventsWithQueryIds {
 #[serde(rename_all = "camelCase")]
 struct OnEventSubscription {
     #[serde(default)]
-    object_record_events_with_query_ids: Option<ObjectRecordEventsWithQueryIds>,
+    object_record_events_with_query_ids: Vec<ObjectRecordEventsWithQueryIds>,
     #[serde(default)]
     metadata_events: Vec<MetadataEvent>,
     #[serde(default)]
@@ -126,12 +169,15 @@ fn decode_event(data: &str) -> Result<Vec<SseEvent>, SseError> {
     let subscription = envelope.data.on_event_subscription;
     let mut events = Vec::new();
 
-    if let Some(record) = subscription.object_record_events_with_query_ids {
-        events.push(SseEvent::ObjectRecord {
-            event: record.object_record_event,
-            query_ids: record.query_ids,
-        });
-    }
+    events.extend(
+        subscription
+            .object_record_events_with_query_ids
+            .into_iter()
+            .map(|record| SseEvent::ObjectRecord {
+                event: record.object_record_event,
+                query_ids: record.query_ids,
+            }),
+    );
 
     events.extend(
         subscription
@@ -149,6 +195,120 @@ fn decode_event(data: &str) -> Result<Vec<SseEvent>, SseError> {
     Ok(events)
 }
 
+pub async fn register_event_query(
+    base_url: &str,
+    token: &str,
+    event_stream_id: &str,
+    query_id: &str,
+    operation_signature: &str,
+) -> Result<bool, ClientError> {
+    let query = r#"mutation AddQueryToEventStream($input: AddQuerySubscriptionInput!) {
+      addQueryToEventStream(input: $input)
+    }"#;
+    let data = BrowserGraphQLClient::default()
+        .execute_data(
+            base_url,
+            query,
+            RequestOptions::new(Endpoint::Metadata)
+                .operation_name("AddQueryToEventStream")
+                .variables(serde_json::json!({
+                    "input": {
+                        "eventStreamId": event_stream_id,
+                        "queryId": query_id,
+                        "operationSignature": operation_signature,
+                    }
+                }))
+                .bearer_token(token),
+        )
+        .await?;
+    serde_json::from_value(data["addQueryToEventStream"].clone()).map_err(ClientError::Json)
+}
+
+pub async fn unregister_event_query(
+    base_url: &str,
+    token: &str,
+    event_stream_id: &str,
+    query_id: &str,
+) -> Result<bool, ClientError> {
+    let query = r#"mutation RemoveQueryFromEventStream($input: RemoveQueryFromEventStreamInput!) {
+      removeQueryFromEventStream(input: $input)
+    }"#;
+    let data = BrowserGraphQLClient::default()
+        .execute_data(
+            base_url,
+            query,
+            RequestOptions::new(Endpoint::Metadata)
+                .operation_name("RemoveQueryFromEventStream")
+                .variables(serde_json::json!({
+                    "input": {
+                        "eventStreamId": event_stream_id,
+                        "queryId": query_id,
+                    }
+                }))
+                .bearer_token(token),
+        )
+        .await?;
+    serde_json::from_value(data["removeQueryFromEventStream"].clone()).map_err(ClientError::Json)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn subscribe_event_stream<F>(
+    base_url: &str,
+    token: &str,
+    event_stream_id: &str,
+    mut on_event: F,
+) -> Result<(), ClientError>
+where
+    F: FnMut(SseEvent),
+{
+    use futures_util::StreamExt;
+
+    let url = format!("{}/metadata", base_url.trim_end_matches('/'));
+    let response = gloo_net::http::Request::post(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .header("Accept", "text/event-stream")
+        .json(&serde_json::json!({
+            "query": ON_EVENT_SUBSCRIPTION_QUERY,
+            "variables": {"eventStreamId": event_stream_id},
+        }))?
+        .send()
+        .await?;
+    if response.status() != 200 {
+        return Err(ClientError::Response {
+            status: response.status(),
+            message: String::from("event stream request failed"),
+        });
+    }
+    let body = response.body().ok_or(ClientError::MissingData)?;
+    let mut stream = wasm_streams::ReadableStream::from_raw(body).into_stream();
+    let mut buffer = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| ClientError::Transport(format!("{error:?}")))?;
+        buffer.extend_from_slice(&js_sys::Uint8Array::from(chunk).to_vec());
+        consume_event_frames(&mut buffer, &mut on_event)?;
+    }
+    if !buffer.is_empty() {
+        consume_event_frames(&mut buffer, &mut on_event)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn consume_event_frames<F>(buffer: &mut Vec<u8>, on_event: &mut F) -> Result<(), ClientError>
+where
+    F: FnMut(SseEvent),
+{
+    while let Some(position) = buffer.windows(2).position(|window| window == b"\n\n") {
+        let frame = buffer.drain(..=position + 1).collect::<Vec<_>>();
+        let frame =
+            String::from_utf8(frame).map_err(|error| ClientError::Transport(error.to_string()))?;
+        for event in decode_frames(&frame)? {
+            on_event(event);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,7 +316,7 @@ mod tests {
 
     #[test]
     fn decoder_matches_the_upstream_object_record_event_frame() {
-        let frame = "event: next\ndata: {\"data\":{\"onEventSubscription\":{\"objectRecordEventsWithQueryIds\":{\"objectRecordEvent\":{\"action\":\"updated\",\"objectNameSingular\":\"person\",\"recordId\":\"p1\",\"properties\":{\"updatedFields\":[\"name\"]}},\"queryIds\":[\"q1\",\"q2\"]}}}}\n\n";
+        let frame = "event: next\ndata: {\"data\":{\"onEventSubscription\":{\"objectRecordEventsWithQueryIds\":[{\"objectRecordEvent\":{\"action\":\"updated\",\"objectNameSingular\":\"person\",\"recordId\":\"p1\",\"properties\":{\"updatedFields\":[\"name\"]}},\"queryIds\":[\"q1\",\"q2\"]}]}}}\n\n";
         let events = decode_frames(frame).unwrap();
         assert_eq!(
             events,
@@ -172,6 +332,23 @@ mod tests {
                 query_ids: vec!["q1".into(), "q2".into()],
             }]
         );
+    }
+
+    #[test]
+    fn decoder_preserves_batched_object_record_events() {
+        let frame = "event: next\ndata: {\"data\":{\"onEventSubscription\":{\"objectRecordEventsWithQueryIds\":[{\"objectRecordEvent\":{\"action\":\"updated\",\"objectNameSingular\":\"person\",\"recordId\":\"p1\"},\"queryIds\":[\"q1\"]},{\"objectRecordEvent\":{\"action\":\"created\",\"objectNameSingular\":\"person\",\"recordId\":\"p2\"},\"queryIds\":[\"q1\",\"q2\"]}]}}}\n\n";
+        let events = decode_frames(frame).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[0],
+            SseEvent::ObjectRecord { event, query_ids }
+                if event.record_id == "p1" && query_ids == &vec!["q1".to_string()]
+        ));
+        assert!(matches!(
+            &events[1],
+            SseEvent::ObjectRecord { event, query_ids }
+                if event.action == "created" && query_ids == &vec!["q1".to_string(), "q2".to_string()]
+        ));
     }
 
     #[test]

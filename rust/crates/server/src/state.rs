@@ -8,6 +8,7 @@ use sqlx::PgPool;
 
 use crate::auth::jwt_service::JwtService;
 use crate::auth::signing_keys::SigningKeyManager;
+use crate::events::EventStreamRegistry;
 use crate::metadata::cache::WorkspaceFlatMapsCache;
 use crate::permissions::PermissionCache;
 
@@ -20,6 +21,7 @@ pub struct AppState {
     pub jwt: Arc<JwtService>,
     pub metadata_cache: Arc<WorkspaceFlatMapsCache>,
     pub permission_cache: Arc<PermissionCache>,
+    pub event_streams: EventStreamRegistry,
 }
 
 impl AppState {
@@ -63,6 +65,7 @@ impl AppState {
             jwt,
             metadata_cache: Arc::new(WorkspaceFlatMapsCache::new()),
             permission_cache: Arc::new(PermissionCache::new()),
+            event_streams: EventStreamRegistry::default(),
         })
     }
 }

@@ -12,6 +12,7 @@ const NAME_REST_EXTRA: &[u8] = b"0123456789";
 pub enum OperationKind {
     Query,
     Mutation,
+    Subscription,
 }
 
 impl OperationKind {
@@ -19,6 +20,7 @@ impl OperationKind {
         match self {
             OperationKind::Query => "query",
             OperationKind::Mutation => "mutation",
+            OperationKind::Subscription => "subscription",
         }
     }
 }
@@ -389,11 +391,7 @@ impl<'a> Parser<'a> {
         let kind = match keyword.as_str() {
             "query" => OperationKind::Query,
             "mutation" => OperationKind::Mutation,
-            "subscription" => {
-                return Err(GraphQlError::validation(
-                    "Subscriptions are not supported by the metadata API.",
-                ))
-            }
+            "subscription" => OperationKind::Subscription,
             _ => {
                 return Err(GraphQlError::parse(format!(
                     "Syntax Error: Unexpected {keyword} at position {}.",
@@ -1137,14 +1135,25 @@ mod tests {
     }
 
     #[test]
-    fn subscription_is_refused() {
-        let error = parse(
-            "subscription S { objects { edges { node { id } } } }",
-            json!({}),
-        )
-        .expect_err("subscriptions unsupported");
+    fn subscription_operations_parse_for_the_event_stream() {
+        let request = parse_request(GraphqlRequestBody {
+            query: Some(
+                "subscription OnEventSubscription($eventStreamId: String!) { onEventSubscription(eventStreamId: $eventStreamId) { eventStreamId } }"
+                    .to_string(),
+            ),
+            operation_name: Some("OnEventSubscription".to_string()),
+            variables: Some(json!({"eventStreamId": "stream-1"})),
+            extensions: None,
+        })
+        .unwrap();
+        let selected = select_operation(&request).unwrap();
 
-        assert_eq!(error.code, "GRAPHQL_VALIDATION_FAILED");
+        assert_eq!(selected.kind, OperationKind::Subscription);
+        assert_eq!(selected.field.name, "onEventSubscription");
+        assert_eq!(
+            selected.field.argument("eventStreamId"),
+            Some(&json!("stream-1"))
+        );
     }
 
     #[test]

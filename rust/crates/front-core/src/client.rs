@@ -76,6 +76,11 @@ pub enum ClientError {
     MissingData,
     #[error("transport failed: {0}")]
     Transport(String),
+    #[error("SSE failed: {0}")]
+    Sse(#[from] crate::sse::SseError),
+    #[cfg(target_arch = "wasm32")]
+    #[error("browser transport failed: {0}")]
+    GlooNet(#[from] gloo_net::Error),
     #[error("HTTP {status}: {message}")]
     Response { status: u16, message: String },
     #[error("server URL must be an absolute http(s) URL")]

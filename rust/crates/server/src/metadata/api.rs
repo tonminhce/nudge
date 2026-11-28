@@ -7,6 +7,8 @@ pub mod input;
 pub mod service;
 
 use std::collections::HashMap;
+use std::convert::Infallible;
+use std::time::Duration;
 
 use axum::extract::FromRequestParts;
 use axum::extract::Query;
@@ -17,6 +19,8 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::HeaderMap;
 use axum::http::Method;
 use axum::http::StatusCode;
+use axum::response::sse::Event;
+use axum::response::sse::Sse;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::routing::get;
@@ -24,12 +28,15 @@ use axum::Json;
 use axum::Router;
 use serde_json::json;
 use serde_json::Value;
+use tokio::time::MissedTickBehavior;
 
 use crate::auth::error::AuthError;
 use crate::auth::middleware::AuthContext;
+use crate::events::EventStreamRegistry;
 use crate::metadata::api::errors::GraphQlError;
 use crate::metadata::api::graphql::parse_request;
 use crate::metadata::api::graphql::select_operation;
+use crate::metadata::api::graphql::FieldSelection;
 use crate::metadata::api::graphql::GraphqlRequestBody;
 use crate::metadata::api::graphql::OperationKind;
 use crate::metadata::api::handlers::dispatch;
@@ -169,7 +176,8 @@ async fn execute_metadata_request(
             return graphql_json_response(StatusCode::OK, &parts.headers, error_payload(&[error]))
         }
     };
-    if !is_metadata_root_field(&selected.field.name) {
+    if selected.kind != OperationKind::Subscription && !is_metadata_root_field(&selected.field.name)
+    {
         return graphql_json_response(
             StatusCode::OK,
             &parts.headers,
@@ -203,6 +211,25 @@ async fn execute_metadata_request(
                 .with_sub_code("WORKSPACE_NOT_DEFINED")]),
         );
     };
+    if selected.kind == OperationKind::Subscription {
+        if selected.field.name != "onEventSubscription" {
+            return graphql_json_response(
+                StatusCode::OK,
+                &parts.headers,
+                error_payload(&[GraphQlError::validation(format!(
+                    "Cannot subscribe to field \"{}\".",
+                    selected.field.name
+                ))]),
+            );
+        }
+        return event_subscription_response(
+            &state,
+            &auth,
+            &selected.field,
+            &execution_request.variables,
+        )
+        .await;
+    }
     let ctx = OperationContext {
         state: &state,
         workspace_id,
@@ -235,7 +262,100 @@ fn is_metadata_root_field(name: &str) -> bool {
             | "object"
             | "field"
             | "currentUser"
+            | "addQueryToEventStream"
+            | "removeQueryFromEventStream"
     )
+}
+
+struct EventStreamCleanup {
+    registry: EventStreamRegistry,
+    workspace_id: uuid::Uuid,
+    event_stream_id: String,
+}
+
+impl Drop for EventStreamCleanup {
+    fn drop(&mut self) {
+        self.registry
+            .remove(self.workspace_id, &self.event_stream_id);
+    }
+}
+
+async fn event_subscription_response(
+    state: &AppState,
+    auth: &AuthContext,
+    field: &FieldSelection,
+    variables: &Value,
+) -> Response {
+    let event_stream_id = field
+        .argument("eventStreamId")
+        .and_then(Value::as_str)
+        .or_else(|| variables.get("eventStreamId").and_then(Value::as_str))
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let Some(event_stream_id) = event_stream_id else {
+        return graphql_json_response(
+            StatusCode::OK,
+            &axum::http::HeaderMap::new(),
+            error_payload(&[GraphQlError::validation("eventStreamId is required")]),
+        );
+    };
+    let Some(workspace_id) = auth.workspace_id else {
+        return graphql_json_response(
+            StatusCode::OK,
+            &axum::http::HeaderMap::new(),
+            error_payload(&[GraphQlError::forbidden("Could not retrieve workspace ID")]),
+        );
+    };
+    let Some(mut receiver) = state
+        .event_streams
+        .open(workspace_id, event_stream_id.clone(), auth)
+    else {
+        return graphql_json_response(
+            StatusCode::CONFLICT,
+            &axum::http::HeaderMap::new(),
+            error_payload(&[GraphQlError::new(
+                "Event stream already exists",
+                "EVENT_STREAM_ALREADY_EXISTS",
+            )]),
+        );
+    };
+    let cleanup = EventStreamCleanup {
+        registry: state.event_streams.clone(),
+        workspace_id,
+        event_stream_id: event_stream_id.clone(),
+    };
+    let stream = async_stream::stream! {
+        let _cleanup = cleanup;
+        let initial = json!({
+            "data": {
+                "onEventSubscription": {
+                    "eventStreamId": event_stream_id,
+                    "objectRecordEventsWithQueryIds": [],
+                    "metadataEvents": [],
+                    "queueJobEvents": [],
+                }
+            }
+        });
+        yield Ok::<Event, Infallible>(Event::default().data(initial.to_string()));
+        let mut interval = tokio::time::interval(Duration::from_secs(15));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                payload = receiver.recv() => {
+                    let Some(payload) = payload else {
+                        break;
+                    };
+                    let data = json!({"data": {"onEventSubscription": payload}});
+                    yield Ok::<Event, Infallible>(Event::default().data(data.to_string()));
+                }
+                _ = interval.tick() => {
+                    yield Ok::<Event, Infallible>(Event::default().data("{}"));
+                }
+            }
+        }
+    };
+    Sse::new(stream).into_response()
 }
 
 fn error_payload(errors: &[GraphQlError]) -> Value {

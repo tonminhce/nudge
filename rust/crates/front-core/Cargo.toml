@@ -24,5 +24,8 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-util = "0.3"
 gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
+js-sys = "0.3"
+wasm-streams = "0.4"
 web-sys = { version = "0.3", features = ["RequestCredentials"] }

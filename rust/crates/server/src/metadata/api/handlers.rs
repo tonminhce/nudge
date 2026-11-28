@@ -95,6 +95,8 @@ pub async fn dispatch(ctx: &OperationContext<'_>) -> ResponsePayload {
         "object" if ctx.is_query => get_object(ctx).await,
         "field" if ctx.is_query => get_field(ctx).await,
         "currentUser" if ctx.is_query => current_user(ctx).await,
+        "addQueryToEventStream" if !ctx.is_query => add_query_to_event_stream(ctx).await,
+        "removeQueryFromEventStream" if !ctx.is_query => remove_query_from_event_stream(ctx).await,
         _ => Err(GraphQlError::validation(format!(
             "Cannot query field \"{operation_name}\" on type."
         ))),
@@ -108,6 +110,49 @@ pub async fn dispatch(ctx: &OperationContext<'_>) -> ResponsePayload {
         }
         Err(error) => ResponsePayload::errors(vec![error]),
     }
+}
+
+async fn add_query_to_event_stream(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let input = input_argument(ctx.selection, ctx.variables);
+    let input = input
+        .as_object()
+        .ok_or_else(|| GraphQlError::user_input("input is required"))?;
+    let event_stream_id = optional_string(input, "eventStreamId")?
+        .ok_or_else(|| GraphQlError::user_input("eventStreamId is required"))?;
+    let query_id = optional_string(input, "queryId")?
+        .ok_or_else(|| GraphQlError::user_input("queryId is required"))?;
+    let operation_signature = optional_string(input, "operationSignature")?
+        .ok_or_else(|| GraphQlError::user_input("operationSignature is required"))?;
+    let auth = ctx
+        .auth
+        .ok_or_else(|| GraphQlError::unauthenticated("Authentication required"))?;
+    Ok(Value::Bool(ctx.state.event_streams.add_query(
+        ctx.workspace_id,
+        &event_stream_id,
+        auth,
+        query_id,
+        operation_signature,
+    )))
+}
+
+async fn remove_query_from_event_stream(ctx: &OperationContext<'_>) -> Result<Value, GraphQlError> {
+    let input = input_argument(ctx.selection, ctx.variables);
+    let input = input
+        .as_object()
+        .ok_or_else(|| GraphQlError::user_input("input is required"))?;
+    let event_stream_id = optional_string(input, "eventStreamId")?
+        .ok_or_else(|| GraphQlError::user_input("eventStreamId is required"))?;
+    let query_id = optional_string(input, "queryId")?
+        .ok_or_else(|| GraphQlError::user_input("queryId is required"))?;
+    let auth = ctx
+        .auth
+        .ok_or_else(|| GraphQlError::unauthenticated("Authentication required"))?;
+    Ok(Value::Bool(ctx.state.event_streams.remove_query(
+        ctx.workspace_id,
+        &event_stream_id,
+        auth,
+        &query_id,
+    )))
 }
 
 async fn run_migration(

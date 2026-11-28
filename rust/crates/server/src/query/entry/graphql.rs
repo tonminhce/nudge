@@ -1163,6 +1163,11 @@ async fn mutate_existing_record(
     let id = required_id(field)?;
     let actor = None;
     let selected = root_record_fields(schema, field, resolver);
+    let updated_fields = data
+        .as_ref()
+        .and_then(Value::as_object)
+        .map(|data| data.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
 
     run_mutation_one(
         &state.core_pool,
@@ -1177,6 +1182,20 @@ async fn mutate_existing_record(
     )
     .await
     .map_err(runner_graphql_error)?;
+    if kind == FilteredMutationKind::Update {
+        let workspace_id = runner_schema
+            .object(&resolver.object_name_singular)
+            .map_err(runner_graphql_error)?
+            .object
+            .workspace_id;
+        state.event_streams.publish_record(
+            workspace_id,
+            "updated",
+            &resolver.object_name_singular,
+            &id.to_string(),
+            json!({"updatedFields": updated_fields}),
+        );
+    }
 
     find_record(
         state,
