@@ -383,7 +383,7 @@ async fn dispatch_rest(
         let object = rest_object(schema, object)
             .map(|model| model.name_singular.as_str())
             .unwrap_or(object);
-        shape_rest_records(runner_schema, object, &mut records, None);
+        shape_rest_records(runner_schema, object, &mut records, None, &[]);
         let plural = schema
             .object(object)
             .map(|object| object.name_plural.clone())
@@ -523,6 +523,7 @@ async fn dispatch_rest(
                             object,
                             &mut records,
                             picked_fields.as_deref(),
+                            &nested,
                         );
                         json!({
                             (format!("{object}Duplicates")): records,
@@ -567,7 +568,13 @@ async fn dispatch_rest(
                 )
                 .await
                 .map_err(rest_runner_error)?;
-                shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
+                shape_rest_record(
+                    runner_schema,
+                    object,
+                    &mut record,
+                    picked_fields.as_deref(),
+                    &nested,
+                );
                 let key = format!("merge{}", pascal_case(object));
                 return Ok(Json(json!({"data": {key: record}})).into_response());
             }
@@ -671,6 +678,7 @@ async fn dispatch_rest(
                 object,
                 &mut records,
                 picked_fields.as_deref(),
+                &nested,
             );
 
             Ok(Json(json!({
@@ -712,7 +720,13 @@ async fn dispatch_rest(
             .await?;
             let mut record = records.remove(0);
 
-            shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
+            shape_rest_record(
+                runner_schema,
+                object,
+                &mut record,
+                picked_fields.as_deref(),
+                &nested,
+            );
 
             let key = format!("create{}", pascal_case(object));
             Ok((
@@ -764,6 +778,7 @@ async fn dispatch_rest(
                 object,
                 &mut records,
                 picked_fields.as_deref(),
+                &nested,
             );
 
             let plural = object_model.name_plural.as_str();
@@ -852,7 +867,13 @@ async fn id_operation(
             .ok_or_else(RestError::record_not_found)?;
             let mut record = record;
 
-            shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
+            shape_rest_record(
+                runner_schema,
+                object,
+                &mut record,
+                picked_fields.as_deref(),
+                nested,
+            );
 
             let key = camel_case(object);
             Ok(Json(json!({ "data": { key: record } })).into_response())
@@ -879,7 +900,13 @@ async fn id_operation(
                 records_by_ids(state, runner_schema, object, &[id], false, nested).await?;
             let mut record = records.remove(0);
 
-            shape_rest_record(runner_schema, object, &mut record, picked_fields.as_deref());
+            shape_rest_record(
+                runner_schema,
+                object,
+                &mut record,
+                picked_fields.as_deref(),
+                nested,
+            );
 
             let key = format!("update{}", pascal_case(object));
             Ok(Json(json!({ "data": { key: record } })).into_response())
@@ -950,7 +977,7 @@ async fn restore_records(
             records_by_ids(state, runner_schema, object, &[id], false, nested).await?;
         let mut record = records.remove(0);
 
-        shape_rest_record(runner_schema, object, &mut record, picked_fields);
+        shape_rest_record(runner_schema, object, &mut record, picked_fields, nested);
 
         let key = format!("restore{}", pascal_case(object));
 
@@ -1001,7 +1028,7 @@ async fn restore_records(
         .await
         .unwrap_or_default();
 
-    shape_rest_records(runner_schema, object, &mut records, picked_fields);
+    shape_rest_records(runner_schema, object, &mut records, picked_fields, nested);
 
     let plural = plural_of(runner_schema, object);
     let key = format!("restore{}", pascal_case(&plural));
@@ -1283,7 +1310,12 @@ fn nested_from_names(
         .collect()
 }
 
-fn normalize_relation_keys(runner_schema: &RunnerSchema, object: &str, record: &mut Value) {
+fn normalize_relation_keys(
+    runner_schema: &RunnerSchema,
+    object: &str,
+    record: &mut Value,
+    expanded: &[NestedRelationSelection],
+) {
     let Ok(model) = runner_schema.object(object) else {
         return;
     };
@@ -1305,23 +1337,26 @@ fn normalize_relation_keys(runner_schema: &RunnerSchema, object: &str, record: &
                 name.clone(),
                 relation.join_column_name.clone(),
                 target_object,
+                expanded
+                    .iter()
+                    .any(|nested| nested.relation_field_name == *name),
             )
         })
         .collect::<Vec<_>>();
 
-    relations.sort();
+    relations.sort_by(|left, right| left.0.cmp(&right.0));
 
-    for (field_name, join_column, target_object) in relations {
+    for (field_name, join_column, target_object, was_expanded) in relations {
         if let (Some(target_object), Some(value)) =
             (target_object.as_deref(), record.get_mut(&field_name))
         {
             match value {
                 Value::Object(_) => {
-                    normalize_relation_keys(runner_schema, target_object, value);
+                    normalize_relation_keys(runner_schema, target_object, value, &[]);
                 }
                 Value::Array(items) => {
                     for item in items {
-                        normalize_relation_keys(runner_schema, target_object, item);
+                        normalize_relation_keys(runner_schema, target_object, item, &[]);
                     }
                 }
                 _ => {}
@@ -1344,6 +1379,10 @@ fn normalize_relation_keys(runner_schema: &RunnerSchema, object: &str, record: &
             Value::Array(_) => {
                 record.insert(field_name, value);
             }
+            Value::Null if was_expanded => {
+                record.insert(join_column, Value::Null);
+                record.insert(field_name, Value::Null);
+            }
             scalar => {
                 record.insert(join_column, scalar.clone());
             }
@@ -1356,8 +1395,9 @@ fn shape_rest_record(
     object: &str,
     record: &mut Value,
     picked_fields: Option<&[String]>,
+    expanded: &[NestedRelationSelection],
 ) {
-    normalize_relation_keys(runner_schema, object, record);
+    normalize_relation_keys(runner_schema, object, record, expanded);
 
     if let Some(record) = record.as_object_mut() {
         pick_fields(record, picked_fields);
@@ -1369,9 +1409,10 @@ fn shape_rest_records(
     object: &str,
     records: &mut [Value],
     picked_fields: Option<&[String]>,
+    expanded: &[NestedRelationSelection],
 ) {
     for record in records {
-        shape_rest_record(runner_schema, object, record, picked_fields);
+        shape_rest_record(runner_schema, object, record, picked_fields, expanded);
     }
 }
 
@@ -1722,10 +1763,22 @@ mod tests {
             .expect("build relation fixture schema")
     }
 
+    fn expanded_company() -> Vec<NestedRelationSelection> {
+        vec![NestedRelationSelection {
+            relation_field_name: String::from("company"),
+            selected_field_names: Vec::new(),
+            first: None,
+        }]
+    }
+
     fn shaped(record: &str) -> Value {
+        shaped_with(record, &[])
+    }
+
+    fn shaped_with(record: &str, expanded: &[NestedRelationSelection]) -> Value {
         let schema = relation_fixture_schema();
         let mut record = serde_json::from_str::<Value>(record).expect("record json");
-        normalize_relation_keys(&schema, "person", &mut record);
+        normalize_relation_keys(&schema, "person", &mut record, expanded);
 
         record
     }
@@ -1750,8 +1803,9 @@ mod tests {
 
     #[test]
     fn an_expanded_relation_carries_the_object_and_its_join_key() {
-        let record = shaped(
+        let record = shaped_with(
             r#"{"id": "p1", "company": {"id": "c1", "name": "Acme", "accountOwner": null}}"#,
+            &expanded_company(),
         );
         let object = record.as_object().expect("record object");
         let company = object.get("company").and_then(Value::as_object);
@@ -1784,10 +1838,19 @@ mod tests {
     }
 
     #[test]
+    fn an_expanded_unset_relation_keeps_the_name_and_adds_the_join_key() {
+        let record = shaped_with(r#"{"id": "p1", "company": null}"#, &expanded_company());
+        let object = record.as_object().expect("record object");
+
+        assert_eq!(object.get("companyId"), Some(&Value::Null));
+        assert_eq!(object.get("company"), Some(&Value::Null));
+    }
+
+    #[test]
     fn an_unknown_object_leaves_the_record_untouched() {
         let schema = relation_fixture_schema();
         let mut record = json!({ "id": "p1", "company": null });
-        normalize_relation_keys(&schema, "nope", &mut record);
+        normalize_relation_keys(&schema, "nope", &mut record, &[]);
 
         assert_eq!(record, json!({ "id": "p1", "company": null }));
     }
@@ -1805,6 +1868,7 @@ mod tests {
                 "name".to_string(),
                 "companyId".to_string(),
             ]),
+            &[],
         );
 
         assert_eq!(
