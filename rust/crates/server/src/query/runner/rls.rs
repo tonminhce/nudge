@@ -113,9 +113,19 @@ pub(super) async fn row_access_filter_with_alias(
         member_values: HashMap::new(),
         relation_stack: HashSet::new(),
     };
-    compiler
+    let filter = compiler
         .compile_access(object_name_singular, operation, alias, false)
-        .await
+        .await?;
+    if let Some(compiled) = filter.as_ref() {
+        tracing::debug!(
+            target: "rls",
+            object = object_name_singular,
+            alias,
+            sql = compiled.render(),
+            "row access predicate"
+        );
+    }
+    Ok(filter)
 }
 
 struct AccessCompiler<'a> {
