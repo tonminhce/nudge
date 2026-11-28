@@ -455,7 +455,11 @@ pub fn insert_column_cast(
         return Ok(String::from("::uuid"));
     }
 
-    Ok(String::new())
+    if shape.column(column_name).is_none() {
+        return Ok(String::new());
+    }
+
+    set_column_cast(shape, column_name)
 }
 
 pub fn set_column_cast(shape: &TableShape, column_name: &str) -> Result<String, RepositoryError> {
@@ -1379,10 +1383,42 @@ mod tests {
              \"createdByWorkspaceMemberId\", \"createdByName\", \"createdByContext\", \
              \"updatedBySource\", \"updatedByWorkspaceMemberId\", \"updatedByName\", \
              \"updatedByContext\", \"position\") VALUES ($1, $2::text::\"workspace_0\".\"\
-             person_createdBySource_enum\", $3::uuid, $4, $5, $6::text::\"workspace_0\".\"\
-             person_updatedBySource_enum\", $7::uuid, $8, $9, $10) RETURNING \"id\""
+             person_createdBySource_enum\", $3::uuid, $4, $5::jsonb, $6::text::\"workspace_0\".\"\
+             person_updatedBySource_enum\", $7::uuid, $8, $9::jsonb, $10) RETURNING \"id\""
         );
         assert_eq!(compiled.values.len(), 10);
+    }
+
+    #[test]
+    fn an_insert_casts_relation_json_and_timestamp_columns_by_metadata_type() {
+        let shape = shape_from_fields(vec![
+            ("id", FieldMetadataType::Uuid, None),
+            ("name", FieldMetadataType::Text, None),
+            ("companyId", FieldMetadataType::Uuid, None),
+            ("labels", FieldMetadataType::RawJson, None),
+            ("createdAt", FieldMetadataType::DateTime, None),
+            ("birthday", FieldMetadataType::Date, None),
+        ]);
+        let rows = build_insert_rows(
+            &shape,
+            &[record(
+                "{\"name\": \"Rel\", \"companyId\": null, \"labels\": {\"a\": 1}, \
+                 \"createdAt\": \"2026-01-02T03:04:05.000Z\", \"birthday\": \"2026-01-02\"}",
+            )],
+        )
+        .expect("one row");
+        let execution =
+            build_insert_execution(&shape, &rows, &["id".to_string()], false).expect("execution");
+        let compiled =
+            compile_named_parameters(&execution.sql, &rows.parameters).expect("compiled");
+
+        assert_eq!(
+            compiled.text,
+            "INSERT INTO \"workspace_0\".\"person\" (\"name\", \"companyId\", \"labels\", \
+             \"createdAt\", \"birthday\") VALUES ($1, $2::uuid, $3::jsonb, $4::timestamptz, \
+             $5::date) RETURNING \"id\""
+        );
+        assert_eq!(compiled.values.len(), 5);
     }
 
     #[test]
@@ -1413,8 +1449,8 @@ mod tests {
         assert_eq!(
             tail,
             "$11, $12::text::\"workspace_0\".\"person_createdBySource_enum\", $13::uuid, $14, \
-             $15, $16::text::\"workspace_0\".\"person_updatedBySource_enum\", $17::uuid, $18, \
-             $19, $20) RETURNING \"id\""
+             $15::jsonb, $16::text::\"workspace_0\".\"person_updatedBySource_enum\", $17::uuid, \
+             $18, $19::jsonb, $20) RETURNING \"id\""
         );
         assert!(
             !compiled.text.contains("_enum0"),
