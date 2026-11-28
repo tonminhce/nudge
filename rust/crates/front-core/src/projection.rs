@@ -7,6 +7,8 @@ use serde_json::Value;
 pub struct ObjectMetadata {
     pub name_singular: String,
     pub name_plural: String,
+    #[serde(default)]
+    pub duplicate_criteria: Option<Value>,
     #[serde(default, alias = "fields")]
     pub fields_list: Vec<FieldMetadata>,
 }

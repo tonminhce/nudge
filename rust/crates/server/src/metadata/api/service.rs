@@ -1368,6 +1368,7 @@ pub fn object_dto(object: &FlatObjectMetadata) -> Value {
         "isRemote": object.is_remote,
         "isSystem": object.is_system,
         "isSearchable": object.is_searchable,
+        "duplicateCriteria": object.duplicate_criteria.clone(),
         "isAuditLogged": object.is_audit_logged,
         "isLabelSyncedWithName": object.is_label_synced_with_name,
         "isUIEditable": object.is_ui_editable,

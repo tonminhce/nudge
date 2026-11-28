@@ -255,6 +255,31 @@ pub fn search_query(args: SearchQueryArgs) -> GraphQLDocument {
     GraphQLDocument::new(query, variables)
 }
 
+pub fn find_duplicates_query(
+    object: &ObjectMetadata,
+    ids: Vec<String>,
+) -> Result<GraphQLDocument, QueryBuildError> {
+    validate_object_name(&object.name_singular)?;
+    let singular = pascal_case(&object.name_singular);
+    let projection = project_node(
+        object,
+        ProjectionOptions {
+            depth: 1,
+            include_system_fields: true,
+        },
+    );
+    let mut variables = Map::new();
+    variables.insert(
+        String::from("ids"),
+        Value::Array(ids.into_iter().map(Value::String).collect()),
+    );
+    let query = format!(
+        "query FindDuplicate{singular}($ids: [UUID!]!) {{ {}Duplicates(ids: $ids) {{ edges {{ node {{ {projection} }} cursor }} pageInfo {{ hasNextPage startCursor endCursor }} }} }}",
+        object.name_singular
+    );
+    Ok(GraphQLDocument::new(query, variables))
+}
+
 pub fn pascal_case(name: &str) -> String {
     let mut output = String::new();
     let mut uppercase = true;
@@ -388,6 +413,16 @@ mod tests {
             .contains("pageInfo { endCursor hasNextPage }"));
         assert_eq!(document.variables["limit"], 20);
         assert_eq!(document.variables["after"], "cursor");
+    }
+
+    #[test]
+    fn duplicate_query_uses_the_upstream_connection_list() {
+        let document = find_duplicates_query(&person(), vec![String::from("person-1")]).unwrap();
+        assert_eq!(
+            document.query,
+            "query FindDuplicatePerson($ids: [UUID!]!) { personDuplicates(ids: $ids) { edges { node { id name { firstName lastName } } cursor } pageInfo { hasNextPage startCursor endCursor } } }"
+        );
+        assert_eq!(document.variables["ids"], json!(["person-1"]));
     }
 
     #[test]
