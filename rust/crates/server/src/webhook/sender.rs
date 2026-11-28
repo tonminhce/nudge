@@ -10,6 +10,12 @@ use crate::webhook::signature::{
 
 pub const WEBHOOK_REQUEST_TIMEOUT_MS: u64 = 5_000;
 pub const WEBHOOK_MAX_REDIRECTS: usize = 5;
+pub const SSRF_BLOCKED_ERROR_MESSAGE: &str =
+    "Webhook URL resolves to a private/internal IP address";
+
+pub fn is_ssrf_blocked_error(message: &str) -> bool {
+    message.contains("internal IP address") && message.contains("is not allowed")
+}
 
 pub fn default_webhook_client() -> Client {
     Client::builder()
@@ -63,11 +69,17 @@ pub struct WebhookDeliveryOutcome {
     pub status: Option<u16>,
     pub success: bool,
     pub error: Option<String>,
+    pub ssrf_blocked: bool,
 }
 
 impl WebhookDeliveryOutcome {
-    fn build(request: &WebhookDeliveryRequest, status: Option<u16>, error: Option<String>) -> Self {
+    pub(crate) fn build(
+        request: &WebhookDeliveryRequest,
+        status: Option<u16>,
+        error: Option<String>,
+    ) -> Self {
         let success = matches!(status, Some(code) if (200..300).contains(&code));
+        let ssrf_blocked = error.as_deref().is_some_and(is_ssrf_blocked_error);
 
         Self {
             url: request.target_url.clone(),
@@ -76,7 +88,12 @@ impl WebhookDeliveryOutcome {
             status,
             success,
             error,
+            ssrf_blocked,
         }
+    }
+
+    pub fn event_log_error(&self) -> Option<&str> {
+        self.ssrf_blocked.then_some(SSRF_BLOCKED_ERROR_MESSAGE)
     }
 }
 
@@ -168,6 +185,47 @@ mod tests {
     }
 
     #[test]
+    fn ssrf_recognition_matches_the_upstream_two_marker_test() {
+        assert!(is_ssrf_blocked_error(
+            "requested host resolves to an internal IP address, which is not allowed"
+        ));
+        assert!(!is_ssrf_blocked_error(
+            "requested host resolves to an internal IP address"
+        ));
+        assert!(!is_ssrf_blocked_error("connection refused"));
+        assert_eq!(
+            WebhookDeliveryOutcome::build(
+                &WebhookDeliveryRequest {
+                    target_url: "http://localhost/hook".to_string(),
+                    webhook_id: "w".to_string(),
+                    event_name: "e".to_string(),
+                    secret: None,
+                    payload_json: "{}".to_string(),
+                },
+                None,
+                Some("the internal IP address 10.0.0.1 is not allowed".to_string()),
+            )
+            .event_log_error(),
+            Some(SSRF_BLOCKED_ERROR_MESSAGE)
+        );
+        assert_eq!(
+            WebhookDeliveryOutcome::build(
+                &WebhookDeliveryRequest {
+                    target_url: "http://localhost/hook".to_string(),
+                    webhook_id: "w".to_string(),
+                    event_name: "e".to_string(),
+                    secret: None,
+                    payload_json: "{}".to_string(),
+                },
+                None,
+                Some("dns resolution failed".to_string()),
+            )
+            .event_log_error(),
+            None
+        );
+    }
+
+    #[test]
     fn ensure_absolute_url_prefixes_missing_protocol() {
         assert_eq!(
             ensure_absolute_url("example.com/hook"),
@@ -251,7 +309,7 @@ mod tests {
             signature,
             "the signature must validate against the exact delivered body"
         );
-        assert!(raw.contains("Content-Type: application/json"));
+        assert!(lower.contains("content-type: application/json"));
         assert_eq!(nonce.len(), 32);
         assert!(timestamp.chars().all(|c| c.is_ascii_digit()));
     }

@@ -113,7 +113,7 @@ fn log_webhook_response(workspace_id: &str, outcome: &WebhookDeliveryOutcome) {
         &outcome.event_name,
         outcome.success,
         outcome.status,
-        outcome.error.as_deref(),
+        outcome.event_log_error(),
     );
 
     if outcome.success {
@@ -274,6 +274,26 @@ pub fn install(pool: PgPool, redis: Client) -> bool {
 
 pub fn dispatcher() -> Option<&'static WebhookDispatcher> {
     WEBHOOK_DISPATCHER.get()
+}
+
+pub fn is_installed() -> bool {
+    WEBHOOK_DISPATCHER.get().is_some()
+}
+
+pub fn spawn_record_event_batch(
+    workspace_id: &str,
+    object_metadata_id: &str,
+    object_metadata_name_singular: &str,
+    action: &str,
+    events: Vec<serde_json::Value>,
+) -> bool {
+    spawn_record_event_delivery(RecordEventBatchInput {
+        name: format!("{object_metadata_name_singular}.{action}"),
+        workspace_id: workspace_id.to_string(),
+        object_metadata_id: object_metadata_id.to_string(),
+        object_metadata_name_singular: object_metadata_name_singular.to_string(),
+        events,
+    })
 }
 
 pub fn spawn_record_event_delivery(batch: RecordEventBatchInput) -> bool {
@@ -473,6 +493,7 @@ mod tests {
             status: Some(500),
             success: false,
             error: None,
+            ssrf_blocked: false,
         };
         let properties = build_webhook_response_event_properties(
             &outcome.url,
@@ -480,12 +501,71 @@ mod tests {
             &outcome.event_name,
             outcome.success,
             outcome.status,
-            outcome.error.as_deref(),
+            outcome.event_log_error(),
         );
 
         assert_eq!(
             serde_json::to_string(&properties).expect("the properties serialize"),
-            "{\"status\":500,\"success\":false,\"url\":\"https://target.test/hooks\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.updated\"}"
+            "{\"success\":false,\"url\":\"https://target.test/hooks\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.updated\",\"status\":500}"
+        );
+    }
+
+    #[test]
+    fn a_transport_failure_reports_no_error_field_like_upstream() {
+        let outcome = WebhookDeliveryOutcome {
+            url: "https://target.test/hooks".to_string(),
+            webhook_id: "webhook-1".to_string(),
+            event_name: "person.updated".to_string(),
+            status: None,
+            success: false,
+            error: Some("error sending request for url (https://target.test/hooks)".to_string()),
+            ssrf_blocked: false,
+        };
+        let properties = build_webhook_response_event_properties(
+            &outcome.url,
+            &outcome.webhook_id,
+            &outcome.event_name,
+            outcome.success,
+            outcome.status,
+            outcome.event_log_error(),
+        );
+
+        assert_eq!(
+            serde_json::to_string(&properties).expect("the properties serialize"),
+            "{\"success\":false,\"url\":\"https://target.test/hooks\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.updated\"}"
+        );
+    }
+
+    #[test]
+    fn an_ssrf_blocked_delivery_reports_the_upstream_error_sentence() {
+        let outcome = WebhookDeliveryOutcome::build(
+            &WebhookDeliveryRequest {
+                target_url: "http://169.254.169.254/latest/meta-data".to_string(),
+                webhook_id: "webhook-1".to_string(),
+                event_name: "person.updated".to_string(),
+                secret: None,
+                payload_json: "{}".to_string(),
+            },
+            None,
+            Some(
+                "requested host resolves to an internal IP address which is not allowed"
+                    .to_string(),
+            ),
+        );
+        let properties = build_webhook_response_event_properties(
+            &outcome.url,
+            &outcome.webhook_id,
+            &outcome.event_name,
+            outcome.success,
+            outcome.status,
+            outcome.event_log_error(),
+        );
+
+        assert!(outcome.ssrf_blocked);
+        assert!(!outcome.success);
+        assert_eq!(
+            serde_json::to_string(&properties).expect("the properties serialize"),
+            "{\"success\":false,\"url\":\"http://169.254.169.254/latest/meta-data\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.updated\",\"error\":\"Webhook URL resolves to a private/internal IP address\"}"
         );
     }
 }

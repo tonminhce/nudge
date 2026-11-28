@@ -678,13 +678,12 @@ async fn execute_workspace(
                 .and_then(Value::as_str)
                 .and_then(|id| Uuid::parse_str(id).ok())
                 .ok_or_else(record_not_found_graphql_error)?;
-            let workspace_id = runner_schema
+            let object_model = runner_schema
                 .object(&resolver.object_name_singular)
-                .map_err(runner_graphql_error)?
-                .object
-                .workspace_id;
+                .map_err(runner_graphql_error)?;
             state.event_streams.publish_record(
-                workspace_id,
+                object_model.object.workspace_id,
+                object_model.object.id,
                 "created",
                 &resolver.object_name_singular,
                 &id.to_string(),
@@ -771,13 +770,12 @@ async fn execute_workspace(
                 snapshot.after.as_ref(),
             )
             .unwrap_or_else(|| json!({"before": snapshot.before, "after": snapshot.after}));
-            let workspace_id = runner_schema
+            let object_model = runner_schema
                 .object(&resolver.object_name_singular)
-                .map_err(runner_graphql_error)?
-                .object
-                .workspace_id;
+                .map_err(runner_graphql_error)?;
             state.event_streams.publish_record(
-                workspace_id,
+                object_model.object.workspace_id,
+                object_model.object.id,
                 "deleted",
                 &resolver.object_name_singular,
                 &id.to_string(),
@@ -1474,13 +1472,12 @@ async fn mutate_existing_record(
     if let Some(properties) =
         crate::events::record_mutation_properties(&snapshot.before, snapshot.after.as_ref())
     {
-        let workspace_id = runner_schema
+        let object_model = runner_schema
             .object(&resolver.object_name_singular)
-            .map_err(runner_graphql_error)?
-            .object
-            .workspace_id;
+            .map_err(runner_graphql_error)?;
         state.event_streams.publish_record(
-            workspace_id,
+            object_model.object.workspace_id,
+            object_model.object.id,
             action,
             &resolver.object_name_singular,
             &id.to_string(),

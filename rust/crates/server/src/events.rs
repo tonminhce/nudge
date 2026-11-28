@@ -256,6 +256,7 @@ impl EventStreamRegistry {
     pub fn publish_record(
         &self,
         workspace_id: Uuid,
+        object_metadata_id: Uuid,
         action: &str,
         object_name_singular: &str,
         record_id: &str,
@@ -263,6 +264,21 @@ impl EventStreamRegistry {
         schema: &dyn SnapshotFilterSchema,
         actor: Option<&ActorContext>,
     ) {
+        if crate::webhook::service::is_installed() {
+            let (user_id, workspace_member_id) = actor_ids(actor);
+            let event = json!({
+                "userId": user_id,
+                "workspaceMemberId": workspace_member_id,
+                "properties": properties,
+            });
+            crate::webhook::service::spawn_record_event_batch(
+                &workspace_id.to_string(),
+                &object_metadata_id.to_string(),
+                object_name_singular,
+                action,
+                vec![event],
+            );
+        }
         let streams = self.streams.lock().expect("event stream registry");
         for ((stream_workspace_id, event_stream_id), stream) in streams.iter() {
             if *stream_workspace_id != workspace_id {
@@ -520,6 +536,7 @@ mod tests {
 
         registry.publish_record(
             workspace_id,
+            Uuid::new_v4(),
             "updated",
             "person",
             "person-1",
@@ -548,6 +565,7 @@ mod tests {
         assert!(registry.remove_query(workspace_id, "stream-1", &user, "people-query"));
         registry.publish_record(
             workspace_id,
+            Uuid::new_v4(),
             "updated",
             "person",
             "person-1",
@@ -612,6 +630,7 @@ mod tests {
         ));
         registry.publish_record(
             workspace_id,
+            Uuid::new_v4(),
             "updated",
             "person",
             "person-1",

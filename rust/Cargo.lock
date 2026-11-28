@@ -2054,6 +2054,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "webpki-roots 0.26.11",
 ]

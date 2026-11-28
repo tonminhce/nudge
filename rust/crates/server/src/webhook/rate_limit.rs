@@ -220,7 +220,7 @@ pub fn build_webhook_response_event_properties(
 ) -> Value {
     let mut properties = Map::new();
 
-    if error.is_none() {
+    if success {
         if let Some(status) = status {
             properties.insert("status".to_string(), json!(status));
         }
@@ -234,7 +234,7 @@ pub fn build_webhook_response_event_properties(
     properties.insert("webhookId".to_string(), json!(webhook_id));
     properties.insert("eventName".to_string(), json!(event_name));
 
-    if error.is_some() {
+    if !success {
         if let Some(status) = status {
             properties.insert("status".to_string(), json!(status));
         }
@@ -328,7 +328,24 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&properties).unwrap(),
-            "{\"status\":500,\"success\":false,\"url\":\"https://example.com/hook\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.created\"}"
+            "{\"success\":false,\"url\":\"https://example.com/hook\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.created\",\"status\":500}"
+        );
+    }
+
+    #[test]
+    fn webhook_response_success_variant_leads_with_status() {
+        let properties = build_webhook_response_event_properties(
+            "https://example.com/hook",
+            "webhook-1",
+            "person.created",
+            true,
+            Some(204),
+            None,
+        );
+
+        assert_eq!(
+            serde_json::to_string(&properties).unwrap(),
+            "{\"status\":204,\"success\":true,\"url\":\"https://example.com/hook\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.created\"}"
         );
     }
 

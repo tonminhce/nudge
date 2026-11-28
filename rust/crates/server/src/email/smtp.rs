@@ -284,7 +284,7 @@ pub async fn send(
     options: &SmtpTransportOptions,
     message: &SendMailOptions,
 ) -> Result<(), SmtpError> {
-    let mut socket = TcpStream::connect((options.host.as_str(), options.port)).await?;
+    let socket = TcpStream::connect((options.host.as_str(), options.port)).await?;
     socket.set_nodelay(true).ok();
 
     let mut stream = if options.secure {
