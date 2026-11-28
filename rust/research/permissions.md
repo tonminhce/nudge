@@ -731,6 +731,66 @@ severity remaining permission gap in the default self-host configuration, and it
 port. Search must apply the same exclusion in its default branch, and the record-read path must run
 the handler registry after RLS.
 
+### 2.11 RLS criteria on the record API plane (measured against the live reference, 2026-11-28)
+
+Harness: `rust/tools/access-group-parity.py`. It provisions a role, per-object grants and a
+predicate-group rule with direct SQL against the shared `twenty_ref` database, then deletes every
+Redis key matching the workspace id so the reference container rebuilds its workspace cache — no
+server restart is needed on the reference side. Because Nudge's permission cache is in-process
+(`crates/server/src/permissions/mod.rs:29-80`) and is only version-bumped by
+`metadata::cache::invalidate_workspace_maps`, Nudge must be compared from a **freshly started**
+process; `tools/run-same-db-server.py` now takes `NUDGE_NODE_PORT` so a probe instance can run on
+:3002 beside the :3000 dev server. A warm :3000 returned a stale denial for a state the reference
+served normally, which is why the harness reports each server separately.
+
+Measured on the isolated fixture workspace (`--signup ag`, three companies):
+
+- **Rule on a non-default role → the reference denies the whole collection read.** A role whose
+  Company read comes from `core."objectPermission"` rows plus one read-criteria rule returns
+  `errors[0].extensions.subCode = PERMISSION_DENIED`, message "Entity performing the request does
+  not have permission", for `companies(first: N)`. A cold Nudge returns all three rows. That
+  difference is the open item, not a reporting artefact.
+- **Rule on the workspace default role → both servers return all rows unfiltered.** Attaching the
+  same rule to the role with `canReadAllObjectRecords = true` produced `visible n=3` on the reference
+  and on cold Nudge, so criteria rules do not narrow the collection read of an all-records role on
+  this plane. Nudge already agrees here.
+
+Upstream decision chain for the first case: `isObjectOperationDeniedToPrincipals`
+(`engine/permissions/internal/combine/utils/is-object-operation-denied-to-principals.util.ts:8-13`)
+is an `||` whose left term is `!areLimitingRolesAccessingAllRecords`
+(`internal/role/utils/are-limiting-roles-accessing-all-records.util.ts:12-43`), which requires every
+limiting role's `canReadAllRecords` (`twenty-shared/src/utils/canAccessThroughAllRecordsPermission.ts:22-28`)
+to hold. Which ids count as limiting is `getPermissionsPrincipalsLimitingRoleIds`
+(`internal/principal/utils/get-permissions-principals-limiting-role-ids.util.ts:7-25`). So on the
+record API plane a criteria-limited limiting role is denied rather than filtered; row filtering is
+reached through `filterGrantedRecordIds`/`buildReadRecordsAccessSQLCondition`
+(`record-permissions-read.service.ts:245-264`, `:340-349`) and the per-record/related-path callers,
+not through the collection query. The denial path, and the whole predicate-group read model, sits
+behind `/* @license Enterprise */` headers.
+
+Predicate creation is unreachable in the default configuration, which bounds how far this can be
+verified end to end: `row-level-permission-predicate.service.ts:515-525`
+(`/* @license Enterprise */` header at line 1) requires `enterprisePlanService.isValid()` **and**
+`billingService.hasEntitlement(workspaceId, BillingEntitlementKey.RLS)` before `hasRowLevelPermissionFeatureOrThrow`
+(`:527-537`) lets `upsertRowLevelPermissionRules` (`engine/metadata-modules/role/role.resolver.ts:311-324`)
+write anything, and the same check short-cuts predicate loading to `[]` (`:55-59`). Calling that
+mutation against the reference container returns `ROW_LEVEL_PERMISSION_FEATURE_DISABLED`
+(`subCode`, `code: FORBIDDEN`). Any RLS rule state therefore has to be provisioned at the database
+level, exactly as the harness does; there is no reference-API path to compare against on a
+self-hosted Apache install.
+
+Fixture shape that the reference actually reads (wrong shapes silently deny):
+`core."rowLevelPermissionPredicateGroup"` carries `logicalOperator`,
+`positionInRowLevelPermissionPredicateGroup`, `rowLevelPermissionRuleId` and the `canRead/canCreate/
+canUpdate/canSoftDelete/canDestroyRecords` decisions, and `core."rowLevelPermissionPredicate"` rows
+hang off `rowLevelPermissionPredicateGroupId`. A predicate written with only
+`rowLevelPermissionRuleId` and no group row leaves the rule with no criteria and denies the read —
+that cost a false "both servers deny" match before the group insert was added. `core.role` rows for
+non-default roles must also carry `objectPermission` rows: the default Admin role in a workspace
+created by `crates/server/src/auth/service.rs:169-196` has none and relies on the
+`can*AllObjectRecords` booleans, so cloning a role by copying only booleans revokes everything.
+
+
 ---
 
 ## 3. Field-level semantics

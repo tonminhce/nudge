@@ -156,11 +156,12 @@ the live reference in the browser.
 ## What is left, in order
 
 1. Channel-visibility field redaction (Apache, leaks mail bodies today) and the record-plane gaps: destructive merge, file-backed Search images, full SSE events and hooks.
-2. Permissions P4–P5 follow-ups: read `IS_PERMISSION_TABLES_ENABLED` before the permission DDL, and give non-company objects the same access-group treatment when their rules exist.
-2. Frontend exact parity: production Dialog/Popover/Menu/Tabs contracts, record index/show surfaces, contextual command menu, routed side panel and settings leaves.
-3. Wave 6: webhooks, files, SMTP email, search/import/export, timeline, favorites, notes/tasks.
-4. Wave 7: queues, workflows, messaging/calendar sync, AI agents, MCP, billing and the remaining platform features.
-5. Full-app live UI/behavior/performance verification against Twenty 2.61.0 before cutover.
+2. RLS criteria on the record plane: a non-default role that carries a read-criteria rule must be denied the collection read the way 2.61.0 denies it, while the all-records role must stay unfiltered — see [research/permissions.md](research/permissions.md) §2.11 for the measured pair and the harness.
+3. Permissions P4–P5 follow-ups: read `IS_PERMISSION_TABLES_ENABLED` before the permission DDL, and give non-company objects the same access-group treatment when their rules exist.
+4. Frontend exact parity: production Dialog/Popover/Menu/Tabs contracts, record index/show surfaces, contextual command menu, routed side panel and settings leaves.
+5. Wave 6: webhooks, files, SMTP email, record field validation, search/import/export, timeline, favorites, notes/tasks.
+6. Wave 7: queues, workflows, messaging/calendar sync, AI agents, MCP, billing and the remaining platform features.
+7. Full-app live UI/behavior/performance verification against Twenty 2.61.0 before cutover.
 
 The upstream is roughly 1.8M lines across 25,000 files. A faithful port is a multi-session
 program; the waves in [MAP.md](MAP.md) are ordered so that every wave leaves a usable server.
