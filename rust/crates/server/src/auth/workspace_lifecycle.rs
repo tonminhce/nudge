@@ -1187,6 +1187,9 @@ async fn activate_workspace(
         return Err(AuthError::internal(error.message));
     }
 
+    crate::metadata::cache::invalidate_workspace_maps(&state, workspace_id).await;
+    crate::metadata::cache::rebuild_access_groups_after_invalidation(&state, workspace_id).await;
+
     Ok(Json(json!({
         "workspace": {
             "id": workspace_id,

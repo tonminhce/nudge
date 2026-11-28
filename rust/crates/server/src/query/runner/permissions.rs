@@ -20,6 +20,11 @@ pub(crate) fn validate_read(
     model: &ObjectModel,
     columns: &[ColumnShape],
 ) -> Result<(), RunnerError> {
+    if schema.denies_company_overlays(&model.object.name_singular) {
+        return Err(RunnerError::permission_denied(
+            "Entity performing the request does not have permission",
+        ));
+    }
     let Some(permissions) = schema.records_permissions() else {
         return Ok(());
     };
@@ -44,6 +49,11 @@ pub(crate) fn validate_named_read(
     model: &ObjectModel,
     field_names: &[String],
 ) -> Result<(), RunnerError> {
+    if schema.denies_company_overlays(&model.object.name_singular) {
+        return Err(RunnerError::permission_denied(
+            "Entity performing the request does not have permission",
+        ));
+    }
     let Some(permissions) = schema.records_permissions() else {
         return Ok(());
     };
@@ -94,6 +104,11 @@ pub(crate) fn validate_write(
     data: &Map<String, Value>,
     returning_fields: &[String],
 ) -> Result<(), RunnerError> {
+    if schema.denies_company_overlays(&model.object.name_singular) {
+        return Err(RunnerError::permission_denied(
+            "Entity performing the request does not have permission",
+        ));
+    }
     let Some(permissions) = schema.records_permissions() else {
         return Ok(());
     };

@@ -1425,12 +1425,12 @@ mod db_tests {
         let person_physical_set: HashSet<&str> = person_physical
             .iter()
             .map(String::as_str)
-            .filter(|name| *name != "_accessGroupIds" && *name != "_isPrivate")
+            .filter(|name| !name.starts_with("_accessGroup") && *name != "_isPrivate")
             .collect();
         let company_physical_set: HashSet<&str> = company_physical
             .iter()
             .map(String::as_str)
-            .filter(|name| *name != "_accessGroupIds" && *name != "_isPrivate")
+            .filter(|name| !name.starts_with("_accessGroup") && *name != "_isPrivate")
             .collect();
 
         assert_eq!(

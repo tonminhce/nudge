@@ -787,12 +787,20 @@ pub async fn load_workspace_flat_maps(
     pool: &sqlx::PgPool,
     workspace_id: Uuid,
 ) -> MetadataResult<FlatWorkspaceMaps> {
-    let object_rows = load_object_metadata_rows(pool, workspace_id).await?;
-    let field_rows = load_field_metadata_rows(pool, workspace_id).await?;
-    let index_rows = load_index_metadata_rows(pool, workspace_id).await?;
-    let index_field_rows = load_index_field_metadata_rows(pool, workspace_id).await?;
-    let option_rows = load_field_metadata_option_rows(pool, workspace_id).await?;
-    let search_field_rows = load_search_field_metadata_rows(pool, workspace_id).await?;
+    let mut connection = pool.acquire().await?;
+    load_workspace_flat_maps_with_executor(&mut connection, workspace_id).await
+}
+
+pub async fn load_workspace_flat_maps_with_executor(
+    connection: &mut sqlx::PgConnection,
+    workspace_id: Uuid,
+) -> MetadataResult<FlatWorkspaceMaps> {
+    let object_rows = load_object_metadata_rows(&mut *connection, workspace_id).await?;
+    let field_rows = load_field_metadata_rows(&mut *connection, workspace_id).await?;
+    let index_rows = load_index_metadata_rows(&mut *connection, workspace_id).await?;
+    let index_field_rows = load_index_field_metadata_rows(&mut *connection, workspace_id).await?;
+    let option_rows = load_field_metadata_option_rows(&mut *connection, workspace_id).await?;
+    let search_field_rows = load_search_field_metadata_rows(&mut *connection, workspace_id).await?;
 
     assemble_workspace_maps(WorkspaceMetadataRows {
         object_metadata: object_rows,
@@ -805,7 +813,7 @@ pub async fn load_workspace_flat_maps(
 }
 
 async fn load_object_metadata_rows(
-    pool: &sqlx::PgPool,
+    connection: &mut sqlx::PgConnection,
     workspace_id: Uuid,
 ) -> MetadataResult<Vec<ObjectMetadataRow>> {
     let rows = sqlx::query_as::<_, ObjectMetadataRow>(
@@ -822,14 +830,14 @@ async fn load_object_metadata_rows(
          FROM core.\"objectMetadata\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await?;
 
     Ok(rows)
 }
 
 async fn load_field_metadata_rows(
-    pool: &sqlx::PgPool,
+    connection: &mut sqlx::PgConnection,
     workspace_id: Uuid,
 ) -> MetadataResult<Vec<FieldMetadataRow>> {
     let rows = sqlx::query_as::<_, FieldMetadataRow>(
@@ -843,14 +851,14 @@ async fn load_field_metadata_rows(
          FROM core.\"fieldMetadata\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await?;
 
     Ok(rows)
 }
 
 async fn load_index_metadata_rows(
-    pool: &sqlx::PgPool,
+    connection: &mut sqlx::PgConnection,
     workspace_id: Uuid,
 ) -> MetadataResult<Vec<IndexMetadataRow>> {
     let rows = sqlx::query_as::<_, IndexMetadataRow>(
@@ -860,14 +868,14 @@ async fn load_index_metadata_rows(
          FROM core.\"indexMetadata\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await?;
 
     Ok(rows)
 }
 
 async fn load_index_field_metadata_rows(
-    pool: &sqlx::PgPool,
+    connection: &mut sqlx::PgConnection,
     workspace_id: Uuid,
 ) -> MetadataResult<Vec<IndexFieldMetadataRow>> {
     let rows = sqlx::query_as::<_, IndexFieldMetadataRow>(
@@ -876,14 +884,14 @@ async fn load_index_field_metadata_rows(
          FROM core.\"indexFieldMetadata\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await?;
 
     Ok(rows)
 }
 
 async fn load_field_metadata_option_rows(
-    pool: &sqlx::PgPool,
+    connection: &mut sqlx::PgConnection,
     workspace_id: Uuid,
 ) -> MetadataResult<Vec<FieldMetadataOptionRow>> {
     let rows = sqlx::query_as::<_, FieldMetadataOptionRow>(
@@ -893,14 +901,14 @@ async fn load_field_metadata_option_rows(
          FROM core.\"fieldMetadataOption\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await?;
 
     Ok(rows)
 }
 
 async fn load_search_field_metadata_rows(
-    pool: &sqlx::PgPool,
+    connection: &mut sqlx::PgConnection,
     workspace_id: Uuid,
 ) -> MetadataResult<Vec<SearchFieldMetadataRow>> {
     let rows = sqlx::query_as::<_, SearchFieldMetadataRow>(
@@ -910,7 +918,7 @@ async fn load_search_field_metadata_rows(
          FROM core.\"searchFieldMetadata\" WHERE \"workspaceId\" = $1",
     )
     .bind(workspace_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await?;
 
     Ok(rows)

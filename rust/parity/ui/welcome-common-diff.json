@@ -1,0 +1,41 @@
+{
+  "matched": true,
+  "tolerance": 0,
+  "visualOnly": true,
+  "ignored": [
+    "document.title",
+    "document.url"
+  ],
+  "capture": {
+    "reference": {
+      "selectors": {
+        "body": "body",
+        "form": "form",
+        "input": "form input",
+        "button": "form button",
+        "privacy": "a[href*=\"privacy\"]",
+        "terms": "a[href*=\"terms\"]"
+      },
+      "settleMs": 700,
+      "screenshot": true,
+      "format": "png",
+      "fullPage": false
+    },
+    "nudge": {
+      "selectors": {
+        "body": "body",
+        "form": "form",
+        "input": "form input",
+        "button": "form button",
+        "privacy": "a[href*=\"privacy\"]",
+        "terms": "a[href*=\"terms\"]"
+      },
+      "settleMs": 700,
+      "screenshot": true,
+      "format": "png",
+      "fullPage": false
+    }
+  },
+  "differenceCount": 0,
+  "differences": []
+}

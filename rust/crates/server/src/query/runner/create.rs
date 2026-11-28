@@ -85,6 +85,7 @@ pub async fn create_many(
         object_name_singular,
         crate::permissions::ObjectRecordsOperationType::Create,
     )?;
+    let recompute_access_groups = schema.requires_access_group_recompute(object_name_singular);
     if args.upsert {
         let mut ids = vec![None; records.len()];
         let mut pending = Vec::new();
@@ -105,17 +106,42 @@ pub async fn create_many(
                 .iter()
                 .map(|(_, record)| record.clone())
                 .collect::<Vec<_>>();
-            let inserted = if validate_rls {
+            let inserted = if validate_rls || recompute_access_groups {
                 let mut transaction = pool.begin().await.map_err(RunnerError::database)?;
+                if recompute_access_groups {
+                    crate::permissions::access_group::lock_company_access_groups(
+                        &mut transaction,
+                        schema,
+                    )
+                    .await
+                    .map_err(|error| {
+                        RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
+                    })?;
+                }
                 let inserted = insert_records(&mut *transaction, &model.shape, &records).await?;
-                validate_created_rows(
-                    &mut *transaction,
-                    pool,
-                    schema,
-                    object_name_singular,
-                    &inserted,
-                )
-                .await?;
+                if validate_rls {
+                    validate_created_rows(
+                        &mut *transaction,
+                        pool,
+                        schema,
+                        object_name_singular,
+                        &inserted,
+                    )
+                    .await?;
+                }
+                if recompute_access_groups {
+                    crate::permissions::access_group::recompute_after_write(
+                        pool,
+                        &mut transaction,
+                        schema,
+                        object_name_singular,
+                        &inserted,
+                    )
+                    .await
+                    .map_err(|error| {
+                        RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
+                    })?;
+                }
                 transaction.commit().await.map_err(RunnerError::database)?;
                 inserted
             } else {
@@ -132,10 +158,33 @@ pub async fn create_many(
             .collect();
     }
 
-    if validate_rls {
+    if validate_rls || recompute_access_groups {
         let mut transaction = pool.begin().await.map_err(RunnerError::database)?;
+        if recompute_access_groups {
+            crate::permissions::access_group::lock_company_access_groups(&mut transaction, schema)
+                .await
+                .map_err(|error| {
+                    RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
+                })?;
+        }
         let ids = insert_records(&mut *transaction, &model.shape, &records).await?;
-        validate_created_rows(&mut *transaction, pool, schema, object_name_singular, &ids).await?;
+        if validate_rls {
+            validate_created_rows(&mut *transaction, pool, schema, object_name_singular, &ids)
+                .await?;
+        }
+        if recompute_access_groups {
+            crate::permissions::access_group::recompute_after_write(
+                pool,
+                &mut transaction,
+                schema,
+                object_name_singular,
+                &ids,
+            )
+            .await
+            .map_err(|error| {
+                RunnerError::new("ACCESS_GROUP_RECOMPUTE_FAILED", error.to_string())
+            })?;
+        }
         transaction.commit().await.map_err(RunnerError::database)?;
         Ok(ids)
     } else {

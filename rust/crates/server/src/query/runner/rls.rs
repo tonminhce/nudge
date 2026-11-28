@@ -42,6 +42,26 @@ pub async fn row_access_filter(
         operation,
         object_name_singular,
         suffixes,
+        true,
+    )
+    .await
+}
+
+pub async fn row_write_access_filter(
+    pool: &PgPool,
+    schema: &RunnerSchema,
+    object_name_singular: &str,
+    operation: ObjectRecordsOperationType,
+    suffixes: &mut Suffixes,
+) -> Result<Option<CompiledFilter>, RunnerError> {
+    row_access_filter_with_alias(
+        pool,
+        schema,
+        object_name_singular,
+        operation,
+        object_name_singular,
+        suffixes,
+        false,
     )
     .await
 }
@@ -53,7 +73,38 @@ pub(super) async fn row_access_filter_with_alias(
     operation: ObjectRecordsOperationType,
     alias: &str,
     suffixes: &mut Suffixes,
+    allow_company_access_groups: bool,
 ) -> Result<Option<CompiledFilter>, RunnerError> {
+    let model = schema.object(object_name_singular)?;
+    if operation == ObjectRecordsOperationType::Read && model.object.name_singular == "company" {
+        if schema.denies_company_overlays(object_name_singular) {
+            return Ok(Some(unsatisfiable_filter()));
+        }
+        let all_records = schema
+            .records_permissions()
+            .and_then(|permissions| permissions.object(model.object.id))
+            .is_some_and(|object| object.can_read_all_records);
+        if !all_records && allow_company_access_groups {
+            if let Some(compact_ids) = schema.company_access_group_ids() {
+                let ids = compact_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Ok(Some(CompiledFilter {
+                    clauses: vec![WhereClause::sql(
+                        JoinOp::And,
+                        format!(
+                            "{}.{} && CAST(ARRAY[{ids}] AS integer[])",
+                            quote_identifier(alias)?,
+                            quote_identifier("_accessGroupIds")?
+                        ),
+                    )],
+                    params: Vec::new(),
+                }));
+            }
+        }
+    }
     let mut compiler = AccessCompiler {
         pool,
         schema,
@@ -304,16 +355,16 @@ impl AccessCompiler<'_> {
             })
             .transpose()
             .map_err(invalid)?;
-        let raw_filter = (top_level_filter.is_none() && !full_name)
-            .then(|| {
-                operand_filter(
-                    field.field_type,
-                    operand,
-                    sub_field_name.as_deref(),
-                    value.clone(),
-                )
-            })
-            .transpose()?;
+        let raw_filter = if top_level_filter.is_none() && !full_name {
+            Some(operand_filter(
+                field.field_type,
+                operand,
+                sub_field_name.as_deref(),
+                value.clone(),
+            )?)
+        } else {
+            None
+        };
         if let Some(relation_field_id) = relation_field_id {
             return self
                 .compile_relation_predicate(
@@ -564,6 +615,59 @@ pub fn requires_row_access(
             .any(|rule| rule_allows(rule, operation)))
 }
 
+pub(crate) fn row_level_rule_supported(
+    schema: &RunnerSchema,
+    object_name: &str,
+    rule: &RowLevelRecordsPermissions,
+) -> bool {
+    let Ok(model) = schema.object(object_name) else {
+        return false;
+    };
+    rule.predicates.iter().all(|predicate| {
+        if optional_uuid(predicate, "relationFieldMetadataId").is_ok_and(|value| value.is_some())
+            || optional_uuid(predicate, "workspaceMemberRelationFieldMetadataId")
+                .is_ok_and(|value| value.is_some())
+        {
+            return false;
+        }
+        let (Ok(field_id), Ok(operand)) = (
+            required_uuid(predicate, "fieldMetadataId"),
+            required_string(predicate, "operand"),
+        ) else {
+            return false;
+        };
+        let sub_field = optional_string(predicate, "subFieldName");
+        if optional_uuid(predicate, "workspaceMemberFieldMetadataId")
+            .is_ok_and(|value| value.is_some())
+            && matches!(operand, "IS_EMPTY" | "IS_NOT_EMPTY")
+        {
+            return false;
+        }
+        schema.field_metadata(field_id).is_some_and(|field| {
+            field.object_metadata_id == model.object.id
+                && operand_supported(field.field_type, operand, sub_field.as_deref())
+        })
+    })
+}
+
+pub(crate) async fn compile_access_group_rule(
+    pool: &PgPool,
+    schema: &RunnerSchema,
+    object_name: &str,
+    rule: &RowLevelRecordsPermissions,
+    alias: &str,
+    suffixes: &mut Suffixes,
+) -> Result<CompiledFilter, RunnerError> {
+    let mut compiler = AccessCompiler {
+        pool,
+        schema,
+        suffixes,
+        member_values: HashMap::new(),
+        relation_stack: HashSet::new(),
+    };
+    compiler.compile_rule(object_name, alias, rule).await
+}
+
 pub async fn validate_created_rows<'e, E>(
     executor: E,
     pool: &PgPool,
@@ -574,7 +678,7 @@ pub async fn validate_created_rows<'e, E>(
 where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
-    let Some(access) = row_access_filter(
+    let Some(access) = row_write_access_filter(
         pool,
         schema,
         object_name_singular,
@@ -773,6 +877,27 @@ fn operand_supported(
     }
 }
 
+fn view_filter_value(field_type: FieldMetadataType, value: Value) -> Value {
+    if value.is_string()
+        || !matches!(
+            field_type,
+            FieldMetadataType::Text
+                | FieldMetadataType::RichText
+                | FieldMetadataType::Position
+                | FieldMetadataType::RawJson
+                | FieldMetadataType::Files
+                | FieldMetadataType::Array
+                | FieldMetadataType::FullName
+                | FieldMetadataType::Emails
+                | FieldMetadataType::Phones
+                | FieldMetadataType::Links
+        )
+    {
+        return value;
+    }
+    Value::String(serde_json::to_string(&value).expect("JSON value serializes"))
+}
+
 fn operand_filter(
     field_type: FieldMetadataType,
     operand: &str,
@@ -840,6 +965,19 @@ fn operand_filter(
             empty
         });
     }
+    let set_field = matches!(
+        field_type,
+        FieldMetadataType::Select
+            | FieldMetadataType::MultiSelect
+            | FieldMetadataType::Uuid
+            | FieldMetadataType::Relation
+            | FieldMetadataType::MorphRelation
+    );
+    let value = if set_field {
+        value
+    } else {
+        view_filter_value(field_type, value)
+    };
     let operator = match operand {
         "IS" => "eq",
         "IS_NOT" => "neq",
@@ -915,14 +1053,6 @@ fn operand_filter(
             )))
         }
     };
-    let set_field = matches!(
-        field_type,
-        FieldMetadataType::Select
-            | FieldMetadataType::MultiSelect
-            | FieldMetadataType::Uuid
-            | FieldMetadataType::Relation
-            | FieldMetadataType::MorphRelation
-    );
     if set_field && operand == "IS_NOT" {
         return Ok(json!({ "not": { "in": as_array(value) } }));
     }
@@ -1002,18 +1132,23 @@ fn morph_relation_filter(
 }
 
 fn full_name_filter(field_name: &str, operand: &str, value: Value) -> Result<Value, RunnerError> {
-    if operand != "CONTAINS" {
+    if operand != "CONTAINS" && operand != "IS" {
         return Err(invalid(
             "Full-name row-level predicates require a sub field",
         ));
     }
-    let pattern = contains_pattern(value)?;
-    Ok(json!({
-        "or": [
-            { (field_name): { "firstName": { "ilike": pattern } } },
-            { (field_name): { "lastName": { "ilike": pattern } } }
-        ]
-    }))
+    let filter = if operand == "CONTAINS" {
+        let pattern = contains_pattern(value)?;
+        json!({
+            "or": [
+                { (field_name): { "firstName": { "ilike": pattern } } },
+                { (field_name): { "lastName": { "ilike": pattern } } }
+            ]
+        })
+    } else {
+        json!({ (field_name): { "eq": value } })
+    };
+    Ok(filter)
 }
 
 fn with_sub_field(field_name: &str, sub_field_name: Option<&str>, filter: Value) -> Value {

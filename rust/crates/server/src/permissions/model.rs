@@ -263,6 +263,10 @@ pub struct RoleRecordsPermissions {
     pub can_read_some_records: bool,
     #[serde(skip)]
     pub relation_hop_enabled: bool,
+    #[serde(skip)]
+    pub(crate) company_access: Option<super::access_group::CompanyAccessStrategy>,
+    #[serde(skip)]
+    pub(crate) company_access_group_ids: Option<Vec<i32>>,
 }
 
 impl RoleRecordsPermissions {
@@ -282,6 +286,7 @@ pub struct WorkspacePermissionSet {
     pub object_ids: BTreeSet<Uuid>,
     pub object_order: Vec<Uuid>,
     pub feature_flags: HashMap<String, bool>,
+    pub company_object_id: Option<Uuid>,
 }
 
 impl WorkspacePermissionSet {

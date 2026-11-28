@@ -12,7 +12,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 |---|---|---|
 | A. Data model and metadata engine | ~15k LOC server, 5.8k LOC UI | **part** (seeding, DDL runner, metadata CRUD API and deferred queue merged; validation rules and UI editors remain) |
 | B. Record APIs (GraphQL, REST, query runner) | ~30k LOC server | **part** (find/create/update/delete/restore, pagination, groupBy/aggregate, dynamic GraphQL, REST, Search and duplicate detection implemented; destructive merge, file-backed Search images, advanced access groups, full SSE and hooks remain) |
-| C. Auth and access control | ~12k LOC server | **part** (wave 2 and P1–P3 landed; object/field enforcement, transactional update RLS and feature-gated relation-hop RLS are implemented; access-group synchronization, sharing and the remaining permission surfaces are open) |
+| C. Auth and access control | ~12k LOC server | **part** (wave 2 and P1–P3 landed; object/field enforcement, transactional update RLS, feature-gated relation-hop RLS and company access-group materialization are implemented; sharing, propagation plans and the remaining permission surfaces are open) |
 | D. Web interface (Leptos) | ~330k LOC React | **part** (front-core, design system, app shell and core record surfaces landed; exact full-feature UI parity and the remaining product screens are open) |
 | E. Automations and integrations | ~60k LOC server | todo |
 | F. Platform and operations | ~10k LOC | **part** |
@@ -61,7 +61,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | `deleteOne` (soft), `destroyOne`, `restoreMany` | **done** | 4 | soft-delete visibility, destroy and restore envelopes match live |
 | `groupBy` and aggregates | **done** | 4 | aggregate runner + group-by E2E and native tests |
 | Full text search | **part** | 4→6 | cross-object ranking, filters, cursors, CJK fallback, favicons, metadata overrides, standard/application label catalogs and signed core-picture avatars are implemented; Files ownership guards and replica routing remain |
-| Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope, upstream relative-date ranges and relation-hop feature gating. Access-group synchronization and sharing remain. |
+| Record permissions, sharing, private records | **part** | 4 | P1–P3 and core/advanced RLS landed: role/object/field gates, predicate groups, current-member substitution, transactional create/update rollback, nested target read scope, upstream relative-date ranges and relation-hop feature gating. Company access groups now materialize (`permissions/access_group.rs`): group hashes and compact ids, `_accessGroupIds` arrays with a generation column, lazy materialization on read and recompute inside create/update/delete mutations. Upstream propagation plans, `recordShare`-driven groups and the remaining objects are open. |
 | Export records | todo | 6 | |
 | REST API with the upstream shape | **done** | 4 | 18/18 live error/shape probes; fields/depth, error bodies, envelopes and messages match |
 | Dynamic GraphQL schema generated from metadata | **done** | 4 | direct workspace execution with resolver classification, introspection and connection shaping |
@@ -89,7 +89,7 @@ started. The wave numbers are the ones in [MAP.md](MAP.md).
 | Invitations | **done** | 2 | verbatim tokens, resend rotation, upstream throttle set |
 | Email verification and password reset | **done** | 2 | hashed tokens, upstream error matrix, 3/15 min reset throttle, `PASSWORD_CHANGED` revocations |
 | Browser email/password auth flow | **part** | 5 | Existing/new email branching, reference-matched second step, validation, password visibility and reset notice are implemented; SSO/2FA screens and full account-recovery UI remain |
-| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 plus transactional update RLS, upstream relative-date ranges and feature-gated relation-hop RLS landed; access-group synchronization and sharing remain |
+| Role, object, field and row level permission enforcement | **part** | 2→4 | P1–P3 plus transactional update RLS, upstream relative-date ranges, feature-gated relation-hop RLS and company access-group materialization landed; predicate values follow the upstream view-filter stringification, so a literal-value group only matches Select/Uuid/Relation fields as it does upstream. Sharing, propagation plans and non-company groups remain |
 
 ## D. Web interface (Leptos)
 

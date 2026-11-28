@@ -38,6 +38,7 @@ pub use option::FlatFieldMetadataOption;
 pub use option::UniversalFlatFieldMetadataOption;
 pub use rows::assemble_workspace_maps;
 pub use rows::load_workspace_flat_maps;
+pub use rows::load_workspace_flat_maps_with_executor;
 pub use search_field::FlatSearchFieldMetadata;
 pub use search_field::SearchFieldMetadataMinimalInformation;
 pub use search_field::UniversalFlatSearchFieldMetadata;

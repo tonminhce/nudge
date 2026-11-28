@@ -226,6 +226,32 @@ impl RunnerSchema {
         self.workspace_member_id
     }
 
+    pub(crate) fn company_access(
+        &self,
+    ) -> Option<&crate::permissions::access_group::CompanyAccessStrategy> {
+        self.records_permissions
+            .as_ref()
+            .and_then(|permissions| permissions.company_access.as_ref())
+    }
+
+    pub fn company_access_group_ids(&self) -> Option<&[i32]> {
+        self.records_permissions
+            .as_ref()
+            .and_then(|permissions| permissions.company_access_group_ids.as_deref())
+    }
+
+    pub fn requires_access_group_recompute(&self, object_name: &str) -> bool {
+        self.company_access()
+            .is_some_and(|_| matches!(object_name, "company" | "workspaceMember" | "featureFlag"))
+    }
+
+    pub fn denies_company_overlays(&self, object_name: &str) -> bool {
+        object_name == "company"
+            && self
+                .company_access()
+                .is_some_and(|strategy| strategy.denies_overlays())
+    }
+
     pub fn field_metadata(&self, field_metadata_id: Uuid) -> Option<&FlatFieldMetadata> {
         self.fields_by_id.get(&field_metadata_id)
     }

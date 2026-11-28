@@ -1,3 +1,4 @@
+pub(crate) mod access_group;
 mod context;
 mod error;
 mod kernel;
