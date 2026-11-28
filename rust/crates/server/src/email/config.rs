@@ -10,18 +10,34 @@ pub enum EmailDriver {
 
 impl EmailDriver {
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
+        match value.to_ascii_uppercase().as_str() {
             "LOGGER" => Some(Self::Logger),
             "SMTP" => Some(Self::Smtp),
             _ => None,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Logger => "LOGGER",
+            Self::Smtp => "SMTP",
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SmtpAuth {
     pub user: String,
     pub pass: String,
+}
+
+impl std::fmt::Debug for SmtpAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmtpAuth")
+            .field("user", &"[redacted]")
+            .field("pass", &"[redacted]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,10 +78,17 @@ pub struct EmailSendConfig {
     pub smtp: Option<SmtpTransportOptions>,
 }
 
-type EnvGetter = dyn Fn(&str) -> Option<String>;
-
 fn non_empty(value: Option<String>) -> Option<String> {
-    value.filter(|value| !value.is_empty())
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn truthy(value: Option<String>) -> bool {
+    matches!(
+        value.map(|value| value.trim().to_ascii_lowercase()).as_deref(),
+        Some("true") | Some("1")
+    )
 }
 
 fn hostname() -> Option<String> {
@@ -87,7 +110,10 @@ fn hostname() -> Option<String> {
 }
 
 impl SmtpTransportOptions {
-    pub fn from_getter(get: &EnvGetter) -> Result<Self, EmailConfigError> {
+    pub fn from_getter<F>(get: &F) -> Result<Self, EmailConfigError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
         let host = non_empty(get("EMAIL_SMTP_HOST")).ok_or(EmailConfigError::MissingHostAndPort)?;
         let port = match non_empty(get("EMAIL_SMTP_PORT")) {
             Some(raw) => raw.parse::<u16>().ok().filter(|port| *port != 0),
@@ -96,7 +122,7 @@ impl SmtpTransportOptions {
         .ok_or(EmailConfigError::MissingHostAndPort)?;
         let user = non_empty(get("EMAIL_SMTP_USER"));
         let pass = non_empty(get("EMAIL_SMTP_PASSWORD"));
-        let no_tls = non_empty(get("EMAIL_SMTP_NO_TLS")).is_some_and(|value| value == "true");
+        let no_tls = truthy(get("EMAIL_SMTP_NO_TLS"));
 
         Ok(Self::build(
             host,
@@ -138,10 +164,13 @@ impl SmtpTransportOptions {
 }
 
 impl EmailSendConfig {
-    pub fn from_getter(get: &EnvGetter) -> Result<Self, EmailConfigError> {
+    pub fn from_getter<F>(get: &F) -> Result<Self, EmailConfigError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
         let driver_raw = non_empty(get("EMAIL_DRIVER")).unwrap_or_else(|| "LOGGER".to_string());
         let driver = EmailDriver::parse(&driver_raw)
-            .ok_or_else(|| EmailConfigError::InvalidDriver(driver_raw.clone()))?;
+            .ok_or_else(|| EmailConfigError::InvalidDriver(driver_raw.to_ascii_uppercase()))?;
 
         let smtp = match driver {
             EmailDriver::Logger => None,
@@ -160,6 +189,15 @@ impl EmailSendConfig {
 
     pub fn from_env() -> Result<Self, EmailConfigError> {
         Self::from_getter(&|name| env::var(name).ok())
+    }
+
+    pub fn logger_default() -> Self {
+        Self {
+            driver: EmailDriver::Logger,
+            from_name: "Felix from Twenty".to_string(),
+            from_address: "noreply@yourdomain.com".to_string(),
+            smtp: None,
+        }
     }
 
     pub fn from_header(&self) -> String {
@@ -186,6 +224,13 @@ mod tests {
         assert_eq!(EmailDriver::parse("LOGGER"), Some(EmailDriver::Logger));
         assert_eq!(EmailDriver::parse("SMTP"), Some(EmailDriver::Smtp));
         assert_eq!(EmailDriver::parse("SES"), None);
+    }
+
+    #[test]
+    fn driver_values_are_cast_to_upper_snake_case() {
+        assert_eq!(EmailDriver::parse("smtp"), Some(EmailDriver::Smtp));
+        assert_eq!(EmailDriver::parse("Logger"), Some(EmailDriver::Logger));
+        assert_eq!(EmailDriver::Smtp.as_str(), "SMTP");
     }
 
     #[test]
@@ -265,5 +310,82 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.from_header(), "Acme <bot@acme.example>");
+    }
+
+    #[test]
+    fn values_are_trimmed_before_use() {
+        let config = EmailSendConfig::from_getter(&getter(&[
+            ("EMAIL_DRIVER", "  SMTP  "),
+            ("EMAIL_SMTP_HOST", "  smtp.example.com "),
+            ("EMAIL_SMTP_PORT", " 2525 "),
+            ("EMAIL_FROM_ADDRESS", " bot@acme.example "),
+        ]))
+        .unwrap();
+
+        assert_eq!(config.driver, EmailDriver::Smtp);
+        assert_eq!(config.smtp.as_ref().unwrap().host, "smtp.example.com");
+        assert_eq!(config.smtp.as_ref().unwrap().port, 2525);
+        assert_eq!(config.from_address, "bot@acme.example");
+    }
+
+    #[test]
+    fn no_tls_accepts_the_repository_boolean_spellings() {
+        for raw in ["true", "TRUE", "1"] {
+            let options = SmtpTransportOptions::from_getter(&getter(&[
+                ("EMAIL_SMTP_HOST", "smtp.example.com"),
+                ("EMAIL_SMTP_NO_TLS", raw),
+            ]))
+            .unwrap();
+
+            assert!(options.ignore_tls, "{raw} should disable tls");
+            assert!(!options.secure);
+        }
+
+        for raw in ["false", "0", "yes"] {
+            let options = SmtpTransportOptions::from_getter(&getter(&[
+                ("EMAIL_SMTP_HOST", "smtp.example.com"),
+                ("EMAIL_SMTP_NO_TLS", raw),
+            ]))
+            .unwrap();
+
+            assert!(!options.ignore_tls, "{raw} should keep tls enabled");
+        }
+    }
+
+    #[test]
+    fn invalid_port_falls_back_to_the_missing_host_error() {
+        let error = SmtpTransportOptions::from_getter(&getter(&[
+            ("EMAIL_SMTP_HOST", "smtp.example.com"),
+            ("EMAIL_SMTP_PORT", "0"),
+        ]))
+        .unwrap_err();
+
+        assert_eq!(error, EmailConfigError::MissingHostAndPort);
+    }
+
+    #[test]
+    fn logger_default_matches_the_upstream_configuration() {
+        let config = EmailSendConfig::logger_default();
+
+        assert_eq!(config.driver, EmailDriver::Logger);
+        assert_eq!(
+            config,
+            EmailSendConfig::from_getter(&getter(&[])).unwrap()
+        );
+    }
+
+    #[test]
+    fn debug_output_never_carries_the_credentials() {
+        let options = SmtpTransportOptions::from_getter(&getter(&[
+            ("EMAIL_SMTP_HOST", "smtp.example.com"),
+            ("EMAIL_SMTP_USER", "someone@acme.example"),
+            ("EMAIL_SMTP_PASSWORD", "a-value-that-must-not-be-rendered"),
+        ]))
+        .unwrap();
+        let rendered = format!("{options:?}");
+
+        assert!(rendered.contains("[redacted]"));
+        assert!(!rendered.contains("someone@acme.example"));
+        assert!(!rendered.contains("a-value-that-must-not-be-rendered"));
     }
 }

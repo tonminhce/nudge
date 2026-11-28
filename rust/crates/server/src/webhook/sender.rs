@@ -34,13 +34,25 @@ pub fn ensure_absolute_url(value: &str) -> String {
     format!("https://{}", trimmed)
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct WebhookDeliveryRequest {
     pub target_url: String,
     pub webhook_id: String,
     pub event_name: String,
     pub secret: Option<String>,
     pub payload_json: String,
+}
+
+impl std::fmt::Debug for WebhookDeliveryRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebhookDeliveryRequest")
+            .field("target_url", &self.target_url)
+            .field("webhook_id", &self.webhook_id)
+            .field("event_name", &self.event_name)
+            .field("secret", &self.secret.as_ref().map(|_| "[redacted]"))
+            .field("payload_json", &self.payload_json)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

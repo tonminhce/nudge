@@ -30,6 +30,12 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("running the core schema migrations")?;
 
+    crate::email::init_from_env().context("configuring the email driver")?;
+
+    if crate::webhook::install_webhook_dispatcher(state.core_pool.clone(), state.redis.clone()) {
+        tracing::info!("webhook dispatcher installed");
+    }
+
     tokio::spawn(crate::auth::session::cleanup_loop(state.clone()));
     crate::workspace_migrations::worker::spawn_deferred_worker(state.clone());
 

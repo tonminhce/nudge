@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{Datelike, DateTime, Utc};
 
 pub const DEFAULT_WORKSPACE_LOGO: &str =
     "https://twentyhq.github.io/placeholder-images/workspaces/twenty-logo.png";
@@ -92,7 +92,7 @@ fn locale_pair(locale: &str) -> Vec<(&'static str, String)> {
 
 fn extend(
     base: Vec<(&'static str, String)>,
-    more: &[(&str, String)],
+    more: &[(&'static str, String)],
 ) -> Vec<(&'static str, String)> {
     let mut out = base;
     out.extend(more.iter().map(|(token, value)| (*token, value.clone())));

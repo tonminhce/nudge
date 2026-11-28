@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::email::config::{EmailDriver, EmailSendConfig};
 use crate::email::smtp::{SendMailOptions, SmtpError};
 
@@ -5,10 +7,12 @@ pub const EMAIL_SEND_RETRY_LIMIT: u32 = 3;
 pub const EMAIL_SEND_RETRY_BACKOFF_STRATEGY: &str = "exponential";
 pub const EMAIL_SEND_RETRY_BACKOFF_INITIAL_DELAY_MILLISECONDS: u64 = 5_000;
 pub const EMAIL_SEND_RETRY_BACKOFF_JITTER: f64 = 0.5;
+pub const EMAIL_SEND_ATTEMPTS: u32 = 1 + EMAIL_SEND_RETRY_LIMIT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmailSendError {
     MissingSmtpOptions,
+    Config(String),
     Smtp(SmtpError),
 }
 
@@ -18,6 +22,7 @@ impl std::fmt::Display for EmailSendError {
             Self::MissingSmtpOptions => {
                 write!(f, "SMTP driver requires host and port to be defined")
             }
+            Self::Config(message) => write!(f, "{message}"),
             Self::Smtp(error) => write!(f, "{error}"),
         }
     }
@@ -42,6 +47,53 @@ pub fn format_logger_driver_output(message: &SendMailOptions) -> String {
     )
 }
 
+pub fn backoff_delay_millis(
+    attempt: u32,
+    initial_delay_millis: u64,
+    jitter: f64,
+    random: f64,
+) -> u64 {
+    let base =
+        initial_delay_millis.saturating_mul(1u64.checked_shl(attempt).unwrap_or(u64::MAX));
+    let factor = 1.0 + jitter.clamp(0.0, 1.0) * random.clamp(0.0, 1.0);
+
+    (base as f64 * factor).round() as u64
+}
+
+pub fn upstream_backoff_delay(attempt: u32) -> Duration {
+    use rand::Rng;
+
+    let random = rand::thread_rng().gen_range(0.0..1.0);
+
+    Duration::from_millis(backoff_delay_millis(
+        attempt,
+        EMAIL_SEND_RETRY_BACKOFF_INITIAL_DELAY_MILLISECONDS,
+        EMAIL_SEND_RETRY_BACKOFF_JITTER,
+        random,
+    ))
+}
+
+pub async fn send_with_retry(
+    config: &EmailSendConfig,
+    message: &SendMailOptions,
+    delay_for_attempt: impl Fn(u32) -> Duration,
+) -> Result<(), EmailSendError> {
+    let mut last_error = EmailSendError::MissingSmtpOptions;
+
+    for attempt in 0..EMAIL_SEND_ATTEMPTS {
+        match send(config, message).await {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = error,
+        }
+
+        if attempt + 1 < EMAIL_SEND_ATTEMPTS {
+            tokio::time::sleep(delay_for_attempt(attempt)).await;
+        }
+    }
+
+    Err(last_error)
+}
+
 pub async fn send(
     config: &EmailSendConfig,
     message: &SendMailOptions,
@@ -62,7 +114,9 @@ pub async fn send(
                 .as_ref()
                 .ok_or(EmailSendError::MissingSmtpOptions)?;
 
-            super::smtp::send(options, message).await
+            super::smtp::send(options, message)
+                .await
+                .map_err(EmailSendError::from)
         }
     }
 }
@@ -177,6 +231,84 @@ mod tests {
         assert_eq!(EMAIL_SEND_RETRY_BACKOFF_STRATEGY, "exponential");
         assert_eq!(EMAIL_SEND_RETRY_BACKOFF_INITIAL_DELAY_MILLISECONDS, 5_000);
         assert_eq!(EMAIL_SEND_RETRY_BACKOFF_JITTER, 0.5);
+        assert_eq!(EMAIL_SEND_ATTEMPTS, 4);
+    }
+
+    #[test]
+    fn exponential_backoff_doubles_and_applies_jitter() {
+        assert_eq!(backoff_delay_millis(0, 5_000, 0.5, 0.0), 5_000);
+        assert_eq!(backoff_delay_millis(1, 5_000, 0.5, 0.0), 10_000);
+        assert_eq!(backoff_delay_millis(2, 5_000, 0.5, 0.0), 20_000);
+        assert_eq!(backoff_delay_millis(0, 5_000, 0.5, 1.0), 7_500);
+        assert_eq!(backoff_delay_millis(1, 5_000, 0.0, 1.0), 10_000);
+        assert_eq!(backoff_delay_millis(3, 5_000, 0.5, 0.5), 37_500);
+    }
+
+    #[test]
+    fn upstream_backoff_stays_within_the_jitter_band() {
+        for attempt in 0..3 {
+            let delay = upstream_backoff_delay(attempt).as_millis() as u64;
+            let base = 5_000u64 << attempt;
+
+            assert!(
+                (base..=base + base / 2).contains(&delay),
+                "attempt {attempt} produced {delay}ms outside the exponential band"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_gives_up_after_the_upstream_attempt_budget() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&accepted);
+
+        let server = tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((socket, _)) => {
+                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        drop(socket);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let config = EmailSendConfig {
+            driver: EmailDriver::Smtp,
+            from_name: "Felix from Twenty".to_string(),
+            from_address: "noreply@yourdomain.com".to_string(),
+            smtp: Some(SmtpTransportOptions {
+                host: addr.ip().to_string(),
+                port: addr.port(),
+                auth: None,
+                secure: false,
+                ignore_tls: true,
+                require_tls: false,
+                name: Some("nudge.test".to_string()),
+            }),
+        };
+
+        let result = send_with_retry(&config, &message(), |_| Duration::ZERO).await;
+
+        assert!(matches!(result, Err(EmailSendError::Smtp(_))));
+        assert_eq!(
+            accepted.load(std::sync::atomic::Ordering::SeqCst),
+            EMAIL_SEND_ATTEMPTS as usize
+        );
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn retry_stops_at_the_first_success() {
+        let config = EmailSendConfig::from_getter(&|_| None).unwrap();
+
+        send_with_retry(&config, &message(), |_| Duration::ZERO)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

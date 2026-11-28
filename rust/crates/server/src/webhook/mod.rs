@@ -1,28 +1,11 @@
+#![allow(dead_code)]
+
 pub mod dispatch;
 pub mod matching;
 pub mod payload;
 pub mod rate_limit;
 pub mod sender;
+pub mod service;
 pub mod signature;
 
-pub use dispatch::deliver_webhook_requests;
-pub use dispatch::transform_event_batch_to_webhook_requests;
-pub use dispatch::transform_metadata_event_batch_to_webhook_requests;
-pub use dispatch::MetadataEventBatchInput;
-pub use dispatch::RecordEventBatchInput;
-pub use matching::compute_webhook_operations_to_match;
-pub use matching::find_webhooks_matching_event_name;
-pub use matching::WebhookSubscription;
-pub use payload::metadata_event_payload;
-pub use payload::record_event_payload;
-pub use payload::MetadataWebhookEventInput;
-pub use payload::RecordWebhookEventInput;
-pub use sender::call_webhook;
-pub use sender::WebhookDeliveryOutcome;
-pub use sender::WebhookDeliveryRequest;
-pub use signature::generate_nonce;
-pub use signature::generate_signature;
-pub use signature::generate_webhook_secret;
-pub use signature::HEADER_NONCE;
-pub use signature::HEADER_SIGNATURE;
-pub use signature::HEADER_TIMESTAMP;
+pub use service::install as install_webhook_dispatcher;

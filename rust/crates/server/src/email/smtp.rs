@@ -4,7 +4,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use rustls::pki_types::ServerName;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, BufStream};
+use tokio::io::{
+    AsyncBufReadExt as _, AsyncRead, AsyncWrite, AsyncWriteExt as _, BufStream,
+};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
@@ -121,9 +123,10 @@ async fn read_reply(stream: &mut Buffered) -> Result<(u16, Vec<String>), SmtpErr
         let code: u16 = line[..3]
             .parse()
             .map_err(|_| SmtpError::Protocol(format!("malformed reply code: {}", &line[..3])))?;
+        let last_line = line.get(3..4) != Some("-");
         lines.push(line);
 
-        if line.get(3..4) != Some("-") {
+        if last_line {
             return Ok((code, lines));
         }
     }
@@ -352,9 +355,7 @@ pub async fn send(
 
 async fn upgrade(stream: Buffered, host: &str) -> Result<Buffered, SmtpError> {
     let connector = tls_connector()?;
-    let inner = stream
-        .into_inner()
-        .map_err(|error| SmtpError::Io(error.to_string()))?;
+    let inner = stream.into_inner();
     let plain = match inner {
         Connection::Plain(socket) => socket,
         Connection::Secure(_) => return Err(SmtpError::Tls("already tls".into())),
@@ -518,6 +519,8 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let user_token = BASE64.encode("test-user");
         let pass_token = BASE64.encode("test-pass-not-a-secret");
+        let expected_user_token = user_token.clone();
+        let expected_pass_token = pass_token.clone();
 
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -586,8 +589,8 @@ mod tests {
 
         let transcript = server.await.unwrap();
         assert!(transcript.contains("AUTH LOGIN\r\n"));
-        assert!(transcript.contains(&format!("{user_token}\r\n")));
-        assert!(transcript.contains(&format!("{pass_token}\r\n")));
+        assert!(transcript.contains(&format!("{expected_user_token}\r\n")));
+        assert!(transcript.contains(&format!("{expected_pass_token}\r\n")));
     }
 
     #[tokio::test]
@@ -595,6 +598,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let expected = BASE64.encode("\0test-user\0test-pass-not-a-secret");
+        let expected_line = expected.clone();
 
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -658,7 +662,7 @@ mod tests {
         .unwrap();
 
         let transcript = server.await.unwrap();
-        assert!(transcript.contains(&format!("AUTH PLAIN {expected}\r\n")));
+        assert!(transcript.contains(&format!("AUTH PLAIN {expected_line}\r\n")));
     }
 
     #[tokio::test]

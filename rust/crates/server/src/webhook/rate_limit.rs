@@ -6,6 +6,7 @@ pub const TOKEN_BUCKET_THROTTLE_KEY_PREFIX: &str = "token-bucket";
 pub const WEBHOOK_CALL_RATE_LIMITING_TTL_IN_MS: u64 = 60_000;
 pub const WEBHOOK_CALL_RATE_LIMITING_LIMIT: u64 = 60;
 pub const TOKEN_BUCKETS_ALLOW_PARTIAL_ARG: &str = "1";
+pub const TOKEN_BUCKETS_DENY_PARTIAL_ARG: &str = "0";
 
 pub const TRY_CONSUME_TOKEN_BUCKETS_SCRIPT: &str = r###"
 local requestedCost = tonumber(ARGV[1])
@@ -143,25 +144,28 @@ pub async fn try_consume_token_buckets(
     buckets_json: &str,
     allow_partial: bool,
 ) -> Result<SpeedBucketOutcome, redis::RedisError> {
-    let results: Vec<u64> = Script::new(TRY_CONSUME_TOKEN_BUCKETS_SCRIPT)
-        .keys(keys)
-        .arg(tokens_to_consume)
-        .arg(buckets_json)
-        .arg(if allow_partial {
-            TOKEN_BUCKETS_ALLOW_PARTIAL_ARG
-        } else {
-            "0"
-        })
-        .invoke_async(connection)
-        .await?;
+    let script = Script::new(TRY_CONSUME_TOKEN_BUCKETS_SCRIPT);
+    let mut invocation = script.arg(tokens_to_consume);
+    invocation.arg(buckets_json);
+    invocation.arg(if allow_partial {
+        TOKEN_BUCKETS_ALLOW_PARTIAL_ARG
+    } else {
+        TOKEN_BUCKETS_DENY_PARTIAL_ARG
+    });
 
-    let [admitted_count, exhausted_bucket_position, retry_after_ms] = parse_outcome(&results)
-    else {
-        return Err(redis::RedisError::from((
-            redis::ErrorKind::TypeError,
-            "unexpected throttler script outcome",
-        )));
-    };
+    for key in keys {
+        invocation.key(key);
+    }
+
+    let results: Vec<u64> = invocation.invoke_async(connection).await?;
+
+    let [admitted_count, exhausted_bucket_position, retry_after_ms] =
+        parse_outcome(&results).ok_or_else(|| {
+            redis::RedisError::from((
+                redis::ErrorKind::TypeError,
+                "unexpected throttler script outcome",
+            ))
+        })?;
 
     Ok(SpeedBucketOutcome {
         admitted_count,
@@ -280,6 +284,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_outcome_requires_the_three_upstream_positions() {
+        assert_eq!(parse_outcome(&[3, 0, 0]), Some([3u64, 0u64, 0u64]));
+        assert_eq!(parse_outcome(&[3, 0]), None);
+        assert_eq!(parse_outcome(&[]), None);
+    }
+
+    #[test]
+    fn outcome_is_admitted_only_without_an_exhausted_bucket() {
+        assert!(SpeedBucketOutcome {
+            admitted_count: 2,
+            exhausted_bucket_position: 0,
+            retry_after_ms: 0,
+        }
+        .admitted());
+        assert!(!SpeedBucketOutcome {
+            admitted_count: 1,
+            exhausted_bucket_position: 1,
+            retry_after_ms: 500,
+        }
+        .admitted());
+    }
+
+    #[test]
+    fn partial_arg_matches_the_upstream_script_arguments() {
+        assert_eq!(TOKEN_BUCKETS_ALLOW_PARTIAL_ARG, "1");
+        assert_eq!(TOKEN_BUCKETS_DENY_PARTIAL_ARG, "0");
+        assert!(TRY_CONSUME_TOKEN_BUCKETS_SCRIPT.contains("local allowPartial = ARGV[3] == '1'"));
+        assert!(TRY_CONSUME_TOKEN_BUCKETS_SCRIPT
+            .contains("return { admittedCost, exhaustedIndex, retryAfterMs }"));
+    }
+
+    #[test]
     fn webhook_response_properties_follow_upstream_shape() {
         let properties = build_webhook_response_event_properties(
             "https://example.com/hook",
@@ -292,7 +328,7 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&properties).unwrap(),
-            "{\"url\":\"https://example.com/hook\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.created\",\"status\":500,\"success\":false}"
+            "{\"status\":500,\"success\":false,\"url\":\"https://example.com/hook\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.created\"}"
         );
     }
 
@@ -309,7 +345,7 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&properties).unwrap(),
-            "{\"url\":\"https://example.com/hook\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.created\",\"success\":false,\"error\":\"timeout\"}"
+            "{\"success\":false,\"url\":\"https://example.com/hook\",\"webhookId\":\"webhook-1\",\"eventName\":\"person.created\",\"error\":\"timeout\"}"
         );
     }
 }
