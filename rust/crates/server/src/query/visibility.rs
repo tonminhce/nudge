@@ -1384,7 +1384,12 @@ mod tests {
             "MANY_TO_ONE",
         ));
         let mut thread_fields = vec![plain_field(thread_id, "id")];
-        thread_fields.push(relation_field(thread_id, "messages", message_id, "ONE_TO_MANY"));
+        thread_fields.push(relation_field(
+            thread_id,
+            "messages",
+            message_id,
+            "ONE_TO_MANY",
+        ));
         let mut fields = FlatEntityMaps::default();
 
         for field in message_fields.iter().chain(thread_fields.iter()) {
@@ -1400,13 +1405,8 @@ mod tests {
             thread_object(workspace_id, message_id, "message", &message_fields),
         ];
 
-        RunnerSchema::build(
-            &workspace_id,
-            &objects,
-            &fields,
-            &FlatEntityMaps::default(),
-        )
-        .expect("thread schema")
+        RunnerSchema::build(&workspace_id, &objects, &fields, &FlatEntityMaps::default())
+            .expect("thread schema")
     }
 
     fn thread_with_messages(message_id: Uuid) -> Value {
@@ -1501,14 +1501,15 @@ mod tests {
     #[test]
     fn a_schema_without_a_user_workspace_claims_no_channel_ownership() {
         let schema = thread_schema();
-        assert_eq!(channel_viewer_for_schema(&schema), ChannelViewer::NoOwnership);
+        assert_eq!(
+            channel_viewer_for_schema(&schema),
+            ChannelViewer::NoOwnership
+        );
 
         let user_workspace_id = Uuid::new_v4();
         assert_eq!(
             channel_viewer_for_schema(&schema.with_user_workspace_id(Some(user_workspace_id))),
-            ChannelViewer::User {
-                user_workspace_id
-            }
+            ChannelViewer::User { user_workspace_id }
         );
     }
 }
