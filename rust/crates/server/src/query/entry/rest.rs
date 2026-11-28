@@ -551,6 +551,7 @@ async fn dispatch_rest(
                         conflict_priority_index,
                         dry_run: body.get("dryRun").and_then(Value::as_bool).unwrap_or(false),
                     },
+                    Some(&actor),
                     picked_fields.clone().unwrap_or_default(),
                     nested.clone(),
                 )
