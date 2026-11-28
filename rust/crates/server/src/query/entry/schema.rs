@@ -10,6 +10,7 @@ use crate::metadata::names::pascal_case;
 pub enum ResolverMethod {
     FindMany,
     FindOne,
+    FindDuplicates,
     CreateOne,
     CreateMany,
     UpdateOne,
@@ -21,13 +22,17 @@ pub enum ResolverMethod {
 
 impl ResolverMethod {
     pub fn is_query(self) -> bool {
-        matches!(self, Self::FindMany | Self::FindOne | Self::GroupBy)
+        matches!(
+            self,
+            Self::FindMany | Self::FindOne | Self::FindDuplicates | Self::GroupBy
+        )
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::FindMany => "findMany",
             Self::FindOne => "findOne",
+            Self::FindDuplicates => "findDuplicates",
             Self::CreateOne => "createOne",
             Self::CreateMany => "createMany",
             Self::UpdateOne => "updateOne",
@@ -118,6 +123,15 @@ impl WorkspaceSchema {
                     },
                 );
             }
+            if object.duplicate_criteria.is_some() {
+                resolvers_by_root.insert(
+                    format!("{}Duplicates", camel_case(&object.name_singular)),
+                    RootResolver {
+                        method: ResolverMethod::FindDuplicates,
+                        object_name_singular: object.name_singular.clone(),
+                    },
+                );
+            }
         }
 
         Self {
@@ -160,6 +174,12 @@ impl WorkspaceSchema {
             })
             .collect::<Vec<_>>();
         fields.push(String::from("search"));
+        fields.extend(self.objects.iter().filter_map(|object| {
+            object
+                .duplicate_criteria
+                .as_ref()
+                .map(|_| format!("{}Duplicates", camel_case(&object.name_singular)))
+        }));
         fields
     }
 
@@ -273,6 +293,11 @@ impl WorkspaceSchema {
             sdl.push_str(&format!(
                 "  {singular_camel}(filter: JSON!): {type_name}!\n"
             ));
+            if object.duplicate_criteria.is_some() {
+                sdl.push_str(&format!(
+                    "  {singular_camel}Duplicates(ids: [UUID], data: [{type_name}CreateInput]): [{connection_name}!]\n"
+                ));
+            }
         }
 
         sdl.push_str("}\n\ntype Mutation {\n");
@@ -363,6 +388,7 @@ mod tests {
             id: uuid::Uuid::from_u128(1),
             name_singular: String::from("person"),
             name_plural: String::from("people"),
+            duplicate_criteria: Some(json!([["nameFirstName", "nameLastName"]])),
             ..FlatObjectMetadata::default()
         };
 
@@ -385,6 +411,7 @@ mod tests {
         for (root, method) in [
             ("people", ResolverMethod::FindMany),
             ("person", ResolverMethod::FindOne),
+            ("personDuplicates", ResolverMethod::FindDuplicates),
             ("createPerson", ResolverMethod::CreateOne),
             ("createPeople", ResolverMethod::CreateMany),
             ("updatePerson", ResolverMethod::UpdateOne),
@@ -437,6 +464,9 @@ mod tests {
         assert!(sdl.contains("type PersonConnection {"));
         assert!(sdl.contains("people(first: Int"));
         assert!(sdl.contains("person(filter: JSON!"));
+        assert!(sdl.contains(
+            "personDuplicates(ids: [UUID], data: [PersonCreateInput]): [PersonConnection!]"
+        ));
         assert!(sdl.contains("type SearchResultConnection"));
         assert!(sdl.contains("input ObjectRecordFilterInput"));
         assert!(sdl.contains("input UUIDFilter"));

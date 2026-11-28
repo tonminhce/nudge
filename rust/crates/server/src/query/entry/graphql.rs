@@ -37,6 +37,7 @@ use crate::permissions::records_permissions_for_auth;
 use crate::query::cursor::encode_cursor_data;
 use crate::query::runner::create_many;
 use crate::query::runner::create_one;
+use crate::query::runner::find_duplicates;
 use crate::query::runner::find_many;
 use crate::query::runner::find_one;
 use crate::query::runner::find_one::FindOneArgs;
@@ -530,6 +531,9 @@ async fn execute_workspace(
         }
         ResolverMethod::FindOne => {
             find_one_root(state, schema, &runner_schema, field, resolver).await
+        }
+        ResolverMethod::FindDuplicates => {
+            find_duplicates_root(state, schema, &runner_schema, field, resolver).await
         }
         ResolverMethod::CreateOne => {
             let data = required_object(field, "data")?;
@@ -1116,6 +1120,67 @@ fn project_record(record: &Value, selections: &[FieldSelection], type_name: &str
     Value::Object(output)
 }
 
+async fn find_duplicates_root(
+    state: &AppState,
+    schema: &WorkspaceSchema,
+    runner_schema: &Arc<RunnerSchema>,
+    field: &FieldSelection,
+    resolver: &super::schema::RootResolver,
+) -> Result<Value, GraphQlError> {
+    let ids = optional_uuid_list_arg(field, "ids")?;
+    let data = field
+        .argument("data")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let data = match data {
+        Some(Value::Array(values)) => Some(values),
+        Some(_) => {
+            return Err(GraphQlError::user_input(
+                "data must be a list of record inputs",
+            ))
+        }
+        None => None,
+    };
+    match (&ids, &data) {
+        (None, None) => {
+            return Err(GraphQlError::user_input(
+                "You have to provide either \"data\" or \"ids\" argument",
+            ))
+        }
+        (Some(_), Some(_)) => {
+            return Err(GraphQlError::user_input(
+                "You cannot provide both \"data\" and \"ids\" arguments",
+            ))
+        }
+        (None, Some(values)) if values.is_empty() => {
+            return Err(GraphQlError::user_input(
+                "The \"data\" condition can not be empty when \"ids\" input not provided",
+            ))
+        }
+        _ => {}
+    }
+    let connections = find_duplicates(
+        &state.core_pool,
+        runner_schema.clone(),
+        &resolver.object_name_singular,
+        ids.as_deref().unwrap_or(&[]),
+        data.as_deref(),
+        root_record_fields_schemaless(field),
+        nested_relations(schema, field, resolver),
+    )
+    .await
+    .map_err(runner_graphql_error)?;
+    let object_type = pascal_case(&resolver.object_name_singular);
+    Ok(Value::Array(
+        connections
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|connection| project_connection(connection, &field.selection, &object_type))
+            .collect(),
+    ))
+}
+
 async fn find_one_root(
     state: &AppState,
     schema: &WorkspaceSchema,
@@ -1385,6 +1450,29 @@ fn required_id(field: &FieldSelection) -> Result<Uuid, GraphQlError> {
         .and_then(Value::as_str)
         .and_then(|value| Uuid::parse_str(value).ok())
         .ok_or_else(|| GraphQlError::user_input("id is required"))
+}
+
+fn optional_uuid_list_arg(
+    field: &FieldSelection,
+    name: &str,
+) -> Result<Option<Vec<Uuid>>, GraphQlError> {
+    let Some(value) = field.argument(name).filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| GraphQlError::user_input(format!("{name} must be a list of UUIDs")))?;
+    values
+        .iter()
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            value
+                .as_str()
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .ok_or_else(|| GraphQlError::user_input(format!("{name} must be a list of UUIDs")))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 fn optional_bool_arg(field: &FieldSelection, name: &str) -> bool {
@@ -1709,6 +1797,23 @@ fn schema_type_specs(schema: &WorkspaceSchema) -> Vec<Value> {
 
         query_fields.push(field_entry(&plural, non_null(named_type(&connection_name))));
         query_fields.push(field_entry(&singular, non_null(named_type(&type_name))));
+        if object.duplicate_criteria.is_some() {
+            let mut duplicates = field_entry(
+                &format!("{singular}Duplicates"),
+                list(non_null(named_type(&connection_name))),
+            );
+            duplicates["args"] = Value::Array(vec![
+                input_value_entry("ids", list(scalar_type("UUID"))),
+                input_value_entry(
+                    "data",
+                    list(schema_type(
+                        "INPUT_OBJECT",
+                        &format!("{type_name}CreateInput"),
+                    )),
+                ),
+            ]);
+            query_fields.push(duplicates);
+        }
 
         let singular_pascal = pascal_case(&object.name_singular);
         let plural_pascal = pascal_case(&object.name_plural);
