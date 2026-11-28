@@ -1741,13 +1741,19 @@ fn single_entry(key: &str, value: Value) -> Map<String, Value> {
 
 async fn core_operation(
     state: &AppState,
-    _workspace_id: Uuid,
+    workspace_id: Uuid,
     auth: &AuthContext,
     field: &FieldSelection,
 ) -> Result<Value, GraphQlError> {
     match field.name.as_str() {
         "currentUser" => current_user(state, auth, &field.selection).await,
         "currentWorkspace" => current_workspace(state, auth, &field.selection).await,
+        "createFileUpload" => {
+            crate::file::upload::graphql_create_file_upload(state, workspace_id, field).await
+        }
+        "completeFileUpload" => {
+            crate::file::upload::graphql_complete_file_upload(state, workspace_id, field).await
+        }
         "__typename" => Ok(Value::String(String::from("Query"))),
         _ => Err(GraphQlError::user_input(format!(
             "Core field \"{}\" is not implemented by this endpoint",

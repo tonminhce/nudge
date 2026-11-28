@@ -26,6 +26,7 @@ hkdf = { workspace = true }
 flate2 = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }
+http-body-util = "0.1"
 icu_collator = { version = "2", default-features = false, features = ["compiled_data"] }
 icu_locale_core = "2"
 percent-encoding = { workspace = true }
