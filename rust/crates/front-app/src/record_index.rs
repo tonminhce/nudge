@@ -234,8 +234,11 @@ pub fn RecordIndexPage() -> impl IntoView {
         let callback_base_url = base_url.clone();
         let callback_token = token.clone();
         let callback_event_stream_id = event_stream_id.clone();
-        let (stream_cancellation, subscription) =
-            match subscribe_event_stream(&base_url, &token, &event_stream_id, move |event| {
+        let (stream_cancellation, subscription) = match subscribe_event_stream(
+            &base_url,
+            &token,
+            &event_stream_id,
+            move |event| {
                 if !active.get_untracked() {
                     return;
                 }
@@ -256,7 +259,14 @@ pub fn RecordIndexPage() -> impl IntoView {
                                 &register_token,
                                 &register_event_stream_id,
                                 &register_query_id,
-                                "FindManyPeople",
+                                serde_json::json!({
+                                    "objectNameSingular": "person",
+                                    "variables": {
+                                        "filter": text_filter("person", &applied_search.get_untracked()),
+                                        "orderBy": order_by("person", sort.get_untracked()),
+                                        "limit": 60
+                                    }
+                                }),
                             )
                             .await
                             {
@@ -287,13 +297,14 @@ pub fn RecordIndexPage() -> impl IntoView {
                     }
                     _ => {}
                 }
-            }) {
-                Ok(subscription) => subscription,
-                Err(message) => {
-                    error.set(Some(message.to_string()));
-                    return;
-                }
-            };
+            },
+        ) {
+            Ok(subscription) => subscription,
+            Err(message) => {
+                error.set(Some(message.to_string()));
+                return;
+            }
+        };
         cancellation.set(Some(stream_cancellation));
         leptos::task::spawn_local(async move {
             let result = subscription.await;

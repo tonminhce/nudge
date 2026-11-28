@@ -2,13 +2,37 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthContext;
-use crate::metadata::names::pascal_case;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecordOperationSignature {
+    pub object_name_singular: String,
+    #[serde(default)]
+    pub variables: RecordOperationVariables,
+    #[serde(default)]
+    pub fields: Option<Value>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecordOperationVariables {
+    #[serde(default)]
+    pub filter: Option<Value>,
+    #[serde(default)]
+    pub order_by: Option<Value>,
+    #[serde(default)]
+    pub limit: Option<u64>,
+    #[serde(default)]
+    pub cursor_filter: Option<Value>,
+}
 
 #[derive(Clone, Default)]
 pub struct EventStreamRegistry {
@@ -17,7 +41,7 @@ pub struct EventStreamRegistry {
 
 struct EventStream {
     auth_key: String,
-    queries: HashMap<String, String>,
+    queries: HashMap<String, RecordOperationSignature>,
     sender: mpsc::UnboundedSender<Value>,
 }
 
@@ -76,9 +100,9 @@ impl EventStreamRegistry {
         event_stream_id: &str,
         auth: &AuthContext,
         query_id: String,
-        operation_signature: String,
+        operation_signature: RecordOperationSignature,
     ) -> bool {
-        if query_id.is_empty() || operation_signature.is_empty() {
+        if query_id.is_empty() || operation_signature.object_name_singular.is_empty() {
             return false;
         }
         let mut streams = self.streams.lock().expect("event stream registry");
@@ -118,12 +142,6 @@ impl EventStreamRegistry {
         properties: Value,
         writer: Option<&EventWriter>,
     ) {
-        let operation = match object_name_singular {
-            "person" => String::from("FindManyPeople"),
-            "company" => String::from("FindManyCompanies"),
-            "opportunity" => String::from("FindManyOpportunities"),
-            _ => format!("FindMany{}s", pascal_case(object_name_singular)),
-        };
         let streams = self.streams.lock().expect("event stream registry");
         for ((stream_workspace_id, event_stream_id), stream) in streams.iter() {
             if *stream_workspace_id != workspace_id {
@@ -132,7 +150,14 @@ impl EventStreamRegistry {
             let query_ids = stream
                 .queries
                 .iter()
-                .filter(|(_, signature)| signature.contains(&operation))
+                .filter(|(_, signature)| {
+                    signature.object_name_singular == object_name_singular
+                        && signature
+                            .variables
+                            .filter
+                            .as_ref()
+                            .is_none_or(|filter| filter.is_null() || filter == &json!({}))
+                })
                 .map(|(query_id, _)| Value::String(query_id.clone()))
                 .collect::<Vec<_>>();
             if query_ids.is_empty() {
@@ -203,14 +228,22 @@ mod tests {
             "stream-1",
             &user,
             String::from("people-query"),
-            String::from("FindManyPeople"),
+            RecordOperationSignature {
+                object_name_singular: String::from("person"),
+                variables: RecordOperationVariables::default(),
+                fields: None,
+            },
         ));
         assert!(registry.add_query(
             other_workspace_id,
             "stream-2",
             &user,
             String::from("people-query"),
-            String::from("FindManyPeople"),
+            RecordOperationSignature {
+                object_name_singular: String::from("person"),
+                variables: RecordOperationVariables::default(),
+                fields: None,
+            },
         ));
 
         registry.publish_record(
@@ -237,7 +270,11 @@ mod tests {
             "stream-1",
             &auth(Uuid::new_v4()),
             String::from("other-query"),
-            String::from("FindManyPeople"),
+            RecordOperationSignature {
+                object_name_singular: String::from("person"),
+                variables: RecordOperationVariables::default(),
+                fields: None,
+            },
         ));
         assert!(registry.remove_query(workspace_id, "stream-1", &user, "people-query"));
         registry.publish_record(

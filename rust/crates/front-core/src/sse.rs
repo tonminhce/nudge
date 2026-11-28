@@ -212,7 +212,7 @@ pub async fn register_event_query(
     token: &str,
     event_stream_id: &str,
     query_id: &str,
-    operation_signature: &str,
+    operation_signature: serde_json::Value,
 ) -> Result<bool, ClientError> {
     let query = r#"mutation AddQueryToEventStream($input: AddQuerySubscriptionInput!) {
       addQueryToEventStream(input: $input)
