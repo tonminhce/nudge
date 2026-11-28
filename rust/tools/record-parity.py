@@ -87,7 +87,7 @@ def seed_if_empty(client):
     for first, last, company, position in SEED_PEOPLE:
         data = {"name": {"firstName": first, "lastName": last}}
         if company and company_ids.get(company):
-            data["company"] = {"connect": {"id": company_ids[company]}}
+            data["company"] = {"connect": {"where": {"id": company_ids[company]}}}
             if position:
                 data["position"] = position
         elif position:
@@ -387,7 +387,7 @@ def scenario_merge_many(client):
         {
             "data": {
                 "name": {"firstName": "MergeChild", "lastName": tag},
-                "company": {"connect": {"id": secondary_id}},
+                "company": {"connect": {"where": {"id": secondary_id}}},
             }
         },
     )
