@@ -102,13 +102,13 @@ the live reference in the browser.
 |---|---|---|---|
 | Front logic layer (clients, metadata store, cache, SSE decode, query builder) | **done** | 5 | U2 `crates/front-core`; native tests, wasm check and a live Twenty round trip pass |
 | Design system: tokens, primitives, icons | **part** | 5 | Tokens, 4187 Tabler icons, 46 custom icons and the upstream motion layer landed. Controlled forms, status, navigation/feedback primitives and a production `RecordTable` are covered by 138 front-ui tests; the gallery has browser-verified sorting, selection, row activation and custom cells. The email/password auth flow is compared against the live reference. Exact component and page parity remains open. |
-| Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; U4b adds a Cmd/Ctrl+K command menu with navigation, create actions and debounced record search, plus a record-details side panel with Escape/focus behavior; broader side-panel pages remain |
+| Application shell, navigation, command menu | **part** | 5 | U3 router, drawer/header, theme and session persistence landed; the command menu uses global Search with keyboard selection and stale-response guards; contextual command sections and exact side-panel motion remain |
 | Record table: virtualised, drag and drop, groups, aggregates | **part** | 5 | U4a loads live metadata/records; U4b adds server filters, sorting, 240-slot virtualization, Person/Company create dialogs, relation selection and functional List/Kanban/Calendar view dispatch; drag/drop, groups and aggregates remain |
 | Record kanban board | **part** | 5 | U4b grouping and view dispatch landed; upstream drag/drop and live visual parity remain |
 | Record calendar and list views | **part** | 5 | U4b month/week/calendar layouts and list dispatch landed; live behavior and exact UI parity remain |
 | Record show page and per type field display and input | **part** | 5 | U4a record route and live show page landed; U4b adds Person name/email/job-title editing and company relation selection while preserving identity and timestamps; per-type editors for other objects remain |
-| Views, filters, sorts, group by | todo | 5 | 27 view operations |
-| Side panel (57 kinds) | todo | 5 | |
+| Views, filters, sorts, group by | **part** | 5 | server filters, sorting and List/Kanban/Calendar dispatch exist; named views, groups, view options and exact upstream behavior remain |
+| Side panel (57 kinds) | **part** | 5 | record-details panel and Escape/focus behavior exist; routed 57-kind content, resizing, navigation stack and exact motion remain |
 | Settings pages | todo | 5 | 86k LOC upstream |
 | Auth and onboarding screens | **part** | 5 | U3/U4a workspace Email → Password flow matches the captured reference DOM/layout; full browser verification awaits the Qoder connector runtime |
 | Dashboards and page layouts | todo | 5 | |
@@ -154,7 +154,7 @@ the live reference in the browser.
 ## What is left, in order
 
 1. Permissions P4–P5 and record-plane gaps: access-group synchronization, private/share overlays, destructive merge, file-backed Search images, full SSE events and hooks.
-2. Wave 5 frontend: finish U1/U2, then U3 shell + auth, U4 record surfaces, U5 settings, U6 desktop/static serving.
+2. Frontend exact parity: production Dialog/Popover/Menu/Tabs contracts, record index/show surfaces, contextual command menu, routed side panel and settings leaves.
 3. Wave 6: webhooks, files, SMTP email, search/import/export, timeline, favorites, notes/tasks.
 4. Wave 7: queues, workflows, messaging/calendar sync, AI agents, MCP, billing and the remaining platform features.
 5. Full-app live UI/behavior/performance verification against Twenty 2.61.0 before cutover.
