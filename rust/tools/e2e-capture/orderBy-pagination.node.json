@@ -8,7 +8,7 @@
               "cursor": "<cursor>",
               "node": {
                 "name": {
-                  "lastName": "Zhao"
+                  "lastName": "Proberu"
                 }
               }
             },
@@ -16,49 +16,32 @@
               "cursor": "<cursor>",
               "node": {
                 "name": {
-                  "lastName": "Field"
+                  "lastName": "Probere"
                 }
               }
             }
           ],
           "pageInfo": {
             "endCursor": "<cursor>",
-            "hasNextPage": true,
+            "hasNextPage": false,
             "hasPreviousPage": false,
             "startCursor": "<cursor>"
           },
-          "totalCount": 5
+          "totalCount": 2
         }
       }
     },
     "page2": {
       "data": {
         "people": {
-          "edges": [
-            {
-              "cursor": "<cursor>",
-              "node": {
-                "name": {
-                  "lastName": "Collison"
-                }
-              }
-            },
-            {
-              "cursor": "<cursor>",
-              "node": {
-                "name": {
-                  "lastName": "Chesky"
-                }
-              }
-            }
-          ],
+          "edges": [],
           "pageInfo": {
-            "endCursor": "<cursor>",
-            "hasNextPage": true,
+            "endCursor": null,
+            "hasNextPage": false,
             "hasPreviousPage": true,
-            "startCursor": "<cursor>"
+            "startCursor": null
           },
-          "totalCount": 5
+          "totalCount": 2
         }
       }
     }

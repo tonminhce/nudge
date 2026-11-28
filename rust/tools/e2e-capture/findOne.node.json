@@ -3,14 +3,12 @@
     "findOne": {
       "data": {
         "person": {
-          "company": {
-            "name": "Notion"
-          },
+          "company": null,
           "createdAt": "<iso>",
           "id": "<uuid>",
           "name": {
-            "firstName": "Ivan",
-            "lastName": "Zhao"
+            "firstName": "Zeta",
+            "lastName": "Probere"
           },
           "updatedAt": "<iso>"
         }
